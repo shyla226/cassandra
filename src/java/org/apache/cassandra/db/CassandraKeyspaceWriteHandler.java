@@ -73,7 +73,7 @@ public class CassandraKeyspaceWriteHandler implements KeyspaceWriteHandler
         for (TableId id : mutation.getTableIds())
         {
             if (keyspace.getColumnFamilyStore(id).writesShouldSkipCommitLog())
-                noneSkipCommitlog = true;
+                noneSkipCommitlog = false;
             else
                 allSkipCommitlog = false;
         }

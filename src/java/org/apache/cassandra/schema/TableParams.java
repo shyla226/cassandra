@@ -182,6 +182,9 @@ public final class TableParams
 
         if (memtableFlushPeriodInMs < 0)
             fail("%s must be greater than or equal to 0 (got %s)", Option.MEMTABLE_FLUSH_PERIOD_IN_MS, memtableFlushPeriodInMs);
+
+        if (cdc && memtable.factory.writesShouldSkipCommitLog())
+            fail("CDC cannot work if writes skip the commit log. Check your memtable configuration.");
     }
 
     private static void fail(String format, Object... args)

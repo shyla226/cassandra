@@ -72,7 +72,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         super(commitLogLowerBound, metadataRef, owner);
     }
 
-    // Only for testing
+    // Only for testing and PersistentMemoryMemtable
     @VisibleForTesting
     public SkipListMemtable(TableMetadataRef metadataRef)
     {
@@ -138,10 +138,6 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
         PartitionPosition left = keyRange.left;
         PartitionPosition right = keyRange.right;
-        if (left.isMinimum())
-            left = null;
-        if (right.isMinimum())
-            right = null;
 
         boolean isBound = keyRange instanceof Bounds;
         boolean includeLeft = isBound || keyRange instanceof IncludingExcludingBounds;
@@ -159,12 +155,25 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
                                                                              PartitionPosition right,
                                                                              boolean includeRight)
     {
-        if (left == null)
-            return right == null ? partitions : partitions.headMap(right, includeRight);
-        else
-            return right == null
-                   ? partitions.tailMap(left, includeLeft)
-                   : partitions.subMap(left, includeLeft, right, includeRight);
+        if (left != null && left.isMinimum())
+            left = null;
+        if (right != null && right.isMinimum())
+            right = null;
+
+        try
+        {
+            if (left == null)
+                return right == null ? partitions : partitions.headMap(right, includeRight);
+            else
+                return right == null
+                       ? partitions.tailMap(left, includeLeft)
+                       : partitions.subMap(left, includeLeft, right, includeRight);
+        }
+        catch (IllegalArgumentException e)
+        {
+            logger.error("Invalid range requested {} - {}", left, right);
+            throw e;
+        }
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -194,7 +203,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         }
     }
 
-    public FlushCollection<AtomicBTreePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
+    public FlushCollection<?> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
         Map<PartitionPosition, AtomicBTreePartition> toFlush = getPartitionsSubMap(from, true, to, false);
         long keySize = 0;

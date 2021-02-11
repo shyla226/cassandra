@@ -69,6 +69,7 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -157,7 +158,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         TRUNCATE,
         DROP,
         STREAMING,
-        ANTICOMPACTION,
+        STREAMS_RECEIVED,
+        REPAIR,
         SCHEMA_CHANGE,
         UNIT_TESTS; // explicitly requested flush needed for a test
     }
@@ -500,6 +502,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public boolean memtableWritesAreDurable()
     {
         return memtableFactory.writesAreDurable();
+    }
+
+    public boolean streamToMemtable()
+    {
+        return memtableFactory.streamToMemtable();
+    }
+
+    public boolean streamFromMemtable()
+    {
+        return memtableFactory.streamFromMemtable();
     }
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, boolean isTransient, int sstableLevel, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
@@ -909,10 +921,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         // we grab the current memtable; once any preceding memtables have flushed, we know its
         // commitLogLowerBound has been set (as this it is set with the upper bound of the preceding memtable)
         final Memtable current = data.getView().getCurrentMemtable();
-        ListenableFutureTask<CommitLogPosition> task = ListenableFutureTask.create(() -> {
-            logger.debug("forceFlush requested but everything is clean in {}", name);
-            return current.getCommitLogLowerBound();
-        });
+        ListenableFutureTask<CommitLogPosition> task = ListenableFutureTask.create(current::getCommitLogLowerBound);
         postFlushExecutor.execute(task);
         return task;
     }
@@ -2014,7 +2023,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         if (!skipFlush)
         {
-            forceBlockingFlush(FlushReason.SNAPSHOT);
+            Memtable current = getTracker().getView().getCurrentMemtable();
+            if (current.shouldSwitch(FlushReason.SNAPSHOT))
+                FBUtilities.waitOnFuture(switchMemtableIfCurrent(current, FlushReason.SNAPSHOT));
+            else
+                current.performSnapshot(snapshotName);
         }
         return snapshotWithoutFlush(snapshotName, predicate, ephemeral, rateLimiter);
     }
@@ -2195,6 +2208,93 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
     }
 
+    public Refs<SSTableReader> writeAndAddMemtableRanges(Refs<SSTableReader> refs,
+                                                         UUID repairSessionID,
+                                                         Supplier<Collection<Range<PartitionPosition>>> rangesSupplier)
+    {
+        SSTableMultiWriter memtableContent = writeMemtableRanges(rangesSupplier, repairSessionID);
+        if (memtableContent != null)
+        {
+            Collection<SSTableReader> sstables = memtableContent.finish(true);
+            refs = refs.ref(sstables);
+
+            // Release the reference any written sstables start with.
+            for (SSTableReader rdr : sstables)
+            {
+                rdr.selfRef().release();
+                logger.info("Memtable ranges (keys {} size {}) written in {}", rdr.estimatedKeys(), rdr.getDataChannel().size(), rdr);
+            }
+        }
+        return refs;
+    }
+
+    private SSTableMultiWriter writeMemtableRanges(Supplier<Collection<Range<PartitionPosition>>> rangesSupplier,
+                                                   UUID repairSessionID)
+    {
+        if (!streamFromMemtable())
+            return null;
+
+        Collection<Range<PartitionPosition>> ranges = rangesSupplier.get();
+        Memtable current = getTracker().getView().getCurrentMemtable();
+        if (current.isClean())
+            return null;
+
+        List<Memtable.FlushCollection<?>> dataSets = new ArrayList<>(ranges.size());
+        long keys = 0;
+        for (Range<PartitionPosition> range : ranges)
+        {
+            Memtable.FlushCollection<?> dataSet = current.getFlushSet(range.left, range.right);
+            dataSets.add(dataSet);
+            keys += dataSet.partitionKeyCount();
+        }
+        if (keys == 0)
+            return null;
+
+        // TODO: Can we write directly to stream, skipping disk?
+        Memtable.FlushCollection<?> firstDataSet = dataSets.get(0);
+        SSTableMultiWriter writer = createSSTableMultiWriter(newSSTableDescriptor(directories.getDirectoryForNewSSTables()),
+                                                             keys,
+                                                             0,
+                                                             repairSessionID,
+                                                             false,
+                                                             0,
+                                                             new SerializationHeader(true,
+                                                                                     firstDataSet.metadata(),
+                                                                                     firstDataSet.columns(),
+                                                                                     firstDataSet.encodingStats()),
+                                                             DO_NOT_TRACK);
+        try
+        {
+            for (Memtable.FlushCollection<?> dataSet : dataSets)
+                new Flushing.FlushRunnable(dataSet, writer, metric, false).call();  // executes on this thread
+
+            return writer;
+        }
+        catch (Error | RuntimeException t)
+        {
+            writer.abort(t);
+            throw t;
+        }
+    }
+
+    private static final LifecycleNewTracker DO_NOT_TRACK = new LifecycleNewTracker()
+    {
+        public void trackNew(SSTable table)
+        {
+            // not tracking
+        }
+
+        public void untrackNew(SSTable table)
+        {
+            // not tracking
+        }
+
+        public OperationType opType()
+        {
+            return OperationType.FLUSH;
+        }
+    };
+
     /**
      * For testing.  No effort is made to clear historical or even the current memtables, nor for
      * thread safety.  All we do is wipe the sstable containers clean, while leaving the actual
@@ -2234,7 +2334,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         final long truncatedAt;
         final CommitLogPosition replayAfter;
 
-        if (keyspace.getMetadata().params.durableWrites || DatabaseDescriptor.isAutoSnapshot())
+        if (keyspace.getMetadata().params.durableWrites && !memtableWritesAreDurable()  // need to clear dirty regions
+            || DatabaseDescriptor.isAutoSnapshot()) // need sstable for snapshot
         {
             replayAfter = forceBlockingFlush(FlushReason.TRUNCATE);
             viewManager.forceBlockingFlush(FlushReason.TRUNCATE);

@@ -182,7 +182,7 @@ public class CassandraStreamReceiver implements StreamReceiver
      * can be archived by the CDC process on discard.
      */
     private boolean requiresWritePath(ColumnFamilyStore cfs) {
-        return hasCDC(cfs) || (session.streamOperation().requiresViewBuild() && hasViews(cfs));
+        return hasCDC(cfs) || cfs.streamToMemtable() || (session.streamOperation().requiresViewBuild() && hasViews(cfs));
     }
 
     private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
@@ -273,7 +273,7 @@ public class CassandraStreamReceiver implements StreamReceiver
         // the streamed sstables.
         if (requiresWritePath)
         {
-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.STREAMING);
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.STREAMS_RECEIVED);
             abort();
         }
     }
