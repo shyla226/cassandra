@@ -103,6 +103,25 @@ public interface Memtable extends Comparable<Memtable>
         {
             return false;
         }
+
+        /**
+         * Normally we can receive streamed sstables directly, but if the memtable can request to receive the data
+         * instead by returning true here.
+         */
+        default boolean streamToMemtable()
+        {
+            return false;
+        }
+
+        /**
+         * When we need to stream data, we usually flush and stream the resulting sstables. If the sstable does not
+         * want to flush, it should return true here and false on shouldSwitch(STREAMING/REPAIR).
+         * In that case, temporary sstables will be created, streamed and then deleted.
+         */
+        default boolean streamFromMemtable()
+        {
+            return false;
+        }
     }
 
     /**
@@ -335,10 +354,13 @@ public interface Memtable extends Comparable<Memtable>
     }
 
     /**
-     * Called in response to a flush request.
-     *
-     * Normally the memtable will return true, but it may decide to ignore certain request types (e.g. for compatible
-     * metadata changes).
+     * Decides whether the memtable should be switched/flushed for the passed reason.
+     * Normally this will return true, but e.g. persistent memtables may choose not to flush. Returning false will
+     * trigger further action for some reasons:
+     * - SCHEMA_CHANGE will be followed by metadataUpdated().
+     * - SNAPSHOT will be followed by performSnapshot().
+     * - STREAMING/REPAIR will be followed by creating a FlushSet for the streamed/repaired ranges. This data will be
+     *   used to create sstables, which will be streamed and then deleted.
      */
     boolean shouldSwitch(ColumnFamilyStore.FlushReason reason);
 
@@ -346,6 +368,12 @@ public interface Memtable extends Comparable<Memtable>
      * Called when the table's metadata is updated. The memtable's metadata reference now points to the new version.
      */
     void metadataUpdated();
+
+    /**
+     * If the memtable needs to do some special action for snapshots (e.g. because it is persistent and does not want
+     * to flush), it should return false on the above with reason SNAPSHOT and implement this method.
+     */
+    void performSnapshot(String snapshotName);
 
     /**
      * Special commit log position marker used in the upper bound marker setting process

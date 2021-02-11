@@ -129,6 +129,12 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
         scheduleFlush();
     }
 
+    public void performSnapshot(String snapshotName)
+    {
+        // unless shouldSwitch(SNAPSHOT) returns false, this cannot be called.
+        throw new AssertionError();
+    }
+
     protected abstract Factory factory();
 
     public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)

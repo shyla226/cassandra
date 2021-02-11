@@ -83,12 +83,12 @@ public class Flushing
     }
 
     @SuppressWarnings("resource")   // writer owned and to be closed by runnable
-    private static FlushRunnable flushRunnable(ColumnFamilyStore cfs,
-                                               Memtable memtable,
-                                               PartitionPosition from,
-                                               PartitionPosition to,
-                                               LifecycleTransaction txn,
-                                               Directories.DataDirectory flushLocation)
+    static FlushRunnable flushRunnable(ColumnFamilyStore cfs,
+                                       Memtable memtable,
+                                       PartitionPosition from,
+                                       PartitionPosition to,
+                                       LifecycleTransaction txn,
+                                       Directories.DataDirectory flushLocation)
     {
         Memtable.FlushCollection<?> flushSet = memtable.getFlushSet(from, to);
         SSTableFormat.Type formatType = SSTableFormat.Type.current();
@@ -104,7 +104,7 @@ public class Flushing
                                                       descriptor,
                                                       flushSet.partitionKeyCount());
 
-        return new FlushRunnable(flushSet, writer, cfs.metric);
+        return new FlushRunnable(flushSet, writer, cfs.metric, true);
     }
 
     public static Throwable abortRunnables(List<FlushRunnable> runnables, Throwable t)
@@ -119,18 +119,21 @@ public class Flushing
     {
         private final Memtable.FlushCollection<?> toFlush;
 
-        private final boolean isBatchLogTable;
         private final SSTableMultiWriter writer;
         private final TableMetrics metrics;
+        private final boolean isBatchLogTable;
+        private final boolean logCompletion;
 
         public FlushRunnable(Memtable.FlushCollection<?> flushSet,
                              SSTableMultiWriter writer,
-                             TableMetrics metrics)
+                             TableMetrics metrics,
+                             boolean logCompletion)
         {
             this.toFlush = flushSet;
             this.writer = writer;
             this.metrics = metrics;
             this.isBatchLogTable = toFlush.metadata() == SystemKeyspace.Batches;
+            this.logCompletion = logCompletion;
         }
 
         private void writeSortedContents()
@@ -158,13 +161,16 @@ public class Flushing
                 }
             }
 
-            long bytesFlushed = writer.getFilePointer();
-            logger.info("Completed flushing {} ({}) for commitlog position {}",
-                        writer.getFilename(),
-                        FBUtilities.prettyPrintMemory(bytesFlushed),
-                        toFlush.memtable().getCommitLogUpperBound());
-            // Update the metrics
-            metrics.bytesFlushed.inc(bytesFlushed);
+            if (logCompletion)
+            {
+                long bytesFlushed = writer.getFilePointer();
+                logger.info("Completed flushing {} ({}) for commitlog position {}",
+                            writer.getFilename(),
+                            FBUtilities.prettyPrintMemory(bytesFlushed),
+                            toFlush.memtable().getCommitLogUpperBound());
+                // Update the metrics
+                metrics.bytesFlushed.inc(bytesFlushed);
+            }
         }
 
         @Override

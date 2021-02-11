@@ -36,7 +36,9 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 /**
  * Skeleton for persistent memory memtable.
  */
-public class PersistentMemoryMemtable extends AbstractMemtable implements Memtable
+public class PersistentMemoryMemtable
+//extends AbstractMemtable
+extends SkipListMemtable        // to test framework
 {
     private final Owner owner;
 
@@ -50,31 +52,31 @@ public class PersistentMemoryMemtable extends AbstractMemtable implements Memtab
     public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         // TODO: implement
-        return 0;
+        return super.put(update, indexer, opGroup);
     }
 
     public MemtableUnfilteredPartitionIterator makePartitionIterator(ColumnFilter columnFilter, DataRange dataRange)
     {
         // TODO: implement
-        return null;
+        return super.makePartitionIterator(columnFilter, dataRange);
     }
 
     public Partition getPartition(DecoratedKey key)
     {
         // TODO: implement
-        return null;
+        return super.getPartition(key);
     }
 
     public int partitionCount()
     {
         // TODO: implement
-        return 0;
+        return super.partitionCount();
     }
 
     public FlushCollection<?> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
         // TODO: implement
-        return null;
+        return super.getFlushSet(from, to);
     }
 
     public boolean shouldSwitch(ColumnFamilyStore.FlushReason reason)
@@ -85,10 +87,9 @@ public class PersistentMemoryMemtable extends AbstractMemtable implements Memtab
         case STARTUP: // Called after reading and replaying the commit log.
         case SHUTDOWN: // Called to flush data before shutdown.
         case INTERNALLY_FORCED: // Called to ensure ordering and persistence of system table events.
-        case STREAMING: // Called to flush data so it can be streamed. TODO: How dow we stream?
-        case ANTICOMPACTION: // Called to flush data for repair. TODO: How do we repair?
         case MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
         case INDEX_TABLE_FLUSH: // Flush requested on index table because main table is flushing.
+        case STREAMS_RECEIVED: // Flush to save streamed data that was written to memtable.
             return false;   // do not do anything
 
         case INDEX_BUILD_COMPLETED:
@@ -100,14 +101,22 @@ public class PersistentMemoryMemtable extends AbstractMemtable implements Memtab
         case INDEX_BUILD_STARTED:
             // TODO: Figure out secondary indexes and views.
             return false;
+
         case SCHEMA_CHANGE:
             if (!(metadata().params.memtable.factory instanceof Factory))
                 return true;    // User has switched to a different memtable class. Flush and release all held data.
             // Otherwise, assuming we can handle the change, don't switch.
             // TODO: Handle
             return false;
+
+        case STREAMING: // Called to flush data so it can be streamed. TODO: How dow we stream?
+        case REPAIR: // Called to flush data for repair. TODO: How do we repair?
+            // ColumnFamilyStore will create sstables of the affected ranges which will not be consulted on reads and
+            // will be deleted after streaming.
+            return false;
+
         case SNAPSHOT:
-            // TODO: Perform snapshot, and figure out a way to restore it (possibly with external tools).
+            // We don't flush for this. Returning false will trigger a performSnapshot call.
             return false;
 
         case DROP: // Called when a table is dropped. This memtable is no longer necessary.
@@ -135,6 +144,11 @@ public class PersistentMemoryMemtable extends AbstractMemtable implements Memtab
         // TODO: handle
     }
 
+    public void performSnapshot(String snapshotName)
+    {
+        // TODO: implement. Figure out how to restore snapshot (with external tools).
+    }
+
     public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
         super.switchOut(writeBarrier, commitLogUpperBound);
@@ -146,7 +160,9 @@ public class PersistentMemoryMemtable extends AbstractMemtable implements Memtab
     {
         // This will be called to release/delete all held data because the memtable is switched, due to having
         // its data flushed, due to a truncate/drop, or due to a schema change to a different memtable class.
-        // TODO: This should delete all memtable data from pmem.
+
+        // TODO: Implement. This should delete all memtable data from pmem.
+        super.discard();
     }
 
     public CommitLogPosition getApproximateCommitLogLowerBound()
@@ -233,5 +249,16 @@ public class PersistentMemoryMemtable extends AbstractMemtable implements Memtab
         {
             return true;
         }
+
+        public boolean streamToMemtable()
+        {
+            return true;
+        }
+
+        public boolean streamFromMemtable()
+        {
+            return true;
+        }
     }
+
 }
