@@ -15,9 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cdc;
 
-public enum Status {
+package org.apache.cassandra.cdc.quasar;
+
+public enum Status
+{
     UNKNOWN("UNKNOWN"),
     STARTING("STARTING"),
     JOINING("JOINING"),

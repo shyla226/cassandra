@@ -33,7 +33,6 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
  */
 @Singleton
 public class MutationMaker {
-    private static final Logger LOGGER = LoggerFactory.getLogger(MutationMaker.class);
     private final boolean emitTombstoneOnDelete;
 
     public MutationMaker(boolean emitTombstoneOnDelete) {

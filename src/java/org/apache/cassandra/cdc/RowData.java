@@ -28,7 +28,6 @@ import java.util.stream.Collectors;
  * name and the value is the {@link CellData}.
  */
 public class RowData {
-    private boolean wideRow = false;
     private final Map<String, CellData> cellMap = new LinkedHashMap<>();
 
     public void addCell(CellData cellData) {
@@ -39,15 +38,6 @@ public class RowData {
         if (hasCell(columnName)) {
             cellMap.remove(columnName);
         }
-    }
-
-    public boolean wideRow() {
-        return this.wideRow;
-    }
-
-    public RowData wideRow(boolean wide) {
-        this.wideRow = wide;
-        return this;
     }
 
     public boolean hasCell(String columnName) {

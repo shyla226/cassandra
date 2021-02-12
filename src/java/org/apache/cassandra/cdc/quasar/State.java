@@ -15,15 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cdc;
+
+package org.apache.cassandra.cdc.quasar;
 
 import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-
-
-public class State {
+public class State
+{
     public static final State NO_STATE = new State(Status.UNKNOWN, -1, -1L);
 
     @JsonProperty("status")

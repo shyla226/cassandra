@@ -18,7 +18,10 @@
 package org.apache.cassandra.cdc;
 
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.stream.Collectors;
+
+import org.apache.cassandra.cdc.quasar.Murmur3HashFunction;
 
 public class MutationKey {
     String keyspace;
@@ -52,4 +55,42 @@ public class MutationKey {
         return Murmur3HashFunction.hash(id());
     }
 
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        MutationKey that = (MutationKey) o;
+        return Objects.equals(keyspace, that.keyspace) &&
+               Objects.equals(table, that.table) &&
+               Arrays.equals(pkColumns, that.pkColumns);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        int result = Objects.hash(keyspace, table);
+        result = 31 * result + Arrays.hashCode(pkColumns);
+        return result;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "MutationKey{" +
+               "keyspace='" + keyspace + '\'' +
+               ", table='" + table + '\'' +
+               ", id='" + id + '\'' +
+               '}';
+    }
+
+    public String getKeyspace()
+    {
+        return keyspace;
+    }
+
+    public String getTable()
+    {
+        return table;
+    }
 }

@@ -15,18 +15,40 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.cdc;
 
-public class QuasarMutationSender implements MutationSender<Mutation> {
-    final HttpClientFactory httpClientFactory;
+import java.util.HashSet;
+import java.util.Set;
 
-    public QuasarMutationSender() {
-        this.httpClientFactory = new HttpClientFactory();
+public class CdcSyncListeners
+{
+    public interface CdcSyncListener
+    {
+        public void notify(int version, long segment, int offset, boolean completed);
     }
 
-    @Override
-    public MutationSender.MutationFuture sendMutationAsync(final Mutation mutation) {
-        return new MutationFuture(mutation, httpClientFactory.replicate(mutation));
+    public static final CdcSyncListeners instance = new CdcSyncListeners();
+
+    private final Set<CdcSyncListener> listeners = new HashSet<>();
+
+    private CdcSyncListeners()
+    {
     }
 
+    public void register(CdcSyncListener listener)
+    {
+        listeners.add(listener);
+    }
+
+    public void unregister(CdcSyncListener listener)
+    {
+        listeners.remove(listener);
+    }
+
+    public void onSynced(int version, long segment, int position, boolean completed)
+    {
+        for (CdcSyncListener listener : listeners)
+            listener.notify(version, segment, position, completed);
+    }
 }

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -39,7 +38,7 @@ import static java.lang.Math.min;
  *
  * RebufferingInputStream is not thread safe.
  */
-public abstract class RebufferingInputStream extends InputStream implements DataInputPlus, Closeable
+public abstract class RebufferingInputStream extends InputStream implements DataInputPlus, AutoCloseable
 {
     protected ByteBuffer buffer;
 

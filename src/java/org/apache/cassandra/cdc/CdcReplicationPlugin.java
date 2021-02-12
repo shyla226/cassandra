@@ -18,73 +18,212 @@
 
 package org.apache.cassandra.cdc;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CdcReplicationPlugin
+import org.apache.cassandra.cdc.quasar.QuasarMutationEmitter;
+import org.apache.cassandra.concurrent.JMXEnabledSingleThreadExecutor;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.utils.MBeanWrapper;
+
+public class CdcReplicationPlugin implements CdcReplicationPluginMBean
 {
     private static final Logger logger = LoggerFactory.getLogger(CdcReplicationPlugin.class);
 
     OffsetFileWriter offsetFileWriter;
-    MutationSender<Mutation> mutationSender;
+    MutationEmitter<Mutation> mutationEmitter;
     CommitLogTransfer commitLogTransfer;
-    CommitLogProcessor commitLogProcessor;
     CommitLogReaderProcessor commitLogReaderProcessor;
+
+    public static final String MBEAN_NAME = "org.apache.cassandra.cdc:type=CdcReplicationMBean";
+    public final CdcReplicationMetrics metrics;
 
     public static final CdcReplicationPlugin instance = new CdcReplicationPlugin();
 
     private CdcReplicationPlugin()
     {
-        this.mutationSender = new QuasarMutationSender();
-        this.offsetFileWriter = new OffsetFileWriter(mutationSender);
-        this.commitLogTransfer = new BlackHoleCommitLogTransfer();
-        this.commitLogReaderProcessor = new CommitLogReaderProcessor(new CommitLogReadHandlerImpl(offsetFileWriter, mutationSender), offsetFileWriter);
-        this.commitLogProcessor = new CommitLogProcessor(new CassandraCdcConfiguration(), commitLogTransfer, offsetFileWriter, commitLogReaderProcessor);
+        this.mutationEmitter = new QuasarMutationEmitter();
+        this.offsetFileWriter = new OffsetFileWriter(mutationEmitter);
+        this.commitLogReaderProcessor = new CommitLogReaderProcessor(new CommitLogReadHandlerImpl(offsetFileWriter, mutationEmitter), offsetFileWriter);
+        this.metrics = new CdcReplicationMetrics(commitLogReaderProcessor, this.offsetFileWriter);
+        MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
+        CdcSyncListeners.instance.register(commitLogReaderProcessor);
     }
 
     public void initialize() throws Exception
     {
         offsetFileWriter.initialize();
-        commitLogProcessor.initialize();
         commitLogReaderProcessor.initialize();
     }
 
     public void start()
     {
-        // watch new commitlog files
-        ExecutorService commitLogExecutor = Executors.newSingleThreadExecutor();
-        commitLogExecutor.submit(() -> {
-            try {
-                commitLogProcessor.start();
-            } catch(Exception e) {
-                logger.error("commitLogProcessor error:", e);
+        // replay CL on error
+        /*
+        if (config.errorCommitLogReprocessEnabled) {
+            logger.debug("Moving back error commitlogs for reprocessing");
+            commitLogTransfer.getErrorCommitLogFiles();
+        }
+        */
+
+        // load existing commitlogs files when initializing
+        File cdcDir = new File(DatabaseDescriptor.getCDCLogLocation());
+        logger.info("Reading existing commit logs in {}", cdcDir);
+        File[] commitLogFiles = CommitLogUtil.getCommitLogs(cdcDir);
+        Arrays.sort(commitLogFiles, CommitLogUtil::compareCommitLogs);
+        File youngerCdcIdxFile = null;
+        for (File file : commitLogFiles) {
+            // filter out already processed commitlogs
+            long segmentId = CommitLogUtil.extractTimestamp(file.getName());
+            if (file.getName().endsWith(".log")) {
+                // only submit logs, not _cdc.idx
+                if(segmentId >= offsetFileWriter.sentOffset().segmentId) {
+                    commitLogReaderProcessor.submitCommitLog(file);
+                }
+            } else if (file.getName().endsWith("_cdc.idx")) {
+                if (youngerCdcIdxFile == null ||  segmentId > CommitLogUtil.extractTimestamp(youngerCdcIdxFile.getName())) {
+                    youngerCdcIdxFile = file;
+                }
             }
-        });
+        }
+        if (youngerCdcIdxFile != null) {
+            // init the last synced position
+            logger.debug("Read last synced position from file={}", youngerCdcIdxFile);
+            try {
+                long seg = CommitLogUtil.extractTimestamp(youngerCdcIdxFile.getName());
+                List<String> lines = Files.readAllLines(youngerCdcIdxFile.toPath(), Charset.forName("UTF-8"));
+                int pos = Integer.parseInt(lines.get(0));
+                boolean completed = false;
+                try {
+                    if("COMPLETED".equals(lines.get(1))) {
+                        completed = true;
+                    }
+                } catch(Exception ex) {
+                }
+                commitLogReaderProcessor.updateSyncedOffset(seg, pos, completed);
+            } catch(IOException ex) {
+                logger.warn("error while reading file=" + youngerCdcIdxFile.getName(), ex);
+            }
+        }
 
         // process commitlog mutation, after we know the synced position
-        ExecutorService commitLogReaderExecutor = Executors.newSingleThreadExecutor();
-        commitLogReaderExecutor.submit(() -> {
+        JMXEnabledSingleThreadExecutor commitLogReaderExecutor = new JMXEnabledSingleThreadExecutor("CdcCommitLogReader", "internal");
+        commitLogReaderExecutor.execute(() -> {
             try {
-                commitLogReaderProcessor.awaitSyncedPosition();
                 commitLogReaderProcessor.start();
-            } catch(Exception e) {
-                logger.error("commitLogProcessor error:", e);
+            } catch(Throwable t) {
+                logger.error("commitLogReader error:", t);
             }
+            logger.error("commitLogReader ending");
         });
 
         // persist the offset of replicated mutation.
-        ExecutorService offsetWriterExecutor = Executors.newSingleThreadExecutor();
-        offsetWriterExecutor.submit(() -> {
+        JMXEnabledSingleThreadExecutor offsetWriterExecutor = new JMXEnabledSingleThreadExecutor("CdcOffsetWriter", "internal");
+        offsetWriterExecutor.execute(() -> {
             try {
                 // wait for the synced position
                 offsetFileWriter.start();
             } catch(Exception e) {
-                logger.error("commitLogProcessor error:", e);
+                logger.error("offsetWriter error:", e);
             }
         });
-        logger.info("CDC replication started");
+        logger.info("CDC replication plugin started");
+    }
+
+    @Override
+    public void flush()
+    {
+        this.offsetFileWriter.flush();
+    }
+
+    @Override
+    public void pause()
+    {
+        this.commitLogReaderProcessor.pause();
+    }
+
+    @Override
+    public void resume()
+    {
+        this.commitLogReaderProcessor.resume();
+    }
+
+    @Override
+    public boolean isPaused()
+    {
+        return this.commitLogReaderProcessor.isPaused();
+    }
+
+    @Override
+    public long getReplicated()
+    {
+        return this.metrics.replicated.getCount();
+    }
+
+    @Override
+    public long getErrors()
+    {
+        return this.metrics.errors.getCount();
+    }
+
+    @Override
+    public long getFlushes()
+    {
+        return this.metrics.flushes.getCount();
+    }
+
+    @Override
+    public int getPendingCommitLogFiles()
+    {
+        return this.metrics.pendingCommitLogFiles.getValue();
+    }
+
+    @Override
+    public int getPendingSentMutations()
+    {
+        return this.metrics.pendingSentMutations.getValue();
+    }
+
+    @Override
+    public long getReplicationLag() {
+        return this.metrics.replicationLag.getValue();
+    }
+
+    @Override
+    public String getEmittedOffset()
+    {
+        CommitLogPosition commitLogPosition = offsetFileWriter.emittedOffset();
+        return commitLogPosition.segmentId + ":" + commitLogPosition.position;
+    }
+
+    @Override
+    public String getSentOffset()
+    {
+        CommitLogPosition commitLogPosition = offsetFileWriter.sentOffset();
+        return commitLogPosition.segmentId + ":" + commitLogPosition.position;
+    }
+
+    @Override
+    public String getSyncedOffset()
+    {
+        CommitLogPosition commitLogPosition = commitLogReaderProcessor.syncedOffsetRef.get();
+        return commitLogPosition.segmentId + ":" + commitLogPosition.position;
+    }
+
+    @Override
+    public String getCommitedOffset()
+    {
+        CommitLogPosition commitLogPosition = offsetFileWriter.fileOffsetRef.get();
+        return commitLogPosition.segmentId + ":" + commitLogPosition.position;
     }
 }

@@ -68,7 +68,8 @@ public abstract class AbstractProcessor
         running = true;
         while (isRunning()) {
             process();
-            Thread.sleep(delay);
+            if (delay > 0)
+                Thread.sleep(delay);
         }
         LOGGER.info("Stopped {}", name);
     }

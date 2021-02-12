@@ -15,32 +15,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.cdc;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+public interface CdcReplicationPluginMBean
+{
+    public void flush();
+    public void pause();
+    public void resume();
 
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
+    public long getReplicated();
+    public long getErrors();
+    public long getFlushes();
 
+    public int getPendingCommitLogFiles();
+    public int getPendingSentMutations();
+    public long getReplicationLag();
+    public boolean isPaused();
 
-public interface MutationSender<P> {
-
-    static class MutationFuture
-    {
-        Mutation mutation;
-        CompletableFuture<Long> sentFuture;
-
-        public MutationFuture(Mutation mutation,
-                              CompletableFuture<Long> sentFuture)
-        {
-            this.mutation = mutation;
-            this.sentFuture = sentFuture;
-        }
-
-        public MutationFuture retry(MutationSender mutationSender) {
-            return mutationSender.sendMutationAsync(this.mutation);
-        }
-    }
-
-    MutationFuture sendMutationAsync(final Mutation mutation);
+    public String getSentOffset();
+    public String getEmittedOffset();
+    public String getSyncedOffset();
+    public String getCommitedOffset();
 }

@@ -21,11 +21,6 @@ import java.util.Objects;
 
 import org.apache.cassandra.service.StorageService;
 
-/**
- * An immutable data structure representing a change event, and can be converted
- * to a kafka connect Struct representing key/value of the change event.
- */
-
 public class Mutation {
     public final long segment;
     public final int position;

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cdc;
 
+import java.util.Objects;
 import java.util.UUID;
 
 public class MutationValue {
@@ -33,5 +34,54 @@ public class MutationValue {
         this.nodeId = nodeId;
         this.operation = operation;
         this.document = document;
+    }
+
+    public Long getWritetime()
+    {
+        return writetime;
+    }
+
+    public UUID getNodeId()
+    {
+        return nodeId;
+    }
+
+    public Operation getOperation()
+    {
+        return operation;
+    }
+
+    public String getDocument()
+    {
+        return document;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        MutationValue that = (MutationValue) o;
+        return Objects.equals(writetime, that.writetime) &&
+               Objects.equals(nodeId, that.nodeId) &&
+               operation == that.operation &&
+               Objects.equals(document, that.document);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(writetime, nodeId, operation, document);
+    }
+
+    @Override
+    public String toString()
+    {
+        return "MutationValue{" +
+               "writetime=" + writetime +
+               ", nodeId=" + nodeId +
+               ", operation=" + operation +
+               ", document='" + document + '\'' +
+               '}';
     }
 }

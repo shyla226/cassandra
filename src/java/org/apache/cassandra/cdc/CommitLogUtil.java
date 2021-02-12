@@ -30,9 +30,6 @@ import org.apache.cassandra.cdc.exceptions.CassandraConnectorDataException;
 
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
-/**
- * Utility class used by the {@link CommitLogProcessor} to compare/delete commit log files.
- */
 public final class CommitLogUtil {
     private static final Logger LOGGER = LoggerFactory.getLogger(CommitLogUtil.class);
 

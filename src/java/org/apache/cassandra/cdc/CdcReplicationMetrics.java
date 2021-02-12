@@ -19,28 +19,34 @@ package org.apache.cassandra.cdc;
 
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Meter;
-import com.codahale.metrics.Timer;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogService;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.MetricNameFactory;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
- * Metrics for commit log
+ * Metrics for commit log replication
  */
 public class CdcReplicationMetrics
 {
     public static final MetricNameFactory factory = new DefaultNameFactory("CdcReplication");
 
-    /** Number and rate of oversized mutations */
-    public final Meter replicatedMutations;
-    public final Meter retriedMutations;
+    public final Meter replicated;
+    public final Meter errors;
+    public final Meter flushes;
 
-    public CdcReplicationMetrics()
+    public final Gauge<Integer> pendingCommitLogFiles;
+    public final Gauge<Integer> pendingSentMutations;
+    public final Gauge<Long> replicationLag;
+
+    public CdcReplicationMetrics(CommitLogReaderProcessor commitLogReaderProcessor, OffsetFileWriter offsetFileWriter)
     {
-        replicatedMutations = Metrics.meter(factory.createMetricName("ReplicatedMutations"));
-        retriedMutations = Metrics.meter(factory.createMetricName("RetriedMutations"));
+        replicated = Metrics.meter(factory.createMetricName("replicated"));
+        errors = Metrics.meter(factory.createMetricName("errors"));
+        flushes = Metrics.meter(factory.createMetricName("flushes"));
+
+        pendingCommitLogFiles = commitLogReaderProcessor.commitLogQueue::size;
+        pendingSentMutations = offsetFileWriter.sentMutations::size;
+        replicationLag = offsetFileWriter::replicationLag;
     }
 }

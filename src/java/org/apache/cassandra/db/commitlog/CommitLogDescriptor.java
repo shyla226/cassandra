@@ -216,6 +216,11 @@ public class CommitLogDescriptor
 
     public String fileName()
     {
+        return fileName(version, id);
+    }
+
+    public static String fileName(int version, long id)
+    {
         return FILENAME_PREFIX + version + SEPARATOR + id + FILENAME_EXTENSION;
     }
 

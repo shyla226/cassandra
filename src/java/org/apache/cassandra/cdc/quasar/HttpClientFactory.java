@@ -15,8 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cdc;
 
+package org.apache.cassandra.cdc.quasar;
+
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -31,6 +33,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.cassandra.cdc.CommitLogReadHandlerImpl;
+import org.apache.cassandra.cdc.Mutation;
+import org.apache.cassandra.cdc.MutationKey;
+import org.apache.cassandra.cdc.MutationValue;
+import org.apache.cassandra.cdc.Operation;
 import org.apache.cassandra.cdc.exceptions.CassandraConnectorTaskException;
 
 public class HttpClientFactory
@@ -85,25 +92,25 @@ public class HttpClientFactory
 
     public CompletableFuture<Long> replicate(final Mutation mutation)
     {
-        CompletableFuture<State> stateFuture = (State.NO_STATE.equals(this.state))
+        CompletableFuture<State> stateFuture = (State.NO_STATE.equals(this.state) || state.size == 0)
                                                ? getState()
                                                : CompletableFuture.completedFuture(this.state);
 
         MutationKey key = mutation.mutationKey();
         MutationValue value = mutation.mutationValue();
-        int hash = key.hash();
-        int ordinal = hash % state.size;
 
+        int hash = key.hash();
+        int ordinal = Math.abs(hash) % state.size;
         final String query = String.format(Locale.ROOT,
                                            String.format(Locale.ROOT, serviceUrlTemplate + "/replicate/%s/%s/%s?writetime=%d&nodeId=%s",
                                                          ordinal,
-                                                         key.keyspace,
-                                                         key.table,
+                                                         key.getKeyspace(),
+                                                         key.getTable(),
                                                          key.id(),
-                                                         value.writetime,
-                                                         value.nodeId.toString()));
+                                                         value.getWritetime(),
+                                                         value.getNodeId().toString()));
 
-        final HttpRequest request = Operation.DELETE.equals(value.operation)
+        final HttpRequest request = Operation.DELETE.equals(value.getOperation())
                                     ? HttpRequest.newBuilder()
                                                  .DELETE()
                                                  .uri(URI.create(query))
@@ -117,8 +124,8 @@ public class HttpClientFactory
                                                  .build();
 
         return stateFuture.thenCompose(state -> {
-            logger.debug("Sending mutation={}", mutation);
-            return httpClient[hash % httpClient.length]
+            logger.debug("Sending mutation={} hash={} ordinal={}", mutation, hash, ordinal);
+            return httpClient[Math.abs(hash) % httpClient.length]
                    .sendAsync(request, HttpResponse.BodyHandlers.ofString())
                    .thenApply(response -> {
                        switch (response.statusCode())
@@ -128,7 +135,8 @@ public class HttpClientFactory
                                return Long.parseLong(response.body());
                            case 503: // service unavailable
                            case 404: // hash not managed
-                               logger.warn("error mutation={} status={}", mutation, response.statusCode());
+                               logger.warn("error mutation={} hash={} ordinal={} query={} status={}",
+                                           mutation, hash, ordinal, query, response.statusCode());
                                try
                                {
                                    String body = response.body();
@@ -136,7 +144,7 @@ public class HttpClientFactory
                                    logger.debug("New state={}, retrying later", this.state);
                                    throw new IllegalStateException();
                                }
-                               catch (Exception e)
+                               catch (IOException e)
                                {
                                    logger.warn("error:", e);
                                    throw new CassandraConnectorTaskException(e);

@@ -27,7 +27,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.inject.Singleton;
 
@@ -36,8 +35,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.metrics.BatchMetrics;
-import org.apache.cassandra.utils.MBeanWrapper;
 
 /**
  * Track the last acknowledged replicated mutation.
@@ -48,48 +45,66 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
     private static final Logger logger = LoggerFactory.getLogger(OffsetFileWriter.class);
 
     public static final String COMMITLOG_OFFSET_FILE = "commitlog_offset.dat";
-    public static final String MBEAN_NAME = "org.apache.cassandra.cdc:type=OffsetFileWriterMBean";
 
     private final File offsetFile;
-    private final MutationSender mutationSender;
+    private final MutationEmitter mutationEmitter;
 
     final AtomicReference<CommitLogPosition> sentOffsetRef = new AtomicReference<>(new CommitLogPosition(0, 0));
+    final AtomicReference<CommitLogPosition> emittedOffsetRef = new AtomicReference<>(new CommitLogPosition(0, 0));
     final AtomicReference<CommitLogPosition> fileOffsetRef = new AtomicReference<>(new CommitLogPosition(0, 0));
-    final BlockingQueue<MutationSender.MutationFuture> sentMutations = new ArrayBlockingQueue<>(128);
+    final BlockingQueue<MutationEmitter.MutationFuture> sentMutations = new ArrayBlockingQueue<>(128);
 
     private final OffsetFlushPolicy offsetFlushPolicy;
     volatile long timeOfLastFlush = System.currentTimeMillis();
-    volatile Long notCommittedEvents = 0L;
+    volatile long notCommittedEvents = 0L;
+    volatile long replicationLag = -1L;
 
-    public static final CdcReplicationMetrics metrics = new CdcReplicationMetrics();
-
-    public OffsetFileWriter(MutationSender mutationSender)
+    public OffsetFileWriter(MutationEmitter mutationEmitter)
     {
         super("OffsetFileWriter", 1000);
-        this.mutationSender = mutationSender;
+        this.mutationEmitter = mutationEmitter;
         this.offsetFlushPolicy = new OffsetFlushPolicy.AlwaysFlushOffsetPolicy();
         this.offsetFile = new File(DatabaseDescriptor.getCDCLogLocation(), COMMITLOG_OFFSET_FILE);
     }
 
-    public CommitLogPosition offset() {
+    public CommitLogPosition committedOffset()
+    {
         return this.fileOffsetRef.get();
     }
 
-    public void markOffset(CommitLogPosition sourceOffset) {
+    public CommitLogPosition sentOffset()
+    {
+        return this.sentOffsetRef.get();
+    }
+
+    public CommitLogPosition emittedOffset()
+    {
+        return this.emittedOffsetRef.get();
+    }
+
+    public void markOffset(CommitLogPosition sourceOffset)
+    {
         this.fileOffsetRef.set(sourceOffset);
     }
 
-    public void flush() throws IOException
+    public void flush()
     {
         saveOffset();
+        notCommittedEvents = 0L;
+        timeOfLastFlush = System.currentTimeMillis();
+        CdcReplicationPlugin.instance.metrics.flushes.mark();
+        logger.debug("Offset flushed file=" + offsetFile.getAbsolutePath());
     }
 
     @Override
     public void initialize() throws IOException
     {
-        if (offsetFile.exists()) {
+        if (offsetFile.exists())
+        {
             loadOffset();
-        } else {
+        }
+        else
+        {
             Path parentPath = offsetFile.toPath().getParent();
             if (!parentPath.toFile().exists())
                 Files.createDirectories(parentPath);
@@ -110,85 +125,104 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
     @Override
     public void process() throws InterruptedException, IOException
     {
-        while(true) {
-            try {
-                MutationSender.MutationFuture mutationFuture = this.sentMutations.take();
-                while(true)
+        while (true)
+        {
+            try
+            {
+                MutationEmitter.MutationFuture mutationFuture = this.sentMutations.take();
+                while (true)
                 {
                     try
                     {
-                        mutationFuture.sentFuture.get();
+                        final long mutationTimestamp = mutationFuture.mutation.ts;
+                        mutationFuture.sentFuture.thenApply(l -> {
+                            // update metrics
+                            CdcReplicationPlugin.instance.metrics.replicated.mark();
+                            replicationLag = System.currentTimeMillis() - mutationTimestamp;
+                            return l;
+                        }).get();
+
                         if (mutationFuture.sentFuture.isCompletedExceptionally() || mutationFuture.sentFuture.isCancelled())
                         {
                             logger.debug("mutation={} not replicated, retrying", mutationFuture.mutation);
-                            metrics.retriedMutations.mark();
-                            mutationFuture = mutationFuture.retry(mutationSender);
+                            CdcReplicationPlugin.instance.metrics.errors.mark();
+                            mutationFuture = mutationFuture.retry(mutationEmitter);
                         }
                         else
                         {
+                            logger.debug("mutation={} replicated", mutationFuture.mutation);
                             sentOffsetRef.set(new CommitLogPosition(mutationFuture.mutation.segment, mutationFuture.mutation.position));
-                            metrics.replicatedMutations.mark();
+                            maybeCommitOffset(mutationFuture.mutation);
                             break;
                         }
                     }
                     catch (Exception e)
                     {
                         logger.warn("error:", e);
-                        mutationFuture = mutationFuture.retry(mutationSender);
+                        Thread.sleep(10000);    // retry 10s later
+                        CdcReplicationPlugin.instance.metrics.errors.mark();
+                        mutationFuture = mutationFuture.retry(mutationEmitter);
                     }
                 }
-            } catch(Exception e) {
+            }
+            catch (Exception e)
+            {
                 logger.error("error:", e);
             }
         }
     }
 
 
-    public static String serializePosition(CommitLogPosition commitLogPosition) {
+    public static String serializePosition(CommitLogPosition commitLogPosition)
+    {
         return Long.toString(commitLogPosition.segmentId) + File.pathSeparatorChar + Integer.toString(commitLogPosition.position);
     }
 
-    public static CommitLogPosition deserializePosition(String s) {
+    public static CommitLogPosition deserializePosition(String s)
+    {
         String[] segAndPos = s.split(Character.toString(File.pathSeparatorChar));
         return new CommitLogPosition(Long.parseLong(segAndPos[0]), Integer.parseInt(segAndPos[1]));
     }
 
-    private synchronized void saveOffset() throws IOException
+    private synchronized void saveOffset()
     {
-        try(FileWriter out = new FileWriter(this.offsetFile)) {
+        try (FileWriter out = new FileWriter(this.offsetFile))
+        {
             out.write(serializePosition(fileOffsetRef.get()));
-        } catch (IOException e) {
+        }
+        catch (IOException e)
+        {
             logger.error("Failed to save offset for file " + offsetFile.getName(), e);
-            throw e;
         }
     }
 
     private synchronized void loadOffset() throws IOException
     {
-        try(BufferedReader br = new BufferedReader(new FileReader(offsetFile)))
+        try (BufferedReader br = new BufferedReader(new FileReader(offsetFile)))
         {
             fileOffsetRef.set(deserializePosition(br.readLine()));
             logger.debug("file offset={}", fileOffsetRef.get());
-        } catch (IOException e) {
+        }
+        catch (IOException e)
+        {
             logger.error("Failed to load offset for file " + offsetFile.getName(), e);
             throw e;
         }
     }
 
-    void maybeCommitOffset(Mutation record) {
-        try {
-            long now = System.currentTimeMillis();
-            long timeSinceLastFlush = now - timeOfLastFlush;
-            if(offsetFlushPolicy.shouldFlush(Duration.ofMillis(timeSinceLastFlush), notCommittedEvents)) {
-                SourceInfo source = record.source;
-                markOffset(source.commitLogPosition);
-                flush();
-                notCommittedEvents = 0L;
-                timeOfLastFlush = now;
-                logger.debug("Offset flushed source=" + source);
-            }
-        } catch(IOException e) {
-            logger.warn("error:", e);
+    void maybeCommitOffset(Mutation record)
+    {
+        long timeSinceLastFlush = System.currentTimeMillis() - timeOfLastFlush;
+        if (offsetFlushPolicy.shouldFlush(Duration.ofMillis(timeSinceLastFlush), notCommittedEvents))
+        {
+            SourceInfo source = record.source;
+            markOffset(source.commitLogPosition);
+            flush();
         }
+    }
+
+    public long replicationLag()
+    {
+        return this.replicationLag;
     }
 }

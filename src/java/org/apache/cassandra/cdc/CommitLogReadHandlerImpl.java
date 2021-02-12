@@ -68,12 +68,12 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
 
     private final MutationMaker mutationMaker;
     private final OffsetFileWriter offsetWriter;
-    private final MutationSender<Mutation> mutationSender;
+    private final MutationEmitter<Mutation> mutationEmitter;
 
     CommitLogReadHandlerImpl(OffsetFileWriter offsetFileWriter,
-                             MutationSender<Mutation> mutationSender)
+                             MutationEmitter<Mutation> mutationEmitter)
     {
-        this.mutationSender = mutationSender;
+        this.mutationEmitter = mutationEmitter;
         this.offsetWriter = offsetFileWriter;
         this.mutationMaker = new MutationMaker(true);
     }
@@ -249,9 +249,9 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         for (PartitionUpdate pu : mutation.getPartitionUpdates())
         {
             CommitLogPosition entryPosition = new CommitLogPosition(CommitLogUtil.extractTimestamp(descriptor.fileName()), entryLocation);
-            if (offsetWriter.offset().compareTo(entryPosition) > 0)
+            if (offsetWriter.emittedOffset().compareTo(entryPosition) > 0)
             {
-                logger.debug("Mutation at {} for table {}.{} already processed, skipping...",
+                logger.debug("Mutation at {} for table {}.{} already emitted, skipping...",
                              entryPosition, pu.metadata().keyspace, pu.metadata().name);
                 return;
             }
@@ -458,7 +458,6 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
                 Object value = row.clustering().get(cd.position());
                 CellData cellData = new CellData(name, value, null, CellData.ColumnType.CLUSTERING);
                 after.addCell(cellData);
-                after.wideRow(true);
             }
             catch (Exception e)
             {
@@ -593,28 +592,31 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
 
     public void maybeBlockingSend(Mutation mutation)
     {
-        CommitLogPosition sentOffset = this.offsetWriter.sentOffsetRef.get();
-        long seg = sentOffset.segmentId;
-        int pos = sentOffset.position;
-
         assert mutation != null : "Unexpected null mutation";
-        assert mutation.segment >= seg : "Unexpected mutation segment";
-        assert mutation.segment > seg ||
-               (mutation.segment == seg && mutation.position > pos)
-        : "Unexpected mutation offset";
 
-        logger.debug("Sending mutation={}", mutation);
+        CommitLogPosition emittedOffset = this.offsetWriter.emittedOffset();
+        logger.debug("Sending mutation={} sentOffset={}", mutation, emittedOffset);
+
+        long seg = emittedOffset.segmentId;
+        int pos = emittedOffset.position;
+
+        if (mutation.segment < seg || (mutation.segment == seg && mutation.position < pos)) {
+            // should never happen
+            logger.debug("Ignoring already emitted mutation={}", mutation);
+            return;
+        }
 
         while (true)
         {
             try
             {
                 this.offsetWriter.sentMutations.put(processMutation(mutation));
+                this.offsetWriter.emittedOffsetRef.set(new CommitLogPosition(mutation.segment, mutation.position));
                 break;
             }
             catch (Exception e)
             {
-                logger.error("failed to send message to pulsar:", e);
+                logger.error("failed to send message:", e);
                 try
                 {
                     Thread.sleep(10000);
@@ -626,9 +628,9 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
         }
     }
 
-    MutationSender.MutationFuture processMutation(final Mutation mutation)
+    MutationEmitter.MutationFuture processMutation(final Mutation mutation)
     {
-        return this.mutationSender.sendMutationAsync(mutation);
+        return this.mutationEmitter.sendMutationAsync(mutation);
     }
 
     public static Instant toInstantFromMicros(long microsSinceEpoch)

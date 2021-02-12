@@ -33,6 +33,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import com.codahale.metrics.Timer;
+import org.apache.cassandra.cdc.CdcSyncListeners;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
@@ -391,6 +392,7 @@ public abstract class CommitLogSegment
             if (complete)
                 writer.write("\nCOMPLETED");
             writer.flush();
+            CdcSyncListeners.instance.onSynced(desc.version, desc.id, offset, complete);
         }
         catch (IOException e)
         {

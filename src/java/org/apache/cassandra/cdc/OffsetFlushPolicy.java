@@ -57,7 +57,6 @@ public interface OffsetFlushPolicy {
 
     class AlwaysFlushOffsetPolicy implements OffsetFlushPolicy
     {
-
         @Override
         public boolean shouldFlush(Duration timeSinceLastFlush, long numOfRecordsSinceLastFlush) {
             return true;
