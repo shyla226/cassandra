@@ -404,7 +404,18 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
 
         long ts = rowType == RowType.DELETE ? row.deletion().time().markedForDeleteAt() : pu.maxTimestamp();
 
-        // full local read
+        if (rowType == RowType.DELETE) {
+            mutationMaker.delete(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition,
+                                 pu.metadata().keyspace, pu.metadata().name, false,
+                                 toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend);
+        } else {
+            mutationMaker.insert(DatabaseDescriptor.getClusterName(), StorageService.instance.getLocalHostUUID(), offsetPosition,
+                                 pu.metadata().keyspace, pu.metadata().name, false,
+                                 toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend, null);
+        }
+
+        // full local read: reading locally may lead to inconsistency
+        /*
         UntypedResultSet untypedResultSet = QueryProcessor.execute(String.format(Locale.ROOT,
                                                                                  "SELECT JSON * FROM %s.%s WHERE %s",
                                                                                  pu.metadata().keyspace,
@@ -426,6 +437,7 @@ public class CommitLogReadHandlerImpl implements CommitLogReadHandler
                                  pu.metadata().keyspace, pu.metadata().name, false,
                                  toInstantFromMicros(ts), after, MARK_OFFSET, this::maybeBlockingSend, jsonDocument);
         }
+         */
     }
 
     private void populatePartitionColumns(RowData after, PartitionUpdate pu)

@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.inject.Singleton;
 
@@ -158,16 +159,32 @@ public class OffsetFileWriter extends AbstractProcessor implements AutoCloseable
                     }
                     catch (Exception e)
                     {
-                        logger.warn("error:", e);
-                        Thread.sleep(10000);    // retry 10s later
                         CdcReplicationPlugin.instance.metrics.errors.mark();
+                        if (e instanceof ExecutionException)
+                        {
+                            if (e.getCause() instanceof IllegalArgumentException)
+                            {
+                                // retry immediatelly from another quasar node
+                                logger.debug("Immediatelly retrying replication :", e.getCause().getMessage());
+                            }
+                            else
+                            {
+                                logger.warn("Node temporarily unavailable:", e.getCause());
+                                Thread.sleep(10000);
+                            }
+                        }
+                        else
+                        {
+                            logger.error("Unexpected error:", e);
+                            Thread.sleep(10000); // unrecoverable error ?
+                        }
                         mutationFuture = mutationFuture.retry(mutationEmitter);
                     }
                 }
             }
             catch (Exception e)
             {
-                logger.error("error:", e);
+                logger.error("unexpected error:", e);
             }
         }
     }

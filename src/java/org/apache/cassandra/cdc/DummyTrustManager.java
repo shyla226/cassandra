@@ -16,33 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.cdc.quasar;
+package org.apache.cassandra.cdc;
 
-public enum Status
-{
-    UNKNOWN("UNKNOWN"),
-    STARTING("STARTING"),
-    JOINING("JOINING"),
-    RUNNING("RUNNING"),
-    LEAVING("LEAVING"),
-    LEFT("LEFT");
+import javax.net.ssl.X509TrustManager;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 
-    private String value;
+public class DummyTrustManager implements X509TrustManager {
 
-    Status(String value) {
-        this.value = value;
+    public X509Certificate[] getAcceptedIssuers() {
+        return null;
     }
 
-    public String getValue() {
-        return value;
+    public void checkClientTrusted(X509Certificate[] chain, String authType)
+            throws CertificateException {
+
     }
 
-    @Override
-    public String toString() {
-        return value;
-    }
+    public void checkServerTrusted(X509Certificate[] chain, String authType)
+            throws CertificateException {
 
-    public boolean isRunning() {
-        return this.equals(RUNNING);
     }
 }
