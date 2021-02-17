@@ -221,8 +221,8 @@ extends SkipListMemtable        // to test framework
         return skipOption ? commitLogSkippingFactory : commitLogWritingFactory;
     }
 
-    private static final Factory commitLogSkippingFactory = new Factory(true);
-    private static final Factory commitLogWritingFactory = new Factory(false);
+    static final Factory commitLogSkippingFactory = new Factory(true);
+    static final Factory commitLogWritingFactory = new Factory(false);
 
     static class Factory implements Memtable.Factory
     {
