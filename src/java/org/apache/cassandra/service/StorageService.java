@@ -52,6 +52,7 @@ import org.apache.cassandra.dht.RangeStreamer.FetchReplica;
 import org.apache.cassandra.fql.FullQueryLogger;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptionsCompositeData;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.locator.ReplicaCollection.Builder.Conflict;
 import org.apache.commons.lang3.StringUtils;
 
@@ -2374,6 +2375,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
                         break;
+                    case INDEX_STATUS:
+                        updateIndexStatus(endpoint, value);
+                        break;
                 }
             }
         }
@@ -2382,6 +2386,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static String[] splitValue(VersionedValue value)
     {
         return value.value.split(VersionedValue.DELIMITER_STR, -1);
+    }
+
+    private void updateIndexStatus(InetAddressAndPort endpoint, VersionedValue versionedValue)
+    {
+        SecondaryIndexManager.receivePeerIndexStatus(endpoint, versionedValue);
     }
 
     private void updateNetVersion(InetAddressAndPort endpoint, VersionedValue value)
