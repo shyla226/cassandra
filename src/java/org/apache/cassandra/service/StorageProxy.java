@@ -117,6 +117,7 @@ import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
+import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
 import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
@@ -183,7 +184,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     };
     private static final ClientRequestMetrics readMetrics = new ClientRequestMetrics("Read");
-    private static final ClientRequestMetrics rangeMetrics = new ClientRequestMetrics("RangeSlice");
+    public static final ClientRangeRequestMetrics rangeMetrics = new ClientRangeRequestMetrics("RangeSlice");
     private static final ClientWriteRequestMetrics writeMetrics = new ClientWriteRequestMetrics("Write");
     private static final CASClientWriteRequestMetrics casWriteMetrics = new CASClientWriteRequestMetrics("CASWrite");
     private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("CASRead");
@@ -204,7 +205,7 @@ public class StorageProxy implements StorageProxyMBean
 
     private static final String DISABLE_SERIAL_READ_LINEARIZABILITY_KEY = "cassandra.unsafe.disable-serial-reads-linearizability";
     private static final boolean disableSerialReadLinearizability =
-        Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
+    Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
 
     private StorageProxy()
     {
@@ -416,9 +417,9 @@ public class StorageProxy implements StorageProxyMBean
         casMetrics.contention.update(contentions);
         Keyspace.open(table.keyspace)
                 .getColumnFamilyStore(table.name)
-                .metric
-                .topCasPartitionContention
-                .addSample(key.getKey(), contentions);
+        .metric
+        .topCasPartitionContention
+        .addSample(key.getKey(), contentions);
     }
 
     /**
@@ -932,8 +933,8 @@ public class StorageProxy implements StorageProxyMBean
         // local writes can timeout, but cannot be dropped (see LocalMutationRunnable and CASSANDRA-6510),
         // so there is no need to hint or retry.
         EndpointsForToken replicasToHint = ReplicaLayout.forTokenWriteLiveAndDown(Keyspace.open(keyspaceName), token)
-                .all()
-                .filter(StorageProxy::shouldHint);
+                                                        .all()
+                                                        .filter(StorageProxy::shouldHint);
 
         submitHint(mutation, replicasToHint, null);
     }
@@ -945,7 +946,7 @@ public class StorageProxy implements StorageProxyMBean
         InetAddressAndPort local = FBUtilities.getBroadcastAddressAndPort();
 
         return ReplicaLayout.forTokenWriteLiveAndDown(Keyspace.open(keyspaceName), token)
-                .all().endpoints().contains(local);
+                            .all().endpoints().contains(local);
     }
 
     /**
@@ -1494,7 +1495,7 @@ public class StorageProxy implements StorageProxyMBean
         // a small number of nodes causing problems, so we should avoid shutting down writes completely to
         // healthy nodes.  Any node with no hintsInProgress is considered healthy.
         if (StorageMetrics.totalHintsInProgress.getCount() > maxHintsInProgress
-                && (getHintsInProgressFor(destination.endpoint()).get() > 0 && shouldHint(destination)))
+            && (getHintsInProgressFor(destination.endpoint()).get() > 0 && shouldHint(destination)))
         {
             throw new OverloadedException("Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount() +
                                           " destination: " + destination +
@@ -1752,8 +1753,8 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return consistencyLevel.isSerialConsistency()
-             ? readWithPaxos(group, consistencyLevel, state, queryStartNanoTime)
-             : readRegular(group, consistencyLevel, queryStartNanoTime);
+               ? readWithPaxos(group, consistencyLevel, state, queryStartNanoTime)
+               : readRegular(group, consistencyLevel, queryStartNanoTime);
     }
 
     private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
@@ -1780,9 +1781,9 @@ public class StorageProxy implements StorageProxyMBean
                 // Commit an empty update to make sure all in-progress updates that should be finished first is, _and_
                 // that no other in-progress can get resurrected.
                 Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer =
-                    disableSerialReadLinearizability
-                    ? () -> null
-                    : () -> Pair.create(PartitionUpdate.emptyUpdate(metadata, key), null);
+                disableSerialReadLinearizability
+                ? () -> null
+                : () -> Pair.create(PartitionUpdate.emptyUpdate(metadata, key), null);
                 // When replaying, we commit at quorum/local quorum, as we want to be sure the following read (done at
                 // quorum/local_quorum) sees any replayed updates. Our own update is however empty, and those don't even
                 // get committed due to an optimiation described in doPaxos/beingRepairAndPaxos, so the commit
@@ -2050,10 +2051,10 @@ public class StorageProxy implements StorageProxyMBean
     private static float estimateResultsPerRange(PartitionRangeReadCommand command, Keyspace keyspace)
     {
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
-        Index index = command.getIndex(cfs);
-        float maxExpectedResults = index == null
-                                 ? command.limits().estimateTotalResults(cfs)
-                                 : index.getEstimatedResultRows();
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        float maxExpectedResults = queryPlan == null
+                                   ? command.limits().estimateTotalResults(cfs)
+                                   : queryPlan.getEstimatedResultRows();
 
         // adjust maxExpectedResults by the number of tokens this node has and the replication factor for this ks
         return (maxExpectedResults / DatabaseDescriptor.getNumTokens()) / keyspace.getReplicationStrategy().getReplicationFactor().allReplicas;
@@ -2064,6 +2065,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         private final Keyspace keyspace;
         private final ConsistencyLevel consistency;
+        private final Index.QueryPlan indexQueryPlan;
         private final Iterator<? extends AbstractBounds<PartitionPosition>> ranges;
         private final int rangeCount;
 
@@ -2071,10 +2073,10 @@ public class StorageProxy implements StorageProxyMBean
         {
             this.keyspace = keyspace;
             this.consistency = consistency;
-
+            this.indexQueryPlan = command.indexQueryPlan();
             List<? extends AbstractBounds<PartitionPosition>> l = keyspace.getReplicationStrategy() instanceof LocalStrategy
-                                                          ? command.dataRange().keyRange().unwrap()
-                                                          : getRestrictedRanges(command.dataRange().keyRange());
+                                                                  ? command.dataRange().keyRange().unwrap()
+                                                                  : getRestrictedRanges(command.dataRange().keyRange());
             this.ranges = l.iterator();
             this.rangeCount = l.size();
         }
@@ -2089,7 +2091,7 @@ public class StorageProxy implements StorageProxyMBean
             if (!ranges.hasNext())
                 return endOfData();
 
-            return ReplicaPlans.forRangeRead(keyspace, consistency, ranges.next(), 1);
+            return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1);
         }
     }
 
@@ -2304,11 +2306,11 @@ public class StorageProxy implements StorageProxyMBean
 
             ReplicaPlan.SharedForRangeRead sharedReplicaPlan = ReplicaPlan.shared(replicaPlan);
             ReadRepair<EndpointsForRange, ReplicaPlan.ForRangeRead> readRepair
-                    = ReadRepair.create(command, sharedReplicaPlan, queryStartNanoTime);
+            = ReadRepair.create(command, sharedReplicaPlan, queryStartNanoTime);
             DataResolver<EndpointsForRange, ReplicaPlan.ForRangeRead> resolver
-                    = new DataResolver<>(rangeCommand, sharedReplicaPlan, readRepair, queryStartNanoTime);
+            = new DataResolver<>(rangeCommand, sharedReplicaPlan, readRepair, queryStartNanoTime);
             ReadCallback<EndpointsForRange, ReplicaPlan.ForRangeRead> handler
-                    = new ReadCallback<>(resolver, rangeCommand, sharedReplicaPlan, queryStartNanoTime);
+            = new ReadCallback<>(resolver, rangeCommand, sharedReplicaPlan, queryStartNanoTime);
 
 
             if (replicaPlan.contacts().size() == 1 && replicaPlan.contacts().get(0).isSelf())
@@ -2373,6 +2375,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             finally
             {
+                rangeMetrics.roundTrips.update(batchesRequested);
                 long latency = System.nanoTime() - startTime;
                 rangeMetrics.addNano(latency);
                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
@@ -2400,18 +2403,31 @@ public class StorageProxy implements StorageProxyMBean
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
         RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
 
-        // our estimate of how many result rows there will be per-range
-        float resultsPerRange = estimateResultsPerRange(command, keyspace);
-        // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
-        // fetch enough rows in the first round
-        resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
-        int maxConcurrencyFactor = Math.min(ranges.rangeCount(), MAX_CONCURRENT_RANGE_REQUESTS);
-        int concurrencyFactor = resultsPerRange == 0.0
+        int maxConcurrencyFactor = Math.min(ranges.rangeCount, MAX_CONCURRENT_RANGE_REQUESTS);
+        int concurrencyFactor = maxConcurrencyFactor;
+
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if ( queryPlan == null || queryPlan.shouldEstimateInitialConcurrency())
+        {
+            // our estimate of how many result rows there will be per-range
+            float resultsPerRange = estimateResultsPerRange(command, keyspace);
+            // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
+            // fetch enough rows in the first round
+            resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
+            concurrencyFactor = resultsPerRange == 0.0
                                 ? 1
                                 : Math.max(1, Math.min(maxConcurrencyFactor, (int) Math.ceil(command.limits().count() / resultsPerRange)));
-        logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
-                     resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
-        Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
+
+            logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
+        }
+        else
+        {
+            logger.trace("Max concurrent range requests: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         MAX_CONCURRENT_RANGE_REQUESTS, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {}", ranges.rangeCount(), concurrencyFactor);
+        }
 
         // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
         RangeMerger mergedRanges = new RangeMerger(ranges, keyspace, consistencyLevel);
@@ -3017,7 +3033,7 @@ public class StorageProxy implements StorageProxyMBean
     @Override
     public void disableReportingUnconfirmedRepairedDataMismatches()
     {
-       DatabaseDescriptor.reportUnconfirmedRepairedDataMismatches(false);
+        DatabaseDescriptor.reportUnconfirmedRepairedDataMismatches(false);
     }
 
     @Override

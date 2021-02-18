@@ -1,21 +1,21 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one
-* or more contributor license agreements.  See the NOTICE file
-* distributed with this work for additional information
-* regarding copyright ownership.  The ASF licenses this file
-* to you under the Apache License, Version 2.0 (the
-* "License"); you may not use this file except in compliance
-* with the License.  You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing,
-* software distributed under the License is distributed on an
-* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-* KIND, either express or implied.  See the License for the
-* specific language governing permissions and limitations
-* under the License.
-*/
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.cassandra.db;
 
 import java.math.BigInteger;
@@ -89,11 +89,11 @@ public class PartitionRangeReadTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE2).getColumnFamilyStore(CF_STANDARD1);
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key1"))
-                .clustering("cc1")
-                .add("val", "asdf").build().applyUnsafe();
+        .clustering("cc1")
+        .add("val", "asdf").build().applyUnsafe();
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key2"))
-                .clustering("cc2")
-                .add("val", "asdf").build().applyUnsafe();
+        .clustering("cc2")
+        .add("val", "asdf").build().applyUnsafe();
 
         assertEquals(2, Util.getAll(Util.cmd(cfs).fromIncl("cc1").toIncl("cc2").build()).size());
     }
@@ -112,17 +112,17 @@ public class PartitionRangeReadTest
         // insert two columns that represent the same integer but have different binary forms (the
         // second one is padded with extra zeros)
         new RowUpdateBuilder(cfs.metadata(), 0, "k1")
-                .clustering(new BigInteger(new byte[]{1}))
-                .add("val", "val1")
-                .build()
-                .applyUnsafe();
+        .clustering(new BigInteger(new byte[]{1}))
+        .add("val", "val1")
+        .build()
+        .applyUnsafe();
         cfs.forceBlockingFlush();
 
         new RowUpdateBuilder(cfs.metadata(), 1, "k1")
-                .clustering(new BigInteger(new byte[]{0, 0, 1}))
-                .add("val", "val2")
-                .build()
-                .applyUnsafe();
+        .clustering(new BigInteger(new byte[]{0, 0, 1}))
+        .add("val", "val2")
+        .build()
+        .applyUnsafe();
         cfs.forceBlockingFlush();
 
         // fetch by the first column name; we should get the second version of the column value
@@ -243,7 +243,7 @@ public class PartitionRangeReadTest
         for (int i = 0; i + 1 < tokens.size(); i++)
         {
             Range<PartitionPosition> range = Range.makeRowRange(tokens.get(i), tokens.get(i + 1));
-            ranges.add(ReplicaPlans.forRangeRead(keyspace, ConsistencyLevel.ONE, range, 1));
+            ranges.add(ReplicaPlans.forRangeRead(keyspace, null, ConsistencyLevel.ONE, range, 1));
             vnodeCount++;
         }
 
@@ -332,4 +332,3 @@ public class PartitionRangeReadTest
         return tokens;
     }
 }
-
