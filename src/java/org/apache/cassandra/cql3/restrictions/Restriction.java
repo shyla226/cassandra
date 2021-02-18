@@ -18,7 +18,9 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.util.List;
+import java.util.function.Consumer;
 
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
@@ -28,6 +30,7 @@ import org.apache.cassandra.index.IndexRegistry;
 /**
  * <p>Implementation of this class must be immutable.</p>
  */
+//TODO Javadoc
 public interface Restriction
 {
     public default boolean isOnToken()
@@ -69,13 +72,21 @@ public interface Restriction
     public boolean hasSupportingIndex(IndexRegistry indexRegistry);
 
     /**
+     * Returns whether this restriction would need filtering if the specified index group were used.
+     *
+     * @param indexGroup an index group
+     * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
+     */
+    public boolean needsFiltering(Index.Group indexGroup);
+
+    /**
      * Adds to the specified row filter the expressions corresponding to this <code>Restriction</code>.
      *
      * @param filter the row filter to add expressions to
      * @param indexRegistry the index registry
      * @param options the query options
      */
-    public void addRowFilterTo(RowFilter filter,
+    public void addToRowFilter(RowFilter filter,
                                IndexRegistry indexRegistry,
                                QueryOptions options);
 }
