@@ -24,8 +24,6 @@ import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.Token;
-
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
 
 // Test that the different iterators cope with handling incoming ranges that are out of order
@@ -62,19 +60,19 @@ public class DeferredRangeIteratorTest
 
     private static class DeferredRangeIterator extends RangeIterator
     {
-        private final List<LongIterator.LongToken> tokens;
+        private final List<PrimaryKey> tokens;
         private int currentIdx = 0;
 
         public DeferredRangeIterator(long min, long[] tokens)
         {
-            super(min, min + 100, 1000);
+            super(LongIterator.fromToken(min), LongIterator.fromToken(min + 100), 1000);
             this.tokens = new ArrayList<>(tokens.length);
             for (long token : tokens)
-                this.tokens.add(new LongIterator.LongToken(token, token));
+                this.tokens.add(LongIterator.fromTokenAndRowId(token, token));
         }
 
         @Override
-        protected Token computeNext()
+        protected PrimaryKey computeNext()
         {
             if (currentIdx >= tokens.size())
                 return endOfData();
@@ -83,12 +81,12 @@ public class DeferredRangeIteratorTest
         }
 
         @Override
-        protected void performSkipTo(Long nextToken)
+        protected void performSkipTo(PrimaryKey nextToken)
         {
             for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < tokens.size(); i++)
             {
-                LongIterator.LongToken token = tokens.get(i);
-                if (token.get() >= nextToken)
+                PrimaryKey token = tokens.get(i);
+                if (token.compareTo(nextToken) >= 0)
                 {
                     currentIdx = i;
                     break;

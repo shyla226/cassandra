@@ -94,7 +94,7 @@ public class InvertedIndexSearcher extends IndexSearcher
 
         PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> reader.exactMatch(term, listener, context.queryContext))
                                         : reader.exactMatch(term, listener, context.queryContext);
-        return toIterator(postingList, context, defer);
+        return toIterator(postingList, context);
     }
 
     public static int openPerIndexFiles()

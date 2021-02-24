@@ -139,8 +139,8 @@ public class RangeIntersectionIterator
     /**
      * Iterator which performs intersection of multiple ranges by using bouncing (merge-join) technique to identify
      * common elements in the given ranges. Aforementioned "bounce" works as follows: range queue is poll'ed for the
-     * range with the smallest current token (main loop), that token is used to {@link RangeIterator#skipTo(Long)}
-     * other ranges, if token produced by {@link RangeIterator#skipTo(Long)} is equal to current "candidate" token,
+     * range with the smallest current token (main loop), that token is used to {@link RangeIterator#skipTo(PrimaryKey)}
+     * other ranges, if token produced by {@link RangeIterator#skipTo(PrimaryKey)} is equal to current "candidate" token,
      * both get merged together and the same operation is repeated for next range from the queue, if returned token
      * is not equal than candidate, candidate's range gets put back into the queue and the main loop gets repeated until
      * next intersection token is found or at least one iterator runs out of tokens.
@@ -150,7 +150,6 @@ public class RangeIntersectionIterator
     private static class BounceIntersectionIterator extends RangeIterator
     {
         private final PriorityQueue<RangeIterator> ranges;
-        private final Token.TokenMerger merger;
         private final List<RangeIterator> toRelease;
         private final List<RangeIterator> processedRanges;
 
@@ -159,11 +158,10 @@ public class RangeIntersectionIterator
             super(statistics);
             this.ranges = ranges;
             this.toRelease = new ArrayList<>(ranges);
-            this.merger = new Token.ReusableTokenMerger(ranges.size());
             this.processedRanges = new ArrayList<>(ranges.size());
         }
 
-        protected Token computeNext()
+        protected PrimaryKey computeNext()
         {
             RangeIterator head = ranges.poll();
 
@@ -174,13 +172,10 @@ public class RangeIntersectionIterator
             if (head.getCurrent().compareTo(getMinimum()) < 0)
                 head.skipTo(getMinimum());
 
-            Token candidate = head.hasNext() ? head.next() : null;
+            PrimaryKey candidate = head.hasNext() ? head.next() : null;
 
-            if (candidate == null || candidate.get() > getMaximum())
+            if (candidate == null || candidate.compareTo(getMaximum()) > 0)
                 return endOfData();
-
-            merger.reset();
-            merger.add(candidate);
 
             processedRanges.clear();
 
@@ -191,17 +186,16 @@ public class RangeIntersectionIterator
 
                 // found a range which doesn't overlap with one (or possibly more) other range(s)
                 // or the range is exhausted
-                if (!isOverlapping(head, range) || (range.skipTo(candidate.get()) == null))
+                if (!isOverlapping(head, range) || (range.skipTo(candidate) == null))
                 {
                     intersectsAll = false;
                     break;
                 }
 
-                int cmp = Long.compare(candidate.get(), range.getCurrent());
+                int cmp = candidate.compareTo(range.getCurrent());
 
                 if (cmp == 0)
                 {
-                    merger.add(range.next());
                     // advance skipped range to the next element if any
                     range.hasNext();
                     processedRanges.add(range);
@@ -211,8 +205,6 @@ public class RangeIntersectionIterator
                     // the candidate is less than the current value in the next range
                     // so make the next range the candidate and start again
                     candidate = range.next();
-                    merger.reset();
-                    merger.add(candidate);
                     ranges.add(head);
                     ranges.addAll(processedRanges);
                     processedRanges.clear();
@@ -229,13 +221,13 @@ public class RangeIntersectionIterator
             {
                 ranges.add(head);
                 ranges.addAll(processedRanges);
-                return merger.merge();
+                return candidate;
             }
 
             return endOfData();
         }
 
-        protected void performSkipTo(Long nextToken)
+        protected void performSkipTo(PrimaryKey nextToken)
         {
             List<RangeIterator> skipped = new ArrayList<>();
 

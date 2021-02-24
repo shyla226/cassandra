@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.TermsReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
@@ -120,25 +121,21 @@ public class SegmentFlushTest
         DecoratedKey key1 = keys.get(0);
         ByteBuffer term1 = UTF8Type.instance.decompose("a");
         Row row1 = createRow(column, term1);
-        writer.addRow(key1, sstableRowId1, row1);
+        writer.addRow(PrimaryKey.factory().createKey(key1, Clustering.EMPTY, sstableRowId1), row1);
 
         // expect a flush if exceed max rowId per segment
         DecoratedKey key2 = keys.get(1);
         ByteBuffer term2 = UTF8Type.instance.decompose("b");
         Row row2 = createRow(column, term2);
-        writer.addRow(key2, sstableRowId2, row2);
+        writer.addRow(PrimaryKey.factory().createKey(key2, Clustering.EMPTY, sstableRowId2), row2);
 
         writer.flush();
 
         IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor, null);
         MetadataSource source = MetadataSource.loadColumnMetadata(components);
 
-        // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, null);
-        assertEquals(segments, segmentMetadatas.size());
+        SegmentMetadata segmentMetadata = SegmentMetadata.load(source, PrimaryKey.factory(), null);
 
-        // verify segment metadata
-        SegmentMetadata segmentMetadata = segmentMetadatas.get(0);
         segmentRowIdOffset = 0;
         posting1 = 0;
         posting2 = (int) (sstableRowId2 - segmentRowIdOffset);

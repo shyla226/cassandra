@@ -17,28 +17,16 @@
  */
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v1.BlockPackedReader;
-import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
-import org.apache.cassandra.index.sai.disk.v1.MonotonicBlockPackedReader;
-import org.apache.cassandra.index.sai.utils.LongArray;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
-
-import static org.apache.cassandra.index.sai.disk.OnDiskKeyProducer.NO_OFFSET;
 
 /**
  * SSTableContext is created for individual sstable shared across indexes to track per-sstable index files.
@@ -49,24 +37,15 @@ import static org.apache.cassandra.index.sai.disk.OnDiskKeyProducer.NO_OFFSET;
 public class SSTableContext extends SharedCloseableImpl
 {
     public final SSTableReader sstable;
+    public final PrimaryKeyMap primaryKeyMap;
 
     private final IndexComponents groupComponents;
-    // mapping from sstable row id to token or offset
-    public final LongArray.Factory tokenReaderFactory, offsetReaderFactory;
-    public final KeyFetcher keyFetcher;
 
-    private SSTableContext(SSTableReader sstable,
-                           LongArray.Factory tokenReaderFactory,
-                           LongArray.Factory offsetReaderFactory,
-                           KeyFetcher keyFetcher,
-                           Cleanup cleanup,
-                           IndexComponents groupComponents)
+    private SSTableContext(SSTableReader sstable, PrimaryKeyMap primaryKeyMap, Cleanup cleanup, IndexComponents groupComponents)
     {
         super(cleanup);
         this.sstable = sstable;
-        this.tokenReaderFactory = tokenReaderFactory;
-        this.offsetReaderFactory = offsetReaderFactory;
-        this.keyFetcher = keyFetcher;
+        this.primaryKeyMap = primaryKeyMap;
         this.groupComponents = groupComponents;
     }
 
@@ -74,10 +53,8 @@ public class SSTableContext extends SharedCloseableImpl
     {
         super(copy);
         this.sstable = copy.sstable;
-        this.tokenReaderFactory = copy.tokenReaderFactory;
-        this.offsetReaderFactory = copy.offsetReaderFactory;
+        this.primaryKeyMap = copy.primaryKeyMap;
         this.groupComponents = copy.groupComponents;
-        this.keyFetcher = copy.keyFetcher;
     }
 
     public static SSTableContext create(SSTableReader sstable)
@@ -85,13 +62,9 @@ public class SSTableContext extends SharedCloseableImpl
         IndexComponents groupComponents = IndexComponents.perSSTable(sstable);
 
         Ref<SSTableReader> sstableRef = null;
-        FileHandle token = null, offset = null;
-        LongArray.Factory tokenReaderFactory, offsetReaderFactory;
-        KeyFetcher keyFetcher;
+        PrimaryKeyMap primaryKeyMap;
         try
         {
-            MetadataSource source = MetadataSource.loadGroupMetadata(groupComponents);
-
             sstableRef = sstable.tryRef();
 
             if (sstableRef == null)
@@ -99,16 +72,11 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            token = groupComponents.createFileHandle(IndexComponents.TOKEN_VALUES);
-            offset  = groupComponents.createFileHandle(IndexComponents.OFFSETS_VALUES);
+            primaryKeyMap = new PrimaryKeyMap.DefaultPrimaryKeyMap(groupComponents, sstable.metadata().partitioner, sstable.metadata().comparator);
 
-            tokenReaderFactory = new BlockPackedReader(token, IndexComponents.TOKEN_VALUES, groupComponents, source);
-            offsetReaderFactory = new MonotonicBlockPackedReader(offset, IndexComponents.OFFSETS_VALUES, groupComponents, source);
-            keyFetcher = new DecoratedKeyFetcher(sstable);
+            Cleanup cleanup = new Cleanup(primaryKeyMap, sstableRef);
 
-            Cleanup cleanup = new Cleanup(token, offset, sstableRef);
-
-            return new SSTableContext(sstable, tokenReaderFactory, offsetReaderFactory, keyFetcher, cleanup, groupComponents);
+            return new SSTableContext(sstable, primaryKeyMap, cleanup, groupComponents);
         }
         catch (Throwable t)
         {
@@ -117,7 +85,8 @@ public class SSTableContext extends SharedCloseableImpl
                 sstableRef.release();
             }
 
-            throw Throwables.unchecked(Throwables.close(t, token, offset));
+            //TODO Does this need to potentially close the PrimaryKeyMap?
+            throw Throwables.unchecked(t);
         }
     }
 
@@ -126,8 +95,8 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public static int openFilesPerSSTable()
     {
-        // token and offset
-        return 2;
+        //TODO How many really?
+        return 1;
     }
 
     @Override
@@ -138,13 +107,12 @@ public class SSTableContext extends SharedCloseableImpl
 
     private static class Cleanup implements RefCounted.Tidy
     {
-        private final FileHandle token, offset;
+        private final PrimaryKeyMap primaryKeyMap;
         private final Ref<SSTableReader> sstableRef;
 
-        private Cleanup(FileHandle token, FileHandle offset, Ref<SSTableReader> sstableRef)
+        private Cleanup(PrimaryKeyMap primaryKeyMap, Ref<SSTableReader> sstableRef)
         {
-            this.token = token;
-            this.offset = offset;
+            this.primaryKeyMap = primaryKeyMap;
             this.sstableRef = sstableRef;
         }
 
@@ -152,7 +120,7 @@ public class SSTableContext extends SharedCloseableImpl
         public void tidy()
         {
             Throwable t = sstableRef.ensureReleased(null);
-            t = Throwables.close(t, token, offset);
+            t = Throwables.close(t, primaryKeyMap);
 
             Throwables.maybeFail(t);
         }
@@ -206,84 +174,5 @@ public class SSTableContext extends SharedCloseableImpl
     public int hashCode()
     {
         return Objects.hashCode(sstable.descriptor.hashCode());
-    }
-
-    public interface KeyFetcher
-    {
-        DecoratedKey apply(RandomAccessReader reader, long keyOffset);
-
-        /**
-         * Create a shared RAR for all tokens in the same segment.
-         */
-        RandomAccessReader createReader();
-    }
-
-    @VisibleForTesting
-    public static class DecoratedKeyFetcher implements KeyFetcher
-    {
-        private final SSTableReader sstable;
-
-        DecoratedKeyFetcher(SSTableReader sstable)
-        {
-            this.sstable = sstable;
-        }
-
-        @Override
-        public RandomAccessReader createReader()
-        {
-            return sstable.openIndexReader();
-        }
-
-        @Override
-        public DecoratedKey apply(RandomAccessReader reader, long keyOffset)
-        {
-            assert reader != null : "RandomAccessReader null";
-
-            // If the returned offset is the sentinel value, we've seen this offset
-            // before or we've run out of valid keys due to ZCS:
-            if (keyOffset == NO_OFFSET)
-                return null;
-
-            try
-            {
-                // can return null
-                return sstable.keyAt(reader, keyOffset);
-            }
-            catch (IOException e)
-            {
-                throw Throwables.cleaned(e);
-            }
-        }
-
-        @Override
-        public String toString()
-        {
-            return MoreObjects.toStringHelper(this).add("sstable", sstable).toString();
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return sstable.descriptor.hashCode();
-        }
-
-        @Override
-        public boolean equals(Object other)
-        {
-            if (other == null)
-            {
-                return false;
-            }
-            if (other == this)
-            {
-                return true;
-            }
-            if (other.getClass() != getClass())
-            {
-                return false;
-            }
-            DecoratedKeyFetcher rhs = (DecoratedKeyFetcher) other;
-            return sstable.descriptor.equals(rhs.sstable.descriptor);
-        }
     }
 }

@@ -22,7 +22,7 @@ import java.util.List;
 
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -63,7 +63,7 @@ public class TermsReaderTest extends NdiRandomizedTest
     {
         final int terms = 70, postings = 2;
         final IndexComponents indexComponents = newIndexComponents();
-        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(terms, postings);
+        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(terms, postings);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
         try (InvertedIndexWriter writer = new InvertedIndexWriter(indexComponents, false))
@@ -94,7 +94,7 @@ public class TermsReaderTest extends NdiRandomizedTest
     private void testTermQueries(int numTerms, int numPostings) throws IOException
     {
         final IndexComponents indexComponents = newIndexComponents();
-        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
         try (InvertedIndexWriter writer = new InvertedIndexWriter(indexComponents, false))
@@ -110,12 +110,12 @@ public class TermsReaderTest extends NdiRandomizedTest
         try (TermsReader reader = new TermsReader(indexComponents, termsData, postingLists,
                                                   indexMetas.get(indexComponents.termsData.ndiType).root, termsFooterPointer))
         {
-            for (Pair<ByteComparable, IntArrayList> pair : termsEnum)
+            for (Pair<ByteComparable, LongArrayList> pair : termsEnum)
             {
                 final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(ByteComparable.Version.OSS41));
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.fixedLength(bytes), NO_OP_TRIE_LISTENER, new QueryContext()))
                 {
-                    final IntArrayList expectedPostingList = pair.right;
+                    final LongArrayList expectedPostingList = pair.right;
 
                     assertNotNull(actualPostingList);
                     assertEquals(expectedPostingList.size(), actualPostingList.size());
@@ -134,11 +134,11 @@ public class TermsReaderTest extends NdiRandomizedTest
                 // test skipping
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.fixedLength(bytes), NO_OP_TRIE_LISTENER, new QueryContext()))
                 {
-                    final IntArrayList expectedPostingList = pair.right;
+                    final LongArrayList expectedPostingList = pair.right;
                     // test skipping to the last block
                     final int idxToSkip = numPostings - 2;
                     // tokens are equal to their corresponding row IDs
-                    final int tokenToSkip = expectedPostingList.get(idxToSkip);
+                    final long tokenToSkip = expectedPostingList.get(idxToSkip);
 
                     long advanceResult = actualPostingList.advance(tokenToSkip);
                     assertEquals(tokenToSkip, advanceResult);
@@ -157,7 +157,7 @@ public class TermsReaderTest extends NdiRandomizedTest
         }
     }
 
-    private List<Pair<ByteComparable, IntArrayList>> buildTermsEnum(int terms, int postings)
+    private List<Pair<ByteComparable, LongArrayList>> buildTermsEnum(int terms, int postings)
     {
         return buildStringTermsEnum(terms, postings, () -> randomSimpleString(4, 10), () -> nextInt(0, Integer.MAX_VALUE));
     }

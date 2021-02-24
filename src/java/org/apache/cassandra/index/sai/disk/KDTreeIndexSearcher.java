@@ -81,7 +81,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
             PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> bkdReader.intersect(query, listener, context.queryContext))
                                             : bkdReader.intersect(query, listener, context.queryContext);
-            return toIterator(postingList, context, defer);
+            return toIterator(postingList, context);
         }
         else
         {

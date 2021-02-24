@@ -24,52 +24,36 @@ import java.util.List;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.LongArrays;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
-import static org.apache.cassandra.Util.dk;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
 public class InvertedIndexSearcherTest extends NdiRandomizedTest
 {
-    private static final SSTableContext.KeyFetcher KEY_FETCHER = new SSTableContext.KeyFetcher() {
-        @Override
-        public DecoratedKey apply(RandomAccessReader reader, long keyOffset)
-        {
-            return dk(String.format("pkvalue_%07d", keyOffset));
-        }
-
-        @Override
-        public RandomAccessReader createReader()
-        {
-            return null;
-        }
-    };
-
     @BeforeClass
     public static void setupCQLTester()
     {
@@ -86,7 +70,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
     private void doTestEqQueriesAgainstStringIndex() throws Exception
     {
         final int numTerms = randomIntBetween(64, 512), numPostings = randomIntBetween(256, 1024);
-        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, LongArrayList>>termsEnum = buildTermsEnum(numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
@@ -102,7 +86,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
                         assertTrue(results.hasNext());
-                        final long actualToken = results.next().get();
+                        final long actualToken = results.next().partitionKey.getToken().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
                     assertFalse(results.hasNext());
@@ -118,12 +102,12 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs
                     final long tokenToSkip = termsEnum.get(t).right.get(idxToSkip);
-                    results.skipTo(tokenToSkip);
+                    results.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(tokenToSkip)));
 
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
-                        final long actualToken = results.next().get();
+                        final long actualToken = results.next().partitionKey.getToken().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
                 }
@@ -146,7 +130,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
     public void testUnsupportedOperator() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
-        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
@@ -160,7 +144,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
         }
     }
 
-    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, IntArrayList>> termsEnum) throws IOException
+    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, LongArrayList>> termsEnum) throws IOException
     {
         final int size = terms * postings;
         final IndexComponents indexComponents = newIndexComponents();
@@ -175,8 +159,8 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                                                                     size,
                                                                     0,
                                                                     Long.MAX_VALUE,
-                                                                    new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMinimumToken(), ByteBufferUtil.bytes(1)),
-                                                                    new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMaximumToken(), ByteBufferUtil.bytes(2)),
+                                                                    PrimaryKey.factory().createKey(new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMinimumToken(), ByteBufferUtil.bytes(1))),
+                                                                    PrimaryKey.factory().createKey(new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMinimumToken(), ByteBufferUtil.bytes(2))),
                                                                     wrap(termsEnum.get(0).left),
                                                                     wrap(termsEnum.get(terms - 1).left),
                                                                     indexMetas);
@@ -184,14 +168,14 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
         try (SSTableIndex.PerIndexFiles indexFiles = new SSTableIndex.PerIndexFiles(indexComponents, true))
         {
             final LongArray.Factory factory = () -> LongArrays.identity().build();
-            Segment segment = new Segment(factory, factory, KEY_FETCHER, indexFiles, segmentMetadata, UTF8Type.instance);
+            Segment segment = new Segment(PrimaryKeyMap.IDENTITY, indexFiles, segmentMetadata, UTF8Type.instance);
             final IndexSearcher searcher = IndexSearcher.open(segment, QueryEventListeners.NO_OP_TRIE_LISTENER);
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }
     }
 
-    private List<Pair<ByteComparable, IntArrayList>> buildTermsEnum(int terms, int postings)
+    private List<Pair<ByteComparable, LongArrayList>> buildTermsEnum(int terms, int postings)
     {
         return InvertedIndexBuilder.buildStringTermsEnum(terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
     }

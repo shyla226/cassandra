@@ -64,9 +64,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
 
     private final MemtableTrie<PrimaryKeys> data;
-    private final ClusteringComparator clusteringComparator;
     private final PrimaryKeysReducer primaryKeysReducer;
-    private final AbstractAnalyzer analyzer;
     private final AbstractType<?> validator;
     private final boolean isLiteral;
     private final Object writeLock = new Object();
@@ -85,10 +83,8 @@ public class TrieMemoryIndex extends MemoryIndex
         super(columnContext);
         //TODO Do we need to follow a setting for this?
         this.data = new MemtableTrie<>(BufferType.OFF_HEAP);
-        this.clusteringComparator = columnContext.clusteringComparator();
         this.primaryKeysReducer = new PrimaryKeysReducer();
         // MemoryIndex is per-core, so analyzer should be thread-safe..
-        this.analyzer = columnContext.getAnalyzer();
         this.validator = columnContext.getValidator();
         this.isLiteral = TypeUtil.isLiteral(validator);
     }
@@ -101,7 +97,7 @@ public class TrieMemoryIndex extends MemoryIndex
             AbstractAnalyzer analyzer = columnContext.getAnalyzer();
             value = TypeUtil.encode(value, validator);
             analyzer.reset(value.duplicate());
-            final PrimaryKey primaryKey = PrimaryKey.of(key, clustering);
+            final PrimaryKey primaryKey = columnContext.keyFactory().createKey(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
@@ -217,14 +213,14 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             return RangeIterator.empty();
         }
-        return new KeyRangeIterator(primaryKeys.partitionKeys());
+        return new KeyRangeIterator(primaryKeys.keys());
     }
 
     public static class Collector
     {
-        long minimumTokenValue = Long.MAX_VALUE;
-        long maximumTokenValue = Long.MIN_VALUE;
-        PriorityQueue<DecoratedKey> mergedKeys = new PriorityQueue<>(lastQueueSize.get(), DecoratedKey.comparator);
+        PrimaryKey minimumKey = PrimaryKey.MAXIMUM;
+        PrimaryKey maximumKey = PrimaryKey.MINIMUM;
+        PriorityQueue<PrimaryKey> mergedKeys = new PriorityQueue<>(lastQueueSize.get());
 
         AbstractBounds<PartitionPosition> keyRange;
 
@@ -238,38 +234,36 @@ public class TrieMemoryIndex extends MemoryIndex
             if (keys.isEmpty())
                 return;
 
-            SortedSet<DecoratedKey> partitionKeys = keys.partitionKeys();
+            SortedSet<PrimaryKey> primaryKeys = keys.keys();
 
             // shortcut to avoid generating iterator
-            if (partitionKeys.size() == 1)
+            if (primaryKeys.size() == 1)
             {
-                DecoratedKey first = partitionKeys.first();
-                if (keyRange.contains(first))
+                PrimaryKey first = primaryKeys.first();
+                if (keyRange.contains(first.partitionKey))
                 {
                     mergedKeys.add(first);
 
-                    long currentTokenValue = first.getToken().getLongValue();
-                    minimumTokenValue = Math.min(minimumTokenValue, currentTokenValue);
-                    maximumTokenValue = Math.max(maximumTokenValue, currentTokenValue);
+                    minimumKey = first.compareTo(minimumKey) < 0 ? first : minimumKey;
+                    maximumKey = first.compareTo(maximumKey) > 0 ? first : maximumKey;
                 }
 
                 return;
             }
 
             // skip entire partition keys if they don't overlap
-            if (!keyRange.right.isMinimum() && partitionKeys.first().compareTo(keyRange.right) > 0
-                    || partitionKeys.last().compareTo(keyRange.left) < 0)
-                return;
+            if (!keyRange.right.isMinimum() && primaryKeys.first().partitionKey.compareTo(keyRange.right) > 0
+                || primaryKeys.last().partitionKey.compareTo(keyRange.left) < 0)
+               return;
 
-            for (DecoratedKey key : partitionKeys)
+            for (PrimaryKey key : primaryKeys)
             {
-                if (keyRange.contains(key))
+                if (keyRange.contains(key.partitionKey))
                 {
                     mergedKeys.add(key);
 
-                    long currentTokenValue = key.getToken().getLongValue();
-                    minimumTokenValue = Math.min(minimumTokenValue, currentTokenValue);
-                    maximumTokenValue = Math.max(maximumTokenValue, currentTokenValue);
+                    minimumKey = key.compareTo(minimumKey) < 0 ? key : minimumKey;
+                    maximumKey = key.compareTo(maximumKey) > 0 ? key : maximumKey;
                 }
             }
             return;
@@ -311,8 +305,9 @@ public class TrieMemoryIndex extends MemoryIndex
             return RangeIterator.empty();
         }
 
+        //TODO Can we find a better way of estimating this?
         lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));
-        return new KeyRangeIterator(cd.minimumTokenValue, cd.maximumTokenValue, cd.mergedKeys);
+        return new KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
     }
 
     private class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
@@ -324,7 +319,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             if (existing == null)
             {
-                existing = PrimaryKeys.create(clusteringComparator);
+                existing = new PrimaryKeys();
                 heapAllocations.add(existing.unsharedHeapSize());
             }
             heapAllocations.add(existing.add(neww));

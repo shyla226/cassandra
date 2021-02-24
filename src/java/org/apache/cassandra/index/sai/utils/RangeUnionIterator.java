@@ -19,10 +19,10 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -48,24 +48,21 @@ public class RangeUnionIterator extends RangeIterator
     // If the ranges are deferred then the ranges queue is not
     // necessarily in order so we need to maintain a separate queue
     // of candidate tokens until the ranges queue is ordered correctly
-    private final PriorityQueue<Token> candidates;
+    private final PriorityQueue<PrimaryKey> candidates;
 
-    private final Token.TokenMerger merger;
     private final List<RangeIterator> toRelease;
 
     private RangeUnionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
     {
         super(statistics);
         this.ranges = ranges;
-        // Don't use Comparator.comparing here, it auto-boxes the longs
-        this.candidates = new PriorityQueue<>(ranges.size(), (t1, t2) -> Long.compare(t1.getLong(), t2.getLong()));
-        this.merger = new Token.ReusableTokenMerger(ranges.size());
+        this.candidates = new PriorityQueue<>(ranges.size());
         this.toRelease = new ArrayList<>(ranges);
     }
 
-    public Token computeNext()
+    public PrimaryKey computeNext()
     {
-        Token candidate;
+        PrimaryKey candidate;
         List<RangeIterator> processedRanges = new ArrayList<>(ranges.size());
 
         // Only poll the ranges for a new candidate if the candidates queue is empty.
@@ -96,21 +93,18 @@ public class RangeUnionIterator extends RangeIterator
             // may have duplicates in the candidates queue so flush them out before continuing
             while (!candidates.isEmpty())
             {
-                if (candidate.get() < candidates.peek().get())
+                if (candidate.compareTo(candidates.peek()) < 0)
                     break;
                 candidates.poll();
             }
         }
 
-        merger.reset();
-        merger.add(candidate);
+        PrimaryKey minCurrent = ranges.stream().map(RangeIterator::getCurrent).min(Comparator.naturalOrder()).orElse(PrimaryKey.MAXIMUM);
 
-        long minCurrent = ranges.stream().mapToLong(RangeIterator::getCurrent).min().orElse(Long.MAX_VALUE);
-
-        if (candidate.get() < minCurrent)
+        if (candidate.compareTo(minCurrent) < 0)
         {
             ranges.addAll(processedRanges);
-            return merger.merge();
+            return candidate;
         }
 
         while (!ranges.isEmpty())
@@ -120,19 +114,12 @@ public class RangeUnionIterator extends RangeIterator
             if (!range.hasNext())
                 continue;
 
-            int cmp = Long.compare(candidate.get(), range.getCurrent());
+            int cmp = candidate.compareTo(range.getCurrent());
 
-            if (cmp == 0)
-            {
-                // If the next token is the same then consume and merge it
-                merger.add(range.next());
-            }
-            else if (cmp > 0)
+            if (cmp > 0)
             {
                 candidates.add(candidate);
                 candidate = range.next();
-                merger.reset();
-                merger.add(candidate);
             }
             else
             {
@@ -143,28 +130,28 @@ public class RangeUnionIterator extends RangeIterator
         }
 
         ranges.addAll(processedRanges);
-        return merger.merge();
+        return candidate;
     }
 
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
         while (!candidates.isEmpty())
         {
-            Token candidate = candidates.peek();
-            if (candidate.get() >= nextToken)
+            PrimaryKey candidate = candidates.peek();
+            if (candidate.compareTo(nextKey) >= 0)
                 break;
             candidates.poll();
         }
         while (!ranges.isEmpty())
         {
-            if (ranges.peek().getCurrent().compareTo(nextToken) >= 0)
+            if (ranges.peek().getCurrent().compareTo(nextKey) >= 0)
                 break;
 
             RangeIterator head = ranges.poll();
 
-            if (head.getMaximum().compareTo(nextToken) >= 0)
+            if (head.getMaximum().compareTo(nextKey) >= 0)
             {
-                head.skipTo(nextToken);
+                head.skipTo(nextKey);
                 if (head.hasNext())
                 {
                     ranges.add(head);
