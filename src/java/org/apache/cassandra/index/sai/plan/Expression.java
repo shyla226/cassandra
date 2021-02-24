@@ -1,8 +1,3 @@
-/*
- * All changes to the original code are Copyright DataStax, Inc.
- *
- * Please see the included license file for details.
- */
 
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
