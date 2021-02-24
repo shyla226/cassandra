@@ -18,10 +18,13 @@
 package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
+import java.io.InputStream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
+import com.google.common.hash.BloomFilter;
+import com.google.common.primitives.UnsignedBytes;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
@@ -37,6 +40,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
+import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.index.sai.disk.OnDiskKeyProducer.NO_OFFSET;
 
@@ -54,13 +58,15 @@ public class SSTableContext extends SharedCloseableImpl
     // mapping from sstable row id to token or offset
     public final LongArray.Factory tokenReaderFactory, offsetReaderFactory;
     public final KeyFetcher keyFetcher;
+    public final BloomFilter tokenBloom;
 
     private SSTableContext(SSTableReader sstable,
                            LongArray.Factory tokenReaderFactory,
                            LongArray.Factory offsetReaderFactory,
                            KeyFetcher keyFetcher,
                            Cleanup cleanup,
-                           IndexComponents groupComponents)
+                           IndexComponents groupComponents,
+                           BloomFilter tokenBloom)
     {
         super(cleanup);
         this.sstable = sstable;
@@ -68,6 +74,7 @@ public class SSTableContext extends SharedCloseableImpl
         this.offsetReaderFactory = offsetReaderFactory;
         this.keyFetcher = keyFetcher;
         this.groupComponents = groupComponents;
+        this.tokenBloom = tokenBloom;
     }
 
     private SSTableContext(SSTableContext copy)
@@ -78,6 +85,7 @@ public class SSTableContext extends SharedCloseableImpl
         this.offsetReaderFactory = copy.offsetReaderFactory;
         this.groupComponents = copy.groupComponents;
         this.keyFetcher = copy.keyFetcher;
+        this.tokenBloom = copy.tokenBloom;
     }
 
     public static SSTableContext create(SSTableReader sstable)
@@ -85,7 +93,7 @@ public class SSTableContext extends SharedCloseableImpl
         IndexComponents groupComponents = IndexComponents.perSSTable(sstable);
 
         Ref<SSTableReader> sstableRef = null;
-        FileHandle token = null, offset = null;
+        FileHandle token = null, offset = null, tokenBloomHandle = null;
         LongArray.Factory tokenReaderFactory, offsetReaderFactory;
         KeyFetcher keyFetcher;
         try
@@ -99,6 +107,31 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
+            tokenBloomHandle = groupComponents.createFileHandle(IndexComponents.TOKEN_BLOOM);
+
+            IndexInput tokenBloomInput = groupComponents.openInput(tokenBloomHandle);
+
+            System.out.println("bloomFileSizeIn = "+tokenBloomInput.length());
+
+            final BloomFilter bloomFilter;
+
+            final int size = tokenBloomInput.readInt();
+
+            //if (tokenBloomInput.length() == 1)
+
+            System.out.println("tokenBloomSize=" + size);
+
+            final BloomFilter<Long> tokenBloom = BloomFilter.readFrom(new InputStream()
+            {
+                @Override
+                public int read() throws IOException
+                {
+                    return UnsignedBytes.toInt(tokenBloomInput.readByte());
+                }
+            }, (obj, sink) -> sink.putLong(obj.longValue()));
+
+            tokenBloomInput.close();
+
             token = groupComponents.createFileHandle(IndexComponents.TOKEN_VALUES);
             offset  = groupComponents.createFileHandle(IndexComponents.OFFSETS_VALUES);
 
@@ -106,9 +139,9 @@ public class SSTableContext extends SharedCloseableImpl
             offsetReaderFactory = new MonotonicBlockPackedReader(offset, IndexComponents.OFFSETS_VALUES, groupComponents, source);
             keyFetcher = new DecoratedKeyFetcher(sstable);
 
-            Cleanup cleanup = new Cleanup(token, offset, sstableRef);
+            Cleanup cleanup = new Cleanup(token, offset, tokenBloomHandle, sstableRef);
 
-            return new SSTableContext(sstable, tokenReaderFactory, offsetReaderFactory, keyFetcher, cleanup, groupComponents);
+            return new SSTableContext(sstable, tokenReaderFactory, offsetReaderFactory, keyFetcher, cleanup, groupComponents, tokenBloom);
         }
         catch (Throwable t)
         {
@@ -126,8 +159,8 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public static int openFilesPerSSTable()
     {
-        // token and offset
-        return 2;
+        // token, offset, and token bloom filter
+        return 3;
     }
 
     @Override
@@ -138,13 +171,14 @@ public class SSTableContext extends SharedCloseableImpl
 
     private static class Cleanup implements RefCounted.Tidy
     {
-        private final FileHandle token, offset;
+        private final FileHandle token, offset, tokenBloomHandle;
         private final Ref<SSTableReader> sstableRef;
 
-        private Cleanup(FileHandle token, FileHandle offset, Ref<SSTableReader> sstableRef)
+        private Cleanup(FileHandle token, FileHandle offset, FileHandle tokenBloomHandle, Ref<SSTableReader> sstableRef)
         {
             this.token = token;
             this.offset = offset;
+            this.tokenBloomHandle = tokenBloomHandle;
             this.sstableRef = sstableRef;
         }
 
@@ -152,7 +186,7 @@ public class SSTableContext extends SharedCloseableImpl
         public void tidy()
         {
             Throwable t = sstableRef.ensureReleased(null);
-            t = Throwables.close(t, token, offset);
+            t = Throwables.close(t, token, offset, tokenBloomHandle);
 
             Throwables.maybeFail(t);
         }

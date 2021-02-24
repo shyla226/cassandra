@@ -22,6 +22,7 @@ import java.io.IOException;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
+import com.google.common.hash.BloomFilter;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -146,9 +147,9 @@ public class Segment implements Closeable
      * @param defer create the iterator in a deferred state
      * @return range iterator that matches given expression
      */
-    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer)
+    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer, BloomFilter bloomFilter)
     {
-        return index.search(expression, context, defer);
+        return index.search(expression, context, defer, bloomFilter);
     }
 
     public AbstractType<?> getColumnType()

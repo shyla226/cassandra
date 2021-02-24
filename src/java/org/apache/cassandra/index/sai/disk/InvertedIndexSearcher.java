@@ -29,6 +29,7 @@ import java.lang.invoke.MethodHandles;
 import java.util.Map;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.hash.BloomFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,7 +82,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @Override
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer)
+    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer, BloomFilter bloomFilter)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
@@ -94,7 +95,7 @@ public class InvertedIndexSearcher extends IndexSearcher
 
         PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> reader.exactMatch(term, listener, context.queryContext))
                                         : reader.exactMatch(term, listener, context.queryContext);
-        return toIterator(postingList, context, defer);
+        return toIterator(postingList, context, defer, bloomFilter);
     }
 
     public static int openPerIndexFiles()

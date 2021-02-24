@@ -140,7 +140,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         @Override
         public void onPostingDecoded()
         {
-            postingDecodes.mark();
+//            postingDecodes.mark();
         }
     }
 }

@@ -38,7 +38,7 @@ import org.apache.cassandra.io.util.FileUtils;
 public class RangeConcatIterator extends RangeIterator
 {
     private final PriorityQueue<RangeIterator> ranges;
-    private final List<RangeIterator> toRelease;
+    final List<RangeIterator> toRelease;
 
     protected RangeConcatIterator(RangeIterator.Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
     {

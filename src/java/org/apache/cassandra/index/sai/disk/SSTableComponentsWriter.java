@@ -18,8 +18,11 @@
 package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Arrays;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.hash.BloomFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +34,10 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericValuesWriter;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.packed.PackedInts;
+import org.apache.lucene.util.packed.PackedLongValues;
 
 /**
  * Writes all SSTable-attached index token and offset structures.
@@ -50,6 +56,8 @@ public class SSTableComponentsWriter
     private DecoratedKey currentKey;
 
     private long currentKeyPartitionOffset;
+
+    final PackedLongValues.Builder tokens = PackedLongValues.deltaPackedBuilder(PackedInts.COMPACT);
 
     public SSTableComponentsWriter(Descriptor descriptor, CompressionParams compressionParams) throws IOException
     {
@@ -101,10 +109,42 @@ public class SSTableComponentsWriter
     {
         tokenWriter.add(tokenValue);
         offsetWriter.add(keyOffset);
+        tokens.add(tokenValue);
     }
 
     public void complete() throws IOException
     {
+        //assert tokens.size() > 0;
+        PackedLongValues tokenValues = tokens.build();
+
+        BloomFilter<Long> bloomFilter = BloomFilter.create((token, sink) ->
+                                                           sink.putLong(token.longValue()), (int) tokens.size(), 0.01);
+
+        //        BloomFilterWriter tokenBloomWriter = new BloomFilterWriter((int) tokens.size(), 0.01);
+        //        //for (long token : tokenValues)
+        for (int x = 0; x < (int) tokens.size(); x++)
+        {
+            long token = tokenValues.get(x);
+            bloomFilter.put(token);
+            //            tokenBloomWriter.addHash(token); // the token is a hash(?) so add it as is, with no additional hashing
+        }
+
+        final IndexOutput tokenBloomOutput = indexComponents.createOutput(IndexComponents.TOKEN_BLOOM);
+        tokenBloomOutput.writeInt((int) tokens.size());
+        bloomFilter.writeTo(new OutputStream()
+        {
+            @Override
+            public void write(int b) throws IOException
+            {
+                tokenBloomOutput.writeByte((byte) b);
+            }
+        });
+        //        tokenBloomWriter.write(tokenBloomOutput);
+        IOUtils.close(tokenBloomOutput);
+
+        long bloomFileSize = indexComponents.sizeOf(Arrays.asList(IndexComponents.TOKEN_BLOOM));
+        System.out.println("bloomFileSizeOut = "+bloomFileSize);
+
         IOUtils.close(tokenWriter, offsetWriter, metadataWriter);
         indexComponents.createGroupCompletionMarker();
     }

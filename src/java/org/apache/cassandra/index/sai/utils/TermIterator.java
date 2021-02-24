@@ -30,6 +30,8 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.Token;
+import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
+import org.apache.cassandra.index.sai.memory.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
@@ -42,10 +44,66 @@ public class TermIterator extends RangeIterator
 
     private final RangeIterator union;
     private final Set<SSTableIndex> referencedIndexes;
+    final List<PostingListRangeIterator> postingRangeIterators = new ArrayList();
+    final List<KeyRangeIterator> memtableRangeIterators = new ArrayList();
 
     private TermIterator(RangeIterator union, Set<SSTableIndex> referencedIndexes, QueryContext queryContext)
     {
         super(union.getMinimum(), union.getMaximum(), union.getCount());
+
+        if (union instanceof RangeUnionIterator)
+        {
+            RangeUnionIterator union2 = (RangeUnionIterator)union;
+            for (RangeIterator it : union2.toRelease)
+            {
+                if (it instanceof PostingListRangeIterator)
+                {
+                    postingRangeIterators.add((PostingListRangeIterator) it);
+                }
+                else if (it instanceof KeyRangeIterator)
+                {
+                    memtableRangeIterators.add((KeyRangeIterator)it);
+                }
+                else if (it instanceof RangeConcatIterator)
+                {
+                    RangeConcatIterator memtableConcat = (RangeConcatIterator)it;
+                    for (RangeIterator it2 : memtableConcat.toRelease)
+                    {
+                        KeyRangeIterator keyRangeIterator = (KeyRangeIterator)it2;
+                        memtableRangeIterators.add(keyRangeIterator);
+                    }
+                }
+                else
+                {
+                    throw new IllegalStateException("range iterator="+it);
+                }
+            }
+        }
+        else if (union instanceof PostingListRangeIterator)
+        {
+            postingRangeIterators.add((PostingListRangeIterator)union);
+        }
+        else if (union instanceof KeyRangeIterator)
+        {
+            memtableRangeIterators.add((KeyRangeIterator)union);
+        }
+        else if (union instanceof RangeConcatIterator)
+        {
+            RangeConcatIterator concat = (RangeConcatIterator)union;
+            for (RangeIterator it2 : concat.toRelease)
+            {
+                KeyRangeIterator keyRangeIterator = (KeyRangeIterator)it2;
+                memtableRangeIterators.add(keyRangeIterator);
+            }
+        }
+        else if (union instanceof Builder.EmptyRangeIterator)
+        {
+            // do nothing
+        }
+        else
+        {
+            throw new IllegalStateException("range iterator="+union);
+        }
 
         this.union = union;
         this.referencedIndexes = referencedIndexes;
@@ -53,13 +111,17 @@ public class TermIterator extends RangeIterator
     }
 
     @SuppressWarnings("resource")
-    public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer)
+    public static TermIterator build(final Expression expression,
+                                     Set<SSTableIndex> perSSTableIndexes,
+                                     AbstractBounds<PartitionPosition> keyRange,
+                                     QueryContext queryContext,
+                                     boolean defer)
     {
-        final List<RangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());;
+        final List<RangeIterator> rangeIterators = new ArrayList<>(1 + perSSTableIndexes.size());;
 
-        RangeIterator memtableIterator = e.context.searchMemtable(e, keyRange);
+        RangeIterator memtableIterator = expression.context.searchMemtable(expression, keyRange);
         if (memtableIterator != null)
-            tokens.add(memtableIterator);
+            rangeIterators.add(memtableIterator);
 
         for (final SSTableIndex index : perSSTableIndexes)
         {
@@ -70,12 +132,12 @@ public class TermIterator extends RangeIterator
                 assert !index.isReleased();
 
                 SSTableQueryContext context = queryContext.getSSTableQueryContext(index.getSSTable());
-                RangeIterator keyIterator = index.search(e, keyRange, context, defer);
+                PostingListRangeIterator keyIterator = index.search(expression, keyRange, context, defer, index.getSSTableContext().tokenBloom);
 
                 if (keyIterator == null)
                     continue;
 
-                tokens.add(keyIterator);
+                rangeIterators.add(keyIterator);
             }
             catch (Throwable e1)
             {
@@ -86,7 +148,7 @@ public class TermIterator extends RangeIterator
             }
         }
 
-        RangeIterator ranges = RangeUnionIterator.build(tokens);
+        RangeIterator ranges = RangeUnionIterator.build(rangeIterators);
         return new TermIterator(ranges, perSSTableIndexes, queryContext);
     }
 
@@ -104,6 +166,8 @@ public class TermIterator extends RangeIterator
 
     protected void performSkipTo(Long nextToken)
     {
+        // TODO: maybe throw unsupported operation as the BloomRangeIntersectionIterator does the skipping
+        //       directly on the underlying sstable range iterators
         try
         {
             union.skipTo(nextToken);

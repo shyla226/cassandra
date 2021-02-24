@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.BloomFilterAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,6 +76,9 @@ public class PostingListRangeIterator extends RangeIterator
     private boolean needsSkipping = false;
     private long skipToToken = Long.MIN_VALUE;
 
+    final BloomFilter bloomFilter;
+    final BloomFilterAccessor bloomFilterAccessor;
+
 
     /**
      * Create a direct PostingListRangeIterator where the underlying PostingList is materialised
@@ -81,7 +86,8 @@ public class PostingListRangeIterator extends RangeIterator
      */
     public PostingListRangeIterator(IndexSearcher.SearcherContext context,
                                     SSTableContext.KeyFetcher keyFetcher,
-                                    IndexComponents components)
+                                    IndexComponents components,
+                                    BloomFilter bloomFilter)
     {
         super(context.minToken(), context.maxToken(), context.count());
 
@@ -92,6 +98,27 @@ public class PostingListRangeIterator extends RangeIterator
         this.context = context;
         this.queryContext = context.context;
         this.components = components;
+        this.bloomFilter = bloomFilter;
+        this.bloomFilterAccessor = new BloomFilterAccessor(bloomFilter);
+    }
+
+    @Override
+    public boolean maybeContains(Object token)
+    {
+        if (token instanceof long[])
+        {
+            return bloomFilterAccessor.mightContain(
+            ((long[]) token)[0],
+            ((long[]) token)[1]);
+        }
+        else if (token instanceof Long)
+        {
+            return bloomFilter.mightContain(token);
+        }
+        else
+        {
+            throw new IllegalStateException();
+        }
     }
 
     @Override

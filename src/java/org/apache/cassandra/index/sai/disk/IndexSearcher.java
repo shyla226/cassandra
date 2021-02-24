@@ -21,6 +21,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import com.google.common.hash.BloomFilter;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -101,20 +103,20 @@ public abstract class IndexSearcher implements Closeable
      *
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract RangeIterator search(Expression expression, SSTableQueryContext queryContext, boolean defer);
+    public abstract RangeIterator search(Expression expression, SSTableQueryContext queryContext, boolean defer, BloomFilter bloomFilter);
 
-    RangeIterator toIterator(PostingList postingList, SSTableQueryContext queryContext, boolean defer)
+    RangeIterator toIterator(PostingList postingList, SSTableQueryContext queryContext, boolean defer, BloomFilter bloomFilter)
     {
         if (postingList == null)
-            return RangeIterator.empty();
+            return null;
 
         SearcherContext searcherContext = defer ? new DeferredSearcherContext(queryContext, postingList.peekable())
                                                 : new DirectSearcherContext(queryContext, postingList.peekable());
 
         if (searcherContext.noOverlap)
-            return RangeIterator.empty();
+            return null;
 
-        RangeIterator iterator = new PostingListRangeIterator(searcherContext, keyFetcher, indexComponents);
+        RangeIterator iterator = new PostingListRangeIterator(searcherContext, keyFetcher, indexComponents, bloomFilter);
 
         return iterator;
     }

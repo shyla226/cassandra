@@ -40,6 +40,7 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
     private final Long min, max;
     private final long count;
     private Long current;
+    public int performSkipToCount = 0;
 
     protected RangeIterator(Builder.Statistics statistics)
     {
@@ -116,6 +117,11 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
     }
 
     protected abstract void performSkipTo(Long nextToken);
+
+    public boolean maybeContains(Object token)
+    {
+        return true;
+    }
 
     protected Token recomputeNext()
     {

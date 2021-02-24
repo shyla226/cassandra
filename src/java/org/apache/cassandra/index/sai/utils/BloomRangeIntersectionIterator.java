@@ -1,19 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Please see the included license file for details.
  */
 package org.apache.cassandra.index.sai.utils;
 
@@ -21,15 +9,19 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.hash.BloomFilterAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.Token;
+import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
+import org.apache.cassandra.index.sai.memory.KeyRangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -40,7 +32,7 @@ import org.apache.cassandra.tracing.Tracing;
  * 3. make sure iterators are closed when intersection ends because of lazy key fetching
  */
 @SuppressWarnings("resource")
-public class RangeIntersectionIterator
+public class BloomRangeIntersectionIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -133,7 +125,7 @@ public class RangeIntersectionIterator
             if (ranges.size() == 1)
                 return ranges.poll();
 
-            return new BloomRangeIntersectionIterator.LookupIntersectionIterator(statistics, ranges);
+            return new LookupIntersectionIterator(statistics, ranges);
         }
     }
 
@@ -145,14 +137,14 @@ public class RangeIntersectionIterator
      * to "bounce" merge because "bounce" distance is never going to be big.
      */
     @VisibleForTesting
-    protected static class LookupIntersectionIterator extends RangeIterator
+    public static class LookupIntersectionIterator extends RangeIterator
     {
         private final RangeIterator smallestIterator;
         private final List<RangeIterator> toRelease;
         private final PriorityQueue<RangeIterator> ranges;
         private final Token.TokenMerger merger;
 
-        private LookupIntersectionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
+        public LookupIntersectionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
         {
             super(statistics);
 
@@ -173,8 +165,12 @@ public class RangeIntersectionIterator
         {
             while (smallestIterator.hasNext())
             {
+                // TODO: 'Token candidate' needs to have the sstable ids in an array of the matches
+                //       with a parallel array of row ids
                 final Token candidate = smallestIterator.next();
                 final Long token = candidate.get();
+
+                final long[] tokenHashes = BloomFilterAccessor.getHash(token, (obj, sink) -> sink.putLong(obj.longValue()));
 
                 merger.reset();
 
@@ -190,18 +186,75 @@ public class RangeIntersectionIterator
                     if (!isOverlapping(smallestIterator, range))
                         return endOfData();
 
-                    final Token point = range.skipTo(token);
-
-                    if (point == null) // one of the iterators is exhausted
+                    final TermIterator termIterator = (TermIterator)range;
+                    Token skipToToken = null;
+                    if (termIterator.postingRangeIterators.size() == 0
+                        && termIterator.memtableRangeIterators.size() == 0)
+                    {
+                        // this termIterator is exhausted therefore the intersection is finished
                         return endOfData();
+                    }
 
-                    if (!point.get().equals(token))
+                    final Iterator<KeyRangeIterator> memIterator = termIterator.memtableRangeIterators.iterator();
+                    while (memIterator.hasNext())
+                    {
+                        final KeyRangeIterator memtableRangeIterator = memIterator.next();
+
+                        // TDOO: a bloom filter may be added to the memtable index
+
+                        final Token token2 = memtableRangeIterator.skipTo(token);
+                        if (token2 == null)
+                        {
+                            // iterator is exhausted, remove it from the list
+                            memIterator.remove();
+                        }
+                        else if (token2.get().equals(token))
+                        {
+                            skipToToken = token2;
+                            // once a match is found in any sstable return
+                            // as the read command loads from all sstables later
+                            break;
+                        }
+                    }
+
+                    // the memtable index does not have the token
+                    // try the sstables
+                    if (skipToToken == null)
+                    {
+                        final Iterator<PostingListRangeIterator> iterator = termIterator.postingRangeIterators.iterator();
+                        while (iterator.hasNext())
+                        {
+                            final PostingListRangeIterator sstableRangeIterator = iterator.next();
+
+                            // TODO: get the sstable id from the posting list range iterator
+                            //       use the token candidate sstable parallel row id array
+                            //       compare directly by row id
+                            if (sstableRangeIterator.maybeContains(tokenHashes))
+                            {
+                                final Token token2 = range.skipTo(token);
+                                if (token2 == null)
+                                {
+                                    // iterator is exhausted, remove it from the list
+                                    iterator.remove();
+                                }
+                                else if (token2.get().equals(token))
+                                {
+                                    skipToToken = token2;
+                                    // once a match is found in any sstable return
+                                    // as the read command loads from all sstables later
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (skipToToken == null)
                     {
                         intersectsAll = false;
                         break;
                     }
 
-                    merger.add(point);
+                    merger.add(skipToToken);
                 }
 
                 if (intersectsAll)

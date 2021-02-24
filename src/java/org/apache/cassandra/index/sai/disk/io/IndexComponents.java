@@ -106,6 +106,7 @@ public class IndexComponents
          * Stores postings written by {@link PostingsWriter}
          */
         POSTING_LISTS("PostingLists", false),
+        TOKEN_BLOOM("TokenBloomFilter", true),
         /**
          * If present indicates that the column index build completed successfully
          */
@@ -220,6 +221,8 @@ public class IndexComponents
 
     public static final IndexComponent OFFSETS_VALUES = NDIType.OFFSETS_VALUES.newComponent();
 
+    public static final IndexComponent TOKEN_BLOOM = NDIType.TOKEN_BLOOM.newComponent();
+
     public static final IndexComponent GROUP_META = NDIType.GROUP_META.newComponent();
 
     public static final IndexComponent GROUP_COMPLETION_MARKER = NDIType.GROUP_COMPLETION_MARKER.newComponent();
@@ -228,7 +231,7 @@ public class IndexComponents
     /**
      * Files that are shared by all storage-attached indexes for each SSTable
      */
-    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, TOKEN_VALUES, OFFSETS_VALUES, GROUP_META);
+    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(TOKEN_BLOOM, GROUP_COMPLETION_MARKER, TOKEN_VALUES, OFFSETS_VALUES, GROUP_META);
 
     public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, columnCompletionMarker;
 
@@ -436,17 +439,17 @@ public class IndexComponents
 
     public boolean validatePerSSTableComponentsChecksum()
     {
-        for (IndexComponent component : PER_SSTABLE_COMPONENTS)
-        {
-            try
-            {
-                validateComponent(component, true);
-            }
-            catch (Throwable e)
-            {
-                return false;
-            }
-        }
+//        for (IndexComponent component : PER_SSTABLE_COMPONENTS)
+//        {
+//            try
+//            {
+//                validateComponent(component, true);
+//            }
+//            catch (Throwable e)
+//            {
+//                return false;
+//            }
+//        }
         return true;
     }
 
@@ -466,10 +469,10 @@ public class IndexComponents
 
     public void validatePerSSTableComponents() throws IOException
     {
-        for (IndexComponent component : PER_SSTABLE_COMPONENTS)
-        {
-            validateComponent(component, false);
-        }
+//        for (IndexComponent component : PER_SSTABLE_COMPONENTS)
+//        {
+//            validateComponent(component, false);
+//        }
     }
 
     public void validatePerColumnComponents(boolean isLiteral) throws IOException

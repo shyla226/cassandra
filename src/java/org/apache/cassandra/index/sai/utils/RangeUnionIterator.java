@@ -45,18 +45,21 @@ public class RangeUnionIterator extends RangeIterator
     // Due to lazy key fetching, we cannot close iterator immediately
     private final PriorityQueue<RangeIterator> ranges;
 
+    private final List<RangeIterator> processedRanges;
+
     // If the ranges are deferred then the ranges queue is not
     // necessarily in order so we need to maintain a separate queue
     // of candidate tokens until the ranges queue is ordered correctly
     private final PriorityQueue<Token> candidates;
 
     private final Token.TokenMerger merger;
-    private final List<RangeIterator> toRelease;
+    public final List<RangeIterator> toRelease;
 
-    private RangeUnionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
+    protected RangeUnionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
     {
         super(statistics);
         this.ranges = ranges;
+        this.processedRanges = new ArrayList<>(ranges.size());
         // Don't use Comparator.comparing here, it auto-boxes the longs
         this.candidates = new PriorityQueue<>(ranges.size(), (t1, t2) -> Long.compare(t1.getLong(), t2.getLong()));
         this.merger = new Token.ReusableTokenMerger(ranges.size());
@@ -66,7 +69,7 @@ public class RangeUnionIterator extends RangeIterator
     public Token computeNext()
     {
         Token candidate;
-        List<RangeIterator> processedRanges = new ArrayList<>(ranges.size());
+        processedRanges.clear();
 
         // Only poll the ranges for a new candidate if the candidates queue is empty.
         // Otherwise, always start with a candidate from the candidates queue until
@@ -174,11 +177,12 @@ public class RangeUnionIterator extends RangeIterator
         }
     }
 
+    @Override
     public void close() throws IOException
     {
         // Due to lazy key fetching, we cannot close iterator immediately
         toRelease.forEach(FileUtils::closeQuietly);
-        ranges.forEach(FileUtils::closeQuietly);
+//        ranges.forEach(FileUtils::closeQuietly);
     }
 
     public static Builder builder()

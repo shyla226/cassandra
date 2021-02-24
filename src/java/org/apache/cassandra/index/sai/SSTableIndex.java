@@ -29,12 +29,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
+import com.google.common.hash.BloomFilter;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.Segment;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -193,19 +195,25 @@ public class SSTableIndex
         return maxKey;
     }
 
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context, boolean defer)
+    public PostingListRangeIterator search(Expression expression,
+                                           AbstractBounds<PartitionPosition> keyRange,
+                                           SSTableQueryContext context,
+                                           boolean defer,
+                                           BloomFilter bloomFilter)
     {
-        RangeConcatIterator.Builder builder = RangeConcatIterator.builder();
+        assert segments.size() == 1 : "segments.size=" + segments.size();
 
-        for (Segment segment : segments)
+        final Segment segment = segments.get(0);
+
+        if (segment.intersects(keyRange))
         {
-            if (segment.intersects(keyRange))
-            {
-                builder.add(segment.search(expression, context, defer));
-            }
+            final PostingListRangeIterator rangeIterator = (PostingListRangeIterator)segment.search(expression, context, defer, bloomFilter);
+            return rangeIterator;
         }
-
-        return builder.build();
+        else
+        {
+            return null;
+        }
     }
 
     public int getSegmentSize()
