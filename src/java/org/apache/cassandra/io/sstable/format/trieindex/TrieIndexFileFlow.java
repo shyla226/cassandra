@@ -130,18 +130,15 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
 
     /**
      * Perform late initialization, that is initialization that is deferred until the first item is requested,
-     * so that we don't leak resources if the flow is never subscribed to. This can be called multiple times
-     * in case of {@link Rebufferer.NotInCacheException}s.
+     * so that we don't leak resources if the flow is never subscribed to.
      */
     private void lateInitialization()
     {
-        Rebufferer.ReaderConstraint rc = Rebufferer.ReaderConstraint.ASYNC;
-
         if (rowIndexFileReader == null)
-            rowIndexFileReader = rowIndexFile.createReader(rc);
+            rowIndexFileReader = rowIndexFile.createReader();
 
         if (posIterator == null)
-            posIterator = new PartitionIndex.IndexPosIterator(partitionIndex, left, right, rc, FileAccessType.RANDOM); // can throw NotInCacheException
+            posIterator = new PartitionIndex.IndexPosIterator(partitionIndex, left, right); // can throw NotInCacheException
     }
 
     private IndexFileEntry readFirst() throws IOException
@@ -178,10 +175,6 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
     /**
      * Returns the next index file entry by reading the position first, then reading either the
      * row index file or the data file depending on where the position points to.
-     *
-     * This method must be async-read-safe, {@link PartitionIndex.IndexPosIterator#nextIndexPos()} as well as
-     * reading from the row index or data files may all throw {@link Rebufferer.NotInCacheException}
-     * and we must be ready to re-enter this method in a consistent state.
      */
     private IndexFileEntry readEntry() throws IOException
     {

@@ -28,7 +28,6 @@ import org.apache.cassandra.io.tries.TrieSerializer;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.SizedInts;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -60,14 +59,14 @@ class RowIndexReader extends Walker<RowIndexReader>
         }
     }
 
-    public RowIndexReader(FileHandle file, long root, Rebufferer.ReaderConstraint rc)
+    public RowIndexReader(FileHandle file, long root)
     {
-        super(file.instantiateRebufferer(), root, rc);
+        super(file.instantiateRebufferer(), root);
     }
 
-    public RowIndexReader(FileHandle file, TrieIndexEntry entry, Rebufferer.ReaderConstraint rc)
+    public RowIndexReader(FileHandle file, TrieIndexEntry entry)
     {
-        this(file, entry.indexTrieRoot, rc);
+        this(file, entry.indexTrieRoot);
     }
 
     /**

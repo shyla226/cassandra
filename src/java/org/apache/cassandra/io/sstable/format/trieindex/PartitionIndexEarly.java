@@ -42,8 +42,8 @@ class PartitionIndexEarly extends PartitionIndex
     }
 
     @Override
-    protected Rebufferer instantiateRebufferer(FileAccessType fileAccessType)
+    protected Rebufferer instantiateRebufferer()
     {
-        return new TailOverridingRebufferer(super.instantiateRebufferer(fileAccessType), cutoff, tail);
+        return new TailOverridingRebufferer(super.instantiateRebufferer(), cutoff, tail);
     }
 }

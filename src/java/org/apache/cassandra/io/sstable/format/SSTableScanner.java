@@ -105,7 +105,7 @@ public class SSTableScanner implements ISSTableScanner
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader(FileAccessType.FULL_FILE);
+        this.dfile = sstable.openDataReader();
         this.sstable = sstable;
         this.columns = columns;
         this.dataRange = dataRange;

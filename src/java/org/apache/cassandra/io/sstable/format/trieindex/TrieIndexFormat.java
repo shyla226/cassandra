@@ -142,8 +142,7 @@ public class TrieIndexFormat implements SSTableFormat
                     return new PartitionIterator(index.sharedCopy(),
                                                  partitioner,
                                                  riFile.sharedCopy(),
-                                                 dFile.sharedCopy(),
-                                                 Rebufferer.ReaderConstraint.NONE)
+                                                 dFile.sharedCopy())
                             .closeHandles();
                 }
             }

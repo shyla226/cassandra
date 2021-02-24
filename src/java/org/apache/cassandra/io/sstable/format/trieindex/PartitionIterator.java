@@ -54,9 +54,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
      * See {@link TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
      */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile,
-                      PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight, Rebufferer.ReaderConstraint rc) throws IOException
+                      PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight) throws IOException
     {
-        super(partitionIndex, left, right, rc);
+        super(partitionIndex, left, right);
         this.partitionIndex = partitionIndex;
         this.partitioner = partitioner;
         this.limit = right;
@@ -78,14 +78,14 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
      * See {@link TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
      */
-    PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile, Rebufferer.ReaderConstraint rc) throws IOException
+    PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile) throws IOException
     {
-        this(partitionIndex, partitioner, rowIndexFile, dataFile, partitionIndex.firstKey(), -1, partitionIndex.lastKey(), 0, rc);
+        this(partitionIndex, partitioner, rowIndexFile, dataFile, partitionIndex.firstKey(), -1, partitionIndex.lastKey(), 0);
     }
 
-    private PartitionIterator(PartitionIndex partitionIndex, Rebufferer.ReaderConstraint rc)
+    private PartitionIterator(PartitionIndex partitionIndex)
     {
-        super(partitionIndex, partitionIndex.firstKey(), partitionIndex.firstKey(), rc);
+        super(partitionIndex, partitionIndex.firstKey(), partitionIndex.firstKey());
         this.partitionIndex = partitionIndex;
         this.partitioner = null;
         this.limit = partitionIndex.firstKey();
@@ -99,9 +99,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         this.nextKey = null;
     }
 
-    static PartitionIterator empty(PartitionIndex partitionIndex, Rebufferer.ReaderConstraint rc)
+    static PartitionIterator empty(PartitionIndex partitionIndex)
     {
-        return new PartitionIterator(partitionIndex, rc);
+        return new PartitionIterator(partitionIndex);
     }
 
     public PartitionIterator closeHandles()
@@ -185,7 +185,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     {
         FileDataInput in = indexInput;
         if (in == null)
-            in = indexInput = rowIndexFile.createReader(pos, rc);
+            in = indexInput = rowIndexFile.createReader(pos);
         else
             in.seek(pos);
         return in;
@@ -195,7 +195,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     {
         FileDataInput in = dataInput;
         if (in == null)
-            in = dataInput = dataFile.createReader(pos, rc);
+            in = dataInput = dataFile.createReader(pos);
         else
             in.seek(pos);
         return in;

@@ -33,7 +33,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
 
     ScrubIterator(PartitionIndex partitionIndex, FileHandle rowIndexFile) throws IOException
     {
-        super(partitionIndex, Rebufferer.ReaderConstraint.NONE);
+        super(partitionIndex);
         this.rowIndexFile = rowIndexFile.sharedCopy();
         advance();
     }
@@ -65,7 +65,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
         {
             if (pos >= 0)
             {
-                try (FileDataInput in = rowIndexFile.createReader(pos, Rebufferer.ReaderConstraint.NONE))
+                try (FileDataInput in = rowIndexFile.createReader(pos))
                 {
                     key = ByteBufferUtil.readWithShortLength(in);
                     dataPosition = TrieIndexEntry.deserialize(in, in.getSeekPosition()).position;

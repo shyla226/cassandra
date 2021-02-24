@@ -38,20 +38,17 @@ class ReverseIndexedReader extends ReverseReader
     long currentBlockStart;
     long currentBlockEnd;
     RowIndexReader.IndexInfo currentIndexInfo;
-    Rebufferer.ReaderConstraint rc;
 
     public ReverseIndexedReader(TrieIndexSSTableReader sstable,
                                 TrieIndexEntry indexEntry,
                                 Slices slices,
                                 FileDataInput file,
                                 boolean shouldCloseFile,
-                                SerializationHelper helper,
-                                Rebufferer.ReaderConstraint rc)
+                                SerializationHelper helper)
     {
         super(sstable, slices, file, shouldCloseFile, helper);
         basePosition = indexEntry.position;
         this.indexEntry = indexEntry;
-        this.rc = rc;
         this.rowIndexFile = sstable.rowIndexFile;
     }
 
@@ -86,8 +83,7 @@ class ReverseIndexedReader extends ReverseReader
             }
             indexReader = new RowIndexReverseIterator(rowIndexFile,
                                                       indexEntry,
-                                                      comparator.asByteComparable(end),
-                                                      rc);
+                                                      comparator.asByteComparable(end));
             sliceOpenMarker = null;
             currentIndexInfo = indexReader.nextIndexInfo(); // this shouldn't throw (constructor calculated it)
             if (currentIndexInfo == null)

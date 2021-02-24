@@ -36,12 +36,11 @@ class ForwardIndexedReader extends ForwardReader
                          Slices slices,
                          FileDataInput file,
                          boolean shouldCloseFile,
-                         SerializationHelper helper,
-                         Rebufferer.ReaderConstraint rc)
+                         SerializationHelper helper)
     {
         super(sstable, slices, file, shouldCloseFile, helper);
         basePosition = indexEntry.position;
-        indexReader = new RowIndexReader(sstable.rowIndexFile, indexEntry, rc);
+        indexReader = new RowIndexReader(sstable.rowIndexFile, indexEntry);
     }
 
     @Override
