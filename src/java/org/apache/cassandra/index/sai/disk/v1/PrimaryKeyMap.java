@@ -27,6 +27,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
 
 public interface PrimaryKeyMap extends Closeable
@@ -45,8 +46,7 @@ public interface PrimaryKeyMap extends Closeable
         private final BKDReader.IteratorState iterator;
         private final PrimaryKey.PrimaryKeyFactory keyFactory;
 
-        //TODO: Probably convert this to take TableMetadata
-        public DefaultPrimaryKeyMap(IndexComponents indexComponents, IPartitioner partitioner, ClusteringComparator clusteringComparator) throws IOException
+        public DefaultPrimaryKeyMap(IndexComponents indexComponents, TableMetadata tableMetadata) throws IOException
         {
             MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexComponents);
 
@@ -57,7 +57,7 @@ public interface PrimaryKeyMap extends Closeable
 
             this.iterator = reader.iteratorState();
 
-            this.keyFactory = PrimaryKey.factory(partitioner, clusteringComparator);
+            this.keyFactory = PrimaryKey.factory(tableMetadata);
         }
 
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)

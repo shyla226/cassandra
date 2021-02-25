@@ -102,7 +102,6 @@ public class TrieMemoryIndex extends MemoryIndex
             final long initialSizeOffHeap = data.sizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
-
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();

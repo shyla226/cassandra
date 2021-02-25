@@ -39,7 +39,7 @@ public class PrimaryKeyTest
         PrimaryKey.PrimaryKeyFactory keyFactory = PrimaryKey.factory(Murmur3Partitioner.instance, new ClusteringComparator());
         DecoratedKey decoratedKey = Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.decompose("A"));
         PrimaryKey expected = keyFactory.createKey(decoratedKey);
-        byte[] bytes = ByteSourceInverse.readBytes(expected.asComparableBytes(ByteComparable.Version.OSS41));
+        byte[] bytes = expected.asBytes();
 
         PrimaryKey result = keyFactory.createKey(bytes);
 
@@ -55,7 +55,7 @@ public class PrimaryKeyTest
 
         ByteComparable comparable = v -> expected.asComparableBytes(v);
 
-        PrimaryKey result = keyFactory.createKey(comparable);
+        PrimaryKey result = keyFactory.createKey(comparable, 1);
 
         assertTrue(expected.compareTo(result) == 0);
     }
@@ -74,7 +74,7 @@ public class PrimaryKeyTest
 
         ByteComparable comparable = v -> expected.asComparableBytes(v);
 
-        PrimaryKey result = keyFactory.createKey(comparable);
+        PrimaryKey result = keyFactory.createKey(comparable, 1);
 
         assertTrue(expected.compareTo(result) == 0);
     }

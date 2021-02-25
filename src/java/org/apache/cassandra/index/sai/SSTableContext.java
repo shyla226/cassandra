@@ -72,7 +72,7 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            primaryKeyMap = new PrimaryKeyMap.DefaultPrimaryKeyMap(groupComponents, sstable.metadata().partitioner, sstable.metadata().comparator);
+            primaryKeyMap = new PrimaryKeyMap.DefaultPrimaryKeyMap(groupComponents, sstable.metadata());
 
             Cleanup cleanup = new Cleanup(primaryKeyMap, sstableRef);
 

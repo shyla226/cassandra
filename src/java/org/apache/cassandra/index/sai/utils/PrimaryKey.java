@@ -21,6 +21,8 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -89,6 +91,27 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         public PrimaryKey createKey(ByteComparable comparable, long sstableRowId)
         {
             ByteSource.Peekable peekable = comparable.asPeekableBytes(ByteComparable.Version.OSS41);
+            return createKeyFromPeekable(peekable, sstableRowId);
+        }
+
+        public PrimaryKey createKey(byte[] bytes)
+        {
+            ByteSource.Peekable peekable = ByteSource.peekable(ByteSource.fixedLength(bytes));
+            return createKeyFromPeekable(peekable, -1);
+        }
+
+        public PrimaryKey createKey(DecoratedKey key)
+        {
+            return new PrimaryKey(key, Clustering.EMPTY, EMPTY_COMPARATOR);
+        }
+
+        public PrimaryKey createKey(Token token)
+        {
+            return new PrimaryKey(token);
+        }
+
+        private PrimaryKey createKeyFromPeekable(ByteSource.Peekable peekable, long sstableRowId)
+        {
             Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), ByteComparable.Version.OSS41);
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
             DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
@@ -112,70 +135,6 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
             return new PrimaryKey(key, clustering, comparator, sstableRowId);
         }
-
-        public PrimaryKey createKey(ByteComparable comparable)
-        {
-            ByteSource.Peekable peekable = comparable.asPeekableBytes(ByteComparable.Version.OSS41);
-            Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), ByteComparable.Version.OSS41);
-            byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
-            DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
-
-            if (comparator.size() == 0)
-                return new PrimaryKey(key, Clustering.EMPTY, comparator);
-
-            ByteBuffer[] values = new ByteBuffer[comparator.size()];
-
-            byte[] clusteringKeyBytes;
-            int index = 0;
-
-            while ((clusteringKeyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable))) != null)
-            {
-                values[index++] = ByteBuffer.wrap(clusteringKeyBytes);
-                if (peekable.peek() == ByteSource.TERMINATOR)
-                    break;
-            }
-
-            Clustering clustering = Clustering.make(values);
-
-            return new PrimaryKey(key, clustering, comparator);
-        }
-
-        public PrimaryKey createKey(byte[] bytes)
-        {
-            ByteSource.Peekable peekable = ByteSource.peekable(ByteSource.of(bytes, ByteComparable.Version.OSS41));
-            Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), ByteComparable.Version.OSS41);
-            byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
-            DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
-
-            if (comparator.size() == 0)
-                return new PrimaryKey(key, Clustering.EMPTY, comparator);
-
-            ByteBuffer[] values = new ByteBuffer[comparator.size()];
-
-            byte[] clusteringKeyBytes;
-            int index = 0;
-
-            while ((clusteringKeyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable))) != null)
-            {
-                values[index++] = ByteBuffer.wrap(clusteringKeyBytes);
-                if (peekable.peek() == ByteSource.TERMINATOR)
-                    break;
-            }
-
-            Clustering clustering = Clustering.make(values);
-
-            return new PrimaryKey(key, clustering, comparator);
-        }
-
-        public PrimaryKey createKey(DecoratedKey key)
-        {
-            return new PrimaryKey(key, Clustering.EMPTY, EMPTY_COMPARATOR);
-        }
-
-        public PrimaryKey createKey(Token token)
-        {
-            return new PrimaryKey(token);
-        }
     }
 
     public static PrimaryKeyFactory factory(TableMetadata tableMetadata)
@@ -183,6 +142,7 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         return new PrimaryKeyFactory(tableMetadata);
     }
 
+    @VisibleForTesting
     public static PrimaryKeyFactory factory(IPartitioner partitioner, ClusteringComparator comparator)
     {
         return new PrimaryKeyFactory(partitioner, comparator);
@@ -193,69 +153,14 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         return new PrimaryKeyFactory(Murmur3Partitioner.instance, EMPTY_COMPARATOR);
     }
 
-
-    private static PrimaryKey of(DecoratedKey partitionKey)
-    {
-        return PrimaryKey.of(partitionKey, Clustering.EMPTY, new ClusteringComparator());
-    }
-    /**
-     * Returns a new primary key composed by the specified partition and clustering keys.
-     *
-     * @param partitionKey a partition key
-     * @param clustering a clustering key
-     * @param clusteringComparator the clustering comparator for the table
-     * @return a new primary key composed by {@code partitionKey} and {@code ClusteringKey}
-     */
-    private static PrimaryKey of(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator clusteringComparator)
-    {
-        return new PrimaryKey(Kind.UNMAPPED, partitionKey, clustering, clusteringComparator, -1);
-    }
-
-    private static PrimaryKey of(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator clusteringComparator, long sstableRowId)
-    {
-        return new PrimaryKey(Kind.MAPPED, partitionKey, clustering, clusteringComparator, sstableRowId);
-    }
-
-    private static PrimaryKey of(ByteComparable comparable, IPartitioner partitioner, ClusteringComparator clusteringComparator, long sstableRowId)
-    {
-        ByteSource.Peekable peekable = comparable.asPeekableBytes(ByteComparable.Version.OSS41);
-        Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), ByteComparable.Version.OSS41);
-        byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
-        DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
-
-        if (clusteringComparator.size() == 0)
-            return PrimaryKey.of(key, Clustering.EMPTY, clusteringComparator, sstableRowId);
-
-        ByteBuffer[] values = new ByteBuffer[clusteringComparator.size()];
-
-        byte[] clusteringKeyBytes;
-        int index = 0;
-
-        while ((clusteringKeyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable))) != null)
-        {
-            values[index++] = ByteBuffer.wrap(clusteringKeyBytes);
-            if (peekable.peek() == ByteSource.TERMINATOR)
-                break;
-        }
-
-        Clustering clustering = Clustering.make(values);
-
-        return PrimaryKey.of(key, clustering, clusteringComparator, sstableRowId);
-    }
-
-    private static PrimaryKey of(Token token)
-    {
-        return new PrimaryKey(Kind.TOKEN, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, -1);
-    }
-
     private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator)
     {
-        this(Kind.UNMAPPED, partitionKey, clustering, comparator, -1);
+        this(partitionKey, clustering, comparator, -1);
     }
 
     private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId)
     {
-        this(Kind.MAPPED, partitionKey, clustering, comparator, sstableRowId);
+        this(sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId);
     }
 
     private PrimaryKey(Token token)
@@ -293,6 +198,7 @@ public class PrimaryKey implements Comparable<PrimaryKey>
     {
         ByteSource source = asComparableBytes(ByteComparable.Version.OSS41);
 
+        return ByteSourceInverse.readBytes(source);
     }
 
     public ByteSource asComparableBytes(ByteComparable.Version version)
@@ -326,7 +232,7 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
     public long sstableRowId()
     {
-        assert sstableRowId >= 0 && kind == Kind.MAPPED && kind != Kind.MARKER;
+        assert kind == Kind.MAPPED;
         return sstableRowId;
     }
 
