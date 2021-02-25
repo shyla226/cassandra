@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
@@ -146,7 +147,7 @@ public class Segment implements Closeable
      * @param defer create the iterator in a deferred state
      * @return range iterator that matches given expression
      */
-    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression expression, SSTableQueryContext context, boolean defer)
     {
         return index.search(expression, context, defer);
     }

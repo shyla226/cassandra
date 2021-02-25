@@ -67,10 +67,10 @@ public class SSTableIndex
     private final SSTableReader sstable;
     private final IndexComponents components;
 
-    private final ImmutableList<Segment> segments;
+    private final Segment segment;
     private PerIndexFiles indexFiles;
 
-    private final List<SegmentMetadata> metadatas;
+    private final SegmentMetadata metadata;
     private final DecoratedKey minKey, maxKey; // in token order
     private final ByteBuffer minTerm, maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
@@ -97,15 +97,12 @@ public class SSTableIndex
 
             final MetadataSource source = MetadataSource.loadColumnMetadata(components);
             version = source.getVersion();
-            metadatas = SegmentMetadata.load(source, null);
+            List<SegmentMetadata> metadatas = SegmentMetadata.load(source, null);
+            assert metadatas.size() == 1;
 
-            for (SegmentMetadata metadata : metadatas)
-            {
-                segmentsBuilder.add(new Segment(columnContext, sstableContext, indexFiles, metadata));
-            }
+            metadata = metadatas.get(0);
 
-            segments = segmentsBuilder.build();
-            assert !segments.isEmpty();
+            segment = new Segment(columnContext, sstableContext, indexFiles, metadata);
 
             this.minKey = metadatas.get(0).minKey;
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey;
@@ -138,7 +135,7 @@ public class SSTableIndex
 
     public long indexFileCacheSize()
     {
-        return segments.stream().mapToLong(Segment::indexFileCacheSize).sum();
+        return segment.indexFileCacheSize();
     }
 
     /**
@@ -193,29 +190,19 @@ public class SSTableIndex
         return maxKey;
     }
 
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context, boolean defer)
     {
-        RangeConcatIterator.Builder builder = RangeConcatIterator.builder();
-
-        for (Segment segment : segments)
-        {
-            if (segment.intersects(keyRange))
-            {
-                builder.add(segment.search(expression, context, defer));
-            }
-        }
-
-        return builder.build();
+        return segment.search(expression, context, defer);
     }
 
     public int getSegmentSize()
     {
-        return segments.size();
+        return 1;
     }
 
-    public List<SegmentMetadata> segments()
+    public SegmentMetadata segment()
     {
-        return metadatas;
+        return metadata;
     }
 
     public Version getVersion()
@@ -323,7 +310,7 @@ public class SSTableIndex
         if (n == 0)
         {
             FileUtils.closeQuietly(indexFiles);
-            FileUtils.closeQuietly(segments);
+            FileUtils.closeQuietly(segment);
             sstableContext.close();
 
             /*

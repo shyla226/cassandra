@@ -26,6 +26,8 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import com.google.common.base.MoreObjects;
@@ -81,7 +83,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @Override
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression exp, SSTableQueryContext context, boolean defer)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
@@ -92,10 +94,10 @@ public class InvertedIndexSearcher extends IndexSearcher
         final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
         QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
 
-        PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> reader.exactMatch(term, listener, context.queryContext))
-                                        : reader.exactMatch(term, listener, context.queryContext);
-        return toIterator(postingList, context, defer);
-    }
+        PostingList postingList = reader.exactMatch(term, listener, context.queryContext);
+
+        return toIterators(postingList == null ? Collections.EMPTY_LIST : Collections.singletonList(postingList.peekable()), context, defer);
+   }
 
     public static int openPerIndexFiles()
     {

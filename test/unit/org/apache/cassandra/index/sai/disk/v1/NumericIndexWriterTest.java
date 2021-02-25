@@ -92,26 +92,26 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         ))
         {
             final Counter visited = Counter.newCounter();
-            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
-            {
-                @Override
-                public boolean visit(byte[] packedValue)
-                {
-                    // we should read point values in reverse order after sorting
-                    assertEquals(1 + visited.get(), NumericUtils.sortableBytesToInt(packedValue, 0));
-                    visited.addAndGet(1);
-                    return true;
-                }
-
-                @Override
-                public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
-                {
-                    return PointValues.Relation.CELL_CROSSES_QUERY;
-                }
-            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
-            {
-                assertEquals(numRows, visited.get());
-            }
+//            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
+//            {
+//                @Override
+//                public boolean visit(byte[] packedValue)
+//                {
+//                    // we should read point values in reverse order after sorting
+//                    assertEquals(1 + visited.get(), NumericUtils.sortableBytesToInt(packedValue, 0));
+//                    visited.addAndGet(1);
+//                    return true;
+//                }
+//
+//                @Override
+//                public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
+//                {
+//                    return PointValues.Relation.CELL_CROSSES_QUERY;
+//                }
+//            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
+//            {
+//                assertEquals(numRows, visited.get());
+//            }
         }
     }
 
@@ -145,29 +145,29 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         ))
         {
             final Counter visited = Counter.newCounter();
-            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
-            {
-                @Override
-                public boolean visit(byte[] packedValue)
-                {
-                    final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
-                    final ByteComparable expectedTerm = ByteComparable.of(Math.toIntExact(visited.get()));
-                    assertEquals("Point value mismatch after visiting " + visited.get() + " entries.", 0,
-                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
-
-                    visited.addAndGet(1);
-                    return true;
-                }
-
-                @Override
-                public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
-                {
-                    return PointValues.Relation.CELL_CROSSES_QUERY;
-                }
-            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
-            {
-                assertEquals(maxSegmentRowId, visited.get());
-            }
+//            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
+//            {
+//                @Override
+//                public boolean visit(byte[] packedValue)
+//                {
+//                    final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
+//                    final ByteComparable expectedTerm = ByteComparable.of(Math.toIntExact(visited.get()));
+//                    assertEquals("Point value mismatch after visiting " + visited.get() + " entries.", 0,
+//                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+//
+//                    visited.addAndGet(1);
+//                    return true;
+//                }
+//
+//                @Override
+//                public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
+//                {
+//                    return PointValues.Relation.CELL_CROSSES_QUERY;
+//                }
+//            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
+//            {
+//                assertEquals(maxSegmentRowId, visited.get());
+//            }
         }
     }
 

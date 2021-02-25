@@ -20,8 +20,10 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.Closeable;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.TreeMap;
@@ -328,7 +330,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
     }
 
-    public PostingList intersect(IntersectVisitor visitor, QueryEventListener.BKDIndexEventListener listener, QueryContext context)
+    public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor, QueryEventListener.BKDIndexEventListener listener, QueryContext context)
     {
         Relation relation = visitor.compare(minPackedValue, maxPackedValue);
 
@@ -378,16 +380,16 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             this.context = context;
         }
 
-        public PostingList execute()
+        public List<PostingList.PeekablePostingList> execute()
         {
             try
             {
-                PriorityQueue<PostingList.PeekablePostingList> postingLists = new PriorityQueue<>(100, COMPARATOR);
+                List<PostingList.PeekablePostingList> postingLists = new ArrayList<>(100);
                 executeInternal(postingLists);
 
                 FileUtils.closeQuietly(bkdInput);
 
-                return mergePostings(postingLists);
+                return postingLists;
             }
             catch (Throwable t)
             {
@@ -399,7 +401,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
-        protected void executeInternal(final PriorityQueue<PostingList.PeekablePostingList> postingLists) throws IOException
+        protected void executeInternal(final List<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             collectPostingLists(postingLists);
         }
@@ -409,28 +411,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             FileUtils.closeQuietly(bkdInput, postingsInput, postingsSummaryInput);
         }
 
-        protected PostingList mergePostings(PriorityQueue<PostingList.PeekablePostingList> postingLists)
-        {
-            final long elapsedMicros = queryExecutionTimer.stop().elapsed(TimeUnit.MICROSECONDS);
-
-            listener.onIntersectionComplete(elapsedMicros, TimeUnit.MICROSECONDS);
-            listener.postingListsHit(postingLists.size());
-
-            if (postingLists.isEmpty())
-            {
-                FileUtils.closeQuietly(postingsInput, postingsSummaryInput);
-                return null;
-            }
-            else
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace(indexComponents.logMessage("[{}] Intersection completed in {} microseconds. {} leaf and internal posting lists hit."),
-                                 indexFile.path(), elapsedMicros, postingLists.size());
-                return MergePostingList.merge(postingLists, () -> FileUtils.close(postingsInput, postingsSummaryInput));
-            }
-        }
-
-        public void collectPostingLists(PriorityQueue<PostingList.PeekablePostingList> postingLists) throws IOException
+        public void collectPostingLists(List<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             context.checkpoint();
 
@@ -646,12 +627,12 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         @Override
-        public void executeInternal(final PriorityQueue<PostingList.PeekablePostingList> postingLists) throws IOException
+        public void executeInternal(final List<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             collectPostingLists(postingLists, minPackedValue, maxPackedValue);
         }
 
-        public void collectPostingLists(PriorityQueue<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
+        public void collectPostingLists(List<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
         {
             context.checkpoint();
 
@@ -680,7 +661,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             visitNode(postingLists, cellMinPacked, cellMaxPacked);
         }
 
-        void filterLeaf(PriorityQueue<PostingList.PeekablePostingList> postingLists) throws IOException
+        void filterLeaf(List<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             bkdInput.seek(index.getLeafBlockFP());
 
@@ -723,7 +704,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
-        void visitNode(PriorityQueue<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
+        void visitNode(List<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
         {
             int splitDim = index.getSplitDim();
             assert splitDim >= 0 : "splitDim=" + splitDim;

@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -101,22 +104,23 @@ public abstract class IndexSearcher implements Closeable
      *
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract RangeIterator search(Expression expression, SSTableQueryContext queryContext, boolean defer);
+    public abstract List<RangeIterator> search(Expression expression, SSTableQueryContext queryContext, boolean defer);
 
-    RangeIterator toIterator(PostingList postingList, SSTableQueryContext queryContext, boolean defer)
+    List<RangeIterator> toIterators(List<PostingList.PeekablePostingList> postingLists, SSTableQueryContext queryContext, boolean defer)
     {
-        if (postingList == null)
-            return RangeIterator.empty();
+        if ((postingLists == null) || postingLists.isEmpty())
+            return Collections.EMPTY_LIST;
 
-        SearcherContext searcherContext = defer ? new DeferredSearcherContext(queryContext, postingList.peekable())
-                                                : new DirectSearcherContext(queryContext, postingList.peekable());
+        List<RangeIterator> iterators = new ArrayList<>();
 
-        if (searcherContext.noOverlap)
-            return RangeIterator.empty();
+        for (PostingList.PeekablePostingList postingList : postingLists)
+        {
+            SearcherContext searcherContext = new DirectSearcherContext(queryContext, postingList);
+            if (!searcherContext.noOverlap)
+                iterators.add(new PostingListRangeIterator(searcherContext, keyFetcher, indexComponents));
+        }
 
-        RangeIterator iterator = new PostingListRangeIterator(searcherContext, keyFetcher, indexComponents);
-
-        return iterator;
+        return iterators;
     }
 
     public abstract class SearcherContext

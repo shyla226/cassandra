@@ -205,23 +205,23 @@ public class KDTreeSegmentMergerTest extends SAITester
 
             for (int term : expected.keySet())
             {
-                PostingList postingList = reader.intersect(buildQuery(term, term), NO_OP_BKD_LISTENER, new QueryContext());
-
-                while (true)
-                {
-                    long rowId = postingList.nextPosting();
-                    if (rowId == PostingList.END_OF_STREAM)
-                        break;
-                    List<Long> postings;
-                    if (actual.containsKey(term))
-                        postings = actual.get(term);
-                    else
-                    {
-                        postings = new ArrayList<>();
-                        actual.put(term, postings);
-                    }
-                    postings.add(rowId);
-                }
+//                PostingList postingList = reader.intersect(buildQuery(term, term), NO_OP_BKD_LISTENER, new QueryContext());
+//
+//                while (true)
+//                {
+//                    long rowId = postingList.nextPosting();
+//                    if (rowId == PostingList.END_OF_STREAM)
+//                        break;
+//                    List<Long> postings;
+//                    if (actual.containsKey(term))
+//                        postings = actual.get(term);
+//                    else
+//                    {
+//                        postings = new ArrayList<>();
+//                        actual.put(term, postings);
+//                    }
+//                    postings.add(rowId);
+//                }
             }
         }
     }
