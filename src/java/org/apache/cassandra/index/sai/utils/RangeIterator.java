@@ -67,7 +67,7 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
         return min;
     }
 
-    public final Long getCurrent()
+    public Long getCurrent()
     {
         return current;
     }

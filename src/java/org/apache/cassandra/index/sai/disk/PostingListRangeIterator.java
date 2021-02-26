@@ -58,6 +58,15 @@ public class PostingListRangeIterator extends RangeIterator
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
+
+    @Override
+    public Long getCurrent()
+    {
+        Long current = super.getCurrent();
+        trace("current = " + current);
+        return current;
+    }
+
     private final SSTableQueryContext queryContext;
     private final IndexComponents components;
 
@@ -194,7 +203,7 @@ public class PostingListRangeIterator extends RangeIterator
 
     private void trace(String message)
     {
-        logger.info(components.logMessage("[QUERY_TRACE][PostingListRangeIterator:" + components.descriptor.generation + "] " + message));
+        logger.info(components.logMessage("[QUERY_TRACE][PostingListRangeIterator:" + components.descriptor.generation + ":" + context.minToken + ":" + context.maxToken + "] " + message));
     }
 
     /**
