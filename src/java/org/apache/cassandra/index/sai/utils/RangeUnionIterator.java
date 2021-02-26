@@ -18,9 +18,13 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.PriorityQueue;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
@@ -42,6 +46,7 @@ import org.apache.cassandra.io.util.FileUtils;
 @SuppressWarnings("resource")
 public class RangeUnionIterator extends RangeIterator
 {
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     // Due to lazy key fetching, we cannot close iterator immediately
     private final PriorityQueue<RangeIterator> ranges;
     private final List<RangeIterator> processedRanges;
@@ -58,6 +63,7 @@ public class RangeUnionIterator extends RangeIterator
     private RangeUnionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
     {
         super(statistics);
+        trace("Creating with " + ranges.size() + " ranges");
         this.ranges = ranges;
         // Don't use Comparator.comparing here, it auto-boxes the longs
         this.candidates = new PriorityQueue<>(ranges.size(), (t1, t2) -> Long.compare(t1.getLong(), t2.getLong()));
@@ -68,6 +74,7 @@ public class RangeUnionIterator extends RangeIterator
 
     public Token computeNext()
     {
+        trace("computeNext");
         Token candidate;
         processedRanges.clear();
 
@@ -151,6 +158,7 @@ public class RangeUnionIterator extends RangeIterator
 
     protected void performSkipTo(Long nextToken)
     {
+        trace("performSkipTo");
         while (!candidates.isEmpty())
         {
             Token candidate = candidates.peek();
@@ -213,4 +221,10 @@ public class RangeUnionIterator extends RangeIterator
             }
         }
     }
+
+    private void trace(String message)
+    {
+        logger.info("[QUERY_TRACE][RangeUnionIterator]] " + message);
+    }
+
 }

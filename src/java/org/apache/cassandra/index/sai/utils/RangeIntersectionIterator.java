@@ -157,6 +157,7 @@ public class RangeIntersectionIterator
         private BounceIntersectionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
         {
             super(statistics);
+            trace("Creating with " + ranges.size() + " ranges");
             this.ranges = ranges;
             this.toRelease = new ArrayList<>(ranges);
             this.merger = new Token.ReusableTokenMerger(ranges.size());
@@ -165,6 +166,7 @@ public class RangeIntersectionIterator
 
         protected Token computeNext()
         {
+            trace("computeNext");
             RangeIterator head = ranges.poll();
 
             if (head == null)
@@ -237,6 +239,7 @@ public class RangeIntersectionIterator
 
         protected void performSkipTo(Long nextToken)
         {
+            trace("performSkipTo(" + nextToken + ")");
             List<RangeIterator> skipped = new ArrayList<>();
 
             while (!ranges.isEmpty())
@@ -253,6 +256,11 @@ public class RangeIntersectionIterator
         public void close() throws IOException
         {
             toRelease.forEach(FileUtils::closeQuietly);
+        }
+
+        private void trace(String message)
+        {
+            logger.info("[QUERY_TRACE][RangeIntersectionIterator]] " + message);
         }
     }
 }

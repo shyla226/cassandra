@@ -188,7 +188,7 @@ public class PostingListRangeIterator extends RangeIterator
 
     private void trace(String message)
     {
-        logger.info(components.logMessage("[QUERY_TRACE][PostingListRangeIterator] " + message));
+        logger.info(components.logMessage("[QUERY_TRACE][PostingListRangeIterator + :" + components.descriptor.generation + "] " + message));
     }
 
     /**
