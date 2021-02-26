@@ -85,6 +85,7 @@ public class PostingListRangeIterator extends RangeIterator
     {
         super(context.minToken(), context.maxToken(), context.count());
 
+        trace("" + context.postingList.size());
         this.keyFetcher = keyFetcher;
         this.segmentRowIdToToken = context.segmentRowIdToToken;
         this.segmentRowIdToOffset = context.segmentRowIdToOffset;
