@@ -103,6 +103,7 @@ public class PostingListRangeIterator extends RangeIterator
             return;
 
         skipToToken = nextToken;
+        trace("needs to skip so setting skipToToken to " + skipToToken);
         needsSkipping = true;
     }
 
@@ -170,7 +171,7 @@ public class PostingListRangeIterator extends RangeIterator
         trace("getNextSegmentRowId");
         if (needsSkipping)
         {
-            trace("needs skipping");
+            trace("needs skipping to " + skipToToken);
             int targetRowID = Math.toIntExact(segmentRowIdToToken.findTokenRowID(skipToToken));
             // skipToToken is larger than max token in token file
             if (targetRowID < 0)
