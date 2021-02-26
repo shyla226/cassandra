@@ -186,10 +186,12 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
                 return this;
 
             if (range.getCount() > 0)
+            {
                 ranges.add(range);
+                statistics.update(range);
+            }
             else
                 FileUtils.closeQuietly(range);
-            statistics.update(range);
 
             return this;
         }

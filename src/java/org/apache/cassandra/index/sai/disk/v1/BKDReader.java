@@ -357,7 +357,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
     private void trace(String message)
     {
-        logger.info("[QUERY_TRACE][BKDReader] " + message);
+        logger.info(indexComponents.logMessage("[QUERY_TRACE][BKDReader] " + message));
     }
 
     /**

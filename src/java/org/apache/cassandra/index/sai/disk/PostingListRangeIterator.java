@@ -97,6 +97,7 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(Long nextToken)
     {
+        trace("performSkipTo(skipToToken = " + skipToToken + ",nextToken = " + nextToken + ")");
         if (skipToToken >= nextToken)
             return;
 
@@ -107,6 +108,7 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected Token computeNext()
     {
+        trace("computeNext");
         try
         {
             queryContext.queryContext.checkpoint();
@@ -184,11 +186,17 @@ public class PostingListRangeIterator extends RangeIterator
         }
     }
 
+    private void trace(String message)
+    {
+        logger.info(components.logMessage("[QUERY_TRACE][PostingListRangeIterator] " + message));
+    }
+
     /**
      * takes a segment row ID and produces a {@link Token} for its partition key.
      */
     private Token getNextToken(long segmentRowId)
     {
+        trace("getNextToken(segmentRowId = " + segmentRowId + ")");
         assert segmentRowId != PostingList.END_OF_STREAM;
 
         long tokenValue = segmentRowIdToToken.get(segmentRowId);

@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai;
 
 import java.io.Closeable;
+import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -30,6 +31,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -56,6 +60,8 @@ import org.apache.cassandra.utils.Throwables;
  */
 public class SSTableIndex
 {
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
     // sort sstable index by first key then last key
     public static final Comparator<SSTableIndex> COMPARATOR = Comparator.comparing((SSTableIndex s) -> s.getSSTable().first)
                                                                         .thenComparing(s -> s.getSSTable().last)
@@ -192,7 +198,13 @@ public class SSTableIndex
 
     public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context, boolean defer)
     {
+        trace("Starting search on SSTable " + getSSTable().descriptor.generation);
         return segment.search(expression, context, defer);
+    }
+
+    private void trace(String message)
+    {
+        logger.info(components.logMessage("[QUERY_TRACE][SSTableIndex] " + message));
     }
 
     public int getSegmentSize()
