@@ -166,12 +166,15 @@ public class PostingListRangeIterator extends RangeIterator
      */
     private long getNextSegmentRowId() throws IOException
     {
+        trace("getNextSegmentRowId");
         if (needsSkipping)
         {
+            trace("needs skipping");
             int targetRowID = Math.toIntExact(segmentRowIdToToken.findTokenRowID(skipToToken));
             // skipToToken is larger than max token in token file
             if (targetRowID < 0)
             {
+                trace("end of stream");
                 return PostingList.END_OF_STREAM;
             }
 
@@ -182,6 +185,7 @@ public class PostingListRangeIterator extends RangeIterator
         }
         else
         {
+            trace("nextPosting");
             return postingList.nextPosting();
         }
     }
