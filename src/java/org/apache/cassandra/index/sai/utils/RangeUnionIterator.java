@@ -171,15 +171,20 @@ public class RangeUnionIterator extends RangeIterator
         while (!ranges.isEmpty())
         {
             if (ranges.peek().getCurrent().compareTo(nextToken) >= 0)
+            {
+                trace("breaking");
                 break;
+            }
 
             RangeIterator head = ranges.poll();
 
             if (head.getMaximum().compareTo(nextToken) >= 0)
             {
+                trace("skipping head");
                 head.skipTo(nextToken);
                 if (head.hasNext())
                 {
+                    trace("putting head back");
                     ranges.add(head);
                     continue;
                 }

@@ -19,9 +19,13 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -41,6 +45,8 @@ import org.apache.lucene.store.RandomAccessInput;
 @NotThreadSafe
 public class PostingsReader implements OrdinalPostingList
 {
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
     protected final IndexInput input;
     private final int blockSize;
     private final long numPostings;

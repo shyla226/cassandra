@@ -18,8 +18,12 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 
 import com.google.common.base.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.lucene.util.FixedBitSet;
