@@ -332,6 +332,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
     public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor, QueryEventListener.BKDIndexEventListener listener, QueryContext context)
     {
+        trace("Starting intersection");
         Relation relation = visitor.compare(minPackedValue, maxPackedValue);
 
         if (relation == Relation.CELL_OUTSIDE_QUERY)
@@ -354,6 +355,11 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         return completable.execute();
     }
 
+    private void trace(String message)
+    {
+        logger.info("[QUERY_TRACE][BKDReader] " + message);
+    }
+
     /**
      * Synchronous intersection of an multi-dimensional shape in byte[] space with a block KD-tree
      * previously written with {@link BKDWriter}.
@@ -372,6 +378,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         Intersection(IndexInput bkdInput, IndexInput postingsInput, IndexInput postingsSummaryInput,
                      IndexTree index, QueryEventListener.BKDIndexEventListener listener, QueryContext context)
         {
+            trace("Non-filtering intersection");
             this.bkdInput = bkdInput;
             this.postingsInput = postingsInput;
             this.postingsSummaryInput = postingsSummaryInput;
@@ -420,7 +427,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             // if there is pre-built posting for entire subtree
             if (postingsIndex.exists(nodeID))
             {
-                postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)).peekable());
+                long filePointer = postingsIndex.getPostingsFilePointer(nodeID);
+                trace("Adding non-filtering postings list for nodeID = " + nodeID + " and file pointer = " + filePointer);
+                postingLists.add(initPostingReader(filePointer).peekable());
                 return;
             }
 
@@ -700,6 +709,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             if (postingsIndex.exists(nodeID) && holder[0].cardinality() > 0)
             {
                 final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
+                trace("Adding filtering postings list for nodeID = " + nodeID + " and file pointer = " + pointer);
                 postingLists.add(initFilteringPostingReader(pointer, holder[0]).peekable());
             }
         }
