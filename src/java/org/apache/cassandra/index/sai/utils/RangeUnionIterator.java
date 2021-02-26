@@ -50,6 +50,7 @@ public class RangeUnionIterator extends RangeIterator
     // Due to lazy key fetching, we cannot close iterator immediately
     private final PriorityQueue<RangeIterator> ranges;
     private final List<RangeIterator> processedRanges;
+    private final int size;
 
 
     // If the ranges are deferred then the ranges queue is not
@@ -65,6 +66,7 @@ public class RangeUnionIterator extends RangeIterator
         super(statistics);
         trace("Creating with " + ranges.size() + " ranges");
         this.ranges = ranges;
+        this.size = ranges.size();
         // Don't use Comparator.comparing here, it auto-boxes the longs
         this.candidates = new PriorityQueue<>(ranges.size(), (t1, t2) -> Long.compare(t1.getLong(), t2.getLong()));
         processedRanges = new ArrayList<>(ranges.size());
@@ -224,7 +226,7 @@ public class RangeUnionIterator extends RangeIterator
 
     private void trace(String message)
     {
-        logger.info("[QUERY_TRACE][RangeUnionIterator]] " + message);
+        logger.info("[QUERY_TRACE][RangeUnionIterator:" + size + "] " + message);
     }
 
 }
