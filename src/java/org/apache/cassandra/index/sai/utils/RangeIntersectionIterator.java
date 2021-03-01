@@ -99,7 +99,9 @@ public class RangeIntersectionIterator
             selectiveIterator.sort(Comparator.comparingLong(RangeIterator::getCount));
 
             Statistics selectiveStatistics = new Statistics(IteratorType.INTERSECTION);
-            for (int i = selectiveIterator.size() - 1; i >= 0 && i >= limit; i--)
+//            for (int i = selectiveIterator.size() - 1; i >= 0 && i >= limit; i--)
+//                FileUtils.closeQuietly(selectiveIterator.remove(i));
+            for (int i = 0; i < selectiveIterator.size() && i < limit; i++)
                 FileUtils.closeQuietly(selectiveIterator.remove(i));
 
             for (RangeIterator iterator : selectiveIterator)
