@@ -63,7 +63,7 @@ public class PostingListRangeIterator extends RangeIterator
     public Long getCurrent()
     {
         Long current = super.getCurrent();
-        trace("current = " + current);
+//        trace("current = " + current);
         return current;
     }
 

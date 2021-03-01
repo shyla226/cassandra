@@ -58,7 +58,7 @@ public class AbstractRangeIteratorTest extends NdiRandomizedTest
         return buildSelectiveIntersection(limit, toRangeIterator(ranges));
     }
 
-    final RangeIterator buildUnion(RangeIterator... ranges)
+    RangeIterator buildUnion(RangeIterator... ranges)
     {
         return RangeUnionIterator.builder().add(Arrays.asList(ranges)).build();
     }

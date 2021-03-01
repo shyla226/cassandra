@@ -86,7 +86,7 @@ public class TermIterator extends RangeIterator
             }
         }
 
-        RangeIterator ranges = RangeUnionIterator.build(tokens);
+        RangeIterator ranges = SimpleRangeUnionIterator.build(tokens);
         return new TermIterator(ranges, perSSTableIndexes, queryContext);
     }
 
