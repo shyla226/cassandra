@@ -341,9 +341,9 @@ public class PostingsTest extends NdiRandomizedTest
         }
 
         @Override
-        public void onPostingDecoded()
+        public void postingDecoded(long postingsDecoded)
         {
-            decodes++;
+            this.decodes += postingsDecoded;
         }
     }
 }
