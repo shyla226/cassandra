@@ -42,7 +42,7 @@ import org.apache.cassandra.utils.Throwables;
  *
  * <ol>
  *   <li> fetch next segment row id from posting list or skip to specific segment row id if {@link #skipTo(Long)} is called </li>
- *   <li> produce a {@link OnDiskKeyProducer.OnDiskToken} from {@link OnDiskKeyProducer#produceToken(long, int)} which is used
+ *   <li> produce a {@link OnDiskKeyProducer.OnDiskToken} from {@link OnDiskKeyProducer#produceToken(long, long)} which is used
  *       to avoid fetching duplicated keys due to partition-level indexing on wide partition schema.
  *       <br/>
  *       Note: in order to reduce disk access in multi-index query, partition keys will only be fetched for intersected tokens

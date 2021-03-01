@@ -64,7 +64,7 @@ public class RangeUnionIterator extends RangeIterator
     private RangeUnionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
     {
         super(statistics);
-        trace("Creating with " + ranges.size() + " ranges");
+        trace("Creating with " + ranges.size() + " ranges and " + statistics.tokenCount + " tokens");
         this.ranges = ranges;
         this.size = ranges.size();
         // Don't use Comparator.comparing here, it auto-boxes the longs
