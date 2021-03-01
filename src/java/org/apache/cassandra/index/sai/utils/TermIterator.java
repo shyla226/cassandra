@@ -87,7 +87,7 @@ public class TermIterator extends RangeIterator
         }
 
         RangeIterator ranges = SimpleRangeUnionIterator.build(tokens);
-        return new TermIterator(ranges, perSSTableIndexes, queryContext);
+        return ranges == null ? null : new TermIterator(ranges, perSSTableIndexes, queryContext);
     }
 
     protected Token computeNext()
@@ -102,7 +102,7 @@ public class TermIterator extends RangeIterator
         }
     }
 
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         try
         {

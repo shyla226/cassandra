@@ -49,16 +49,16 @@ public class RangeConcatIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         while (!ranges.isEmpty())
         {
-            if (ranges.peek().getCurrent().compareTo(nextToken) >= 0)
+            if (ranges.peek().getCurrent() >= nextToken)
                 break;
 
             RangeIterator head = ranges.poll();
 
-            if (head.getMaximum().compareTo(nextToken) >= 0)
+            if (head.getMaximum() >= nextToken)
             {
                 head.skipTo(nextToken);
                 ranges.add(head);

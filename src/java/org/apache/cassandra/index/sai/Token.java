@@ -51,10 +51,7 @@ public abstract class Token implements Comparable<Token>
         this.token = token;
     }
 
-    /**
-     * Using Long instead long, because {@link RangeIterator} is based on Long and uses null to represent non-existing min/max.
-     */
-    public Long get()
+    public long get()
     {
         return token;
     }

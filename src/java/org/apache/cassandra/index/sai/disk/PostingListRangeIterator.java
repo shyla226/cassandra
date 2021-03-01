@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.Throwables;
  * A range iterator based on {@link PostingList}.
  *
  * <ol>
- *   <li> fetch next segment row id from posting list or skip to specific segment row id if {@link #skipTo(Long)} is called </li>
+ *   <li> fetch next segment row id from posting list or skip to specific segment row id if {@link RangeIterator#skipTo(long)} is called </li>
  *   <li> produce a {@link OnDiskKeyProducer.OnDiskToken} from {@link OnDiskKeyProducer#produceToken(long, int)} which is used
  *       to avoid fetching duplicated keys due to partition-level indexing on wide partition schema.
  *       <br/>
@@ -95,7 +95,7 @@ public class PostingListRangeIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         if (skipToToken >= nextToken)
             return;

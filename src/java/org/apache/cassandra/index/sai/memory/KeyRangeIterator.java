@@ -79,7 +79,7 @@ public class KeyRangeIterator extends RangeIterator
         return next;
     }
 
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         while (!keys.isEmpty())
         {

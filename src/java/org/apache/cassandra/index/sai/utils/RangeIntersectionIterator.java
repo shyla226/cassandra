@@ -128,7 +128,7 @@ public class RangeIntersectionIterator
             {
                 // release posting lists
                 FileUtils.closeQuietly(ranges);
-                return RangeIterator.empty();
+                return null;
             }
 
             if (ranges.size() == 1)
@@ -141,8 +141,8 @@ public class RangeIntersectionIterator
     /**
      * Iterator which performs intersection of multiple ranges by using bouncing (merge-join) technique to identify
      * common elements in the given ranges. Aforementioned "bounce" works as follows: range queue is poll'ed for the
-     * range with the smallest current token (main loop), that token is used to {@link RangeIterator#skipTo(Long)}
-     * other ranges, if token produced by {@link RangeIterator#skipTo(Long)} is equal to current "candidate" token,
+     * range with the smallest current token (main loop), that token is used to {@link RangeIterator#skipTo(long)}
+     * other ranges, if token produced by {@link RangeIterator#skipTo(long)} is equal to current "candidate" token,
      * both get merged together and the same operation is repeated for next range from the queue, if returned token
      * is not equal than candidate, candidate's range gets put back into the queue and the main loop gets repeated until
      * next intersection token is found or at least one iterator runs out of tokens.
@@ -173,7 +173,7 @@ public class RangeIntersectionIterator
                 return endOfData();
 
             // jump right to the beginning of the intersection or return next element
-            if (head.getCurrent().compareTo(getMinimum()) < 0)
+            if (head.getCurrent() < getMinimum())
                 head.skipTo(getMinimum());
 
             Token candidate = head.hasNext() ? head.next() : null;
@@ -237,7 +237,7 @@ public class RangeIntersectionIterator
             return endOfData();
         }
 
-        protected void performSkipTo(Long nextToken)
+        protected void performSkipTo(long nextToken)
         {
             List<RangeIterator> skipped = new ArrayList<>();
 

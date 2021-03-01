@@ -50,7 +50,7 @@ public class SimpleRangeUnionIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         for (RangeIterator range : ranges)
         {

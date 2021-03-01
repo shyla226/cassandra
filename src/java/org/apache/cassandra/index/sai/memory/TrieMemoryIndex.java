@@ -215,7 +215,7 @@ public class TrieMemoryIndex extends MemoryIndex
         final PrimaryKeys primaryKeys = data.get(prefix);
         if (primaryKeys == null)
         {
-            return RangeIterator.empty();
+            return null;
         }
         return new KeyRangeIterator(primaryKeys.partitionKeys());
     }
@@ -308,7 +308,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (cd.mergedKeys.isEmpty())
         {
-            return RangeIterator.empty();
+            return null;
         }
 
         lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));

@@ -149,7 +149,7 @@ public class RangeUnionIterator extends RangeIterator
         return merger.merge();
     }
 
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         while (!candidates.isEmpty())
         {
@@ -160,12 +160,12 @@ public class RangeUnionIterator extends RangeIterator
         }
         while (!ranges.isEmpty())
         {
-            if (ranges.peek().getCurrent().compareTo(nextToken) >= 0)
+            if (ranges.peek().getCurrent() >= nextToken)
                 break;
 
             RangeIterator head = ranges.poll();
 
-            if (head.getMaximum().compareTo(nextToken) >= 0)
+            if (head.getMaximum() >= nextToken)
             {
                 head.skipTo(nextToken);
                 if (head.hasNext())

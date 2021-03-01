@@ -35,11 +35,9 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public abstract class RangeIterator extends AbstractIterator<Token> implements Closeable
 {
-    private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
-
-    private final Long min, max;
+    private final long min, max;
     private final long count;
-    private Long current;
+    private long current;
 
     protected RangeIterator(Builder.Statistics statistics)
     {
@@ -48,31 +46,33 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
 
     public RangeIterator(RangeIterator range)
     {
-        this(range == null ? null : range.min, range == null ? null : range.max, range == null ? -1 : range.count);
+        assert range != null;
+
+        this.min = range.min;
+        this.current = range.min;
+        this.max = range.max;
+        this.count = range.count;
     }
 
-    public RangeIterator(Long min, Long max, long count)
+    public RangeIterator(long min, long max, long count)
     {
-        if (min == null || max == null || count == 0)
-            assert min == null && max == null && (count == 0 || count == -1) : min + " - " + max + " " + count;
-
         this.min = min;
         this.current = min;
         this.max = max;
         this.count = count;
     }
 
-    public final Long getMinimum()
+    public final long getMinimum()
     {
         return min;
     }
 
-    public final Long getCurrent()
+    public final long getCurrent()
     {
         return current;
     }
 
-    public final Long getMaximum()
+    public final long getMaximum()
     {
         return max;
     }
@@ -92,30 +92,27 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
      *
      * @return The next current token after the skip was performed
      */
-    public final Token skipTo(Long nextToken)
+    public final Token skipTo(long nextToken)
     {
-        if (min == null || max == null)
-            return endOfData();
-
         // In the case of deferred iterators the current value may not accurately
         // reflect the next value so we need to check that as well
-        if (current.compareTo(nextToken) >= 0)
+        if (current >= nextToken)
         {
             next = next == null ? recomputeNext() : next;
             if (next == null)
                 return endOfData();
-            else if (next.get().compareTo(nextToken) >= 0)
+            else if (next.get() >= nextToken)
                 return next;
         }
 
-        if (max.compareTo(nextToken) < 0)
+        if (max < nextToken)
             return endOfData();
 
         performSkipTo(nextToken);
         return recomputeNext();
     }
 
-    protected abstract void performSkipTo(Long nextToken);
+    protected abstract void performSkipTo(long nextToken);
 
     protected Token recomputeNext()
     {
@@ -127,11 +124,6 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
         boolean hasNext = super.tryToComputeNext();
         current = hasNext ? next.get() : getMaximum();
         return hasNext;
-    }
-
-    public static RangeIterator empty()
-    {
-        return EMPTY;
     }
 
     public static abstract class Builder
@@ -206,17 +198,9 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
         public final RangeIterator build()
         {
             if (rangeCount() == 0)
-                return empty();
+                return null;
             else
                 return buildIterator();
-        }
-
-        public static class EmptyRangeIterator extends RangeIterator
-        {
-            EmptyRangeIterator() { super(null, null, 0); }
-            public Token computeNext() { return endOfData(); }
-            protected void performSkipTo(Long nextToken) { }
-            public void close() { }
         }
 
         protected abstract RangeIterator buildIterator();
@@ -347,7 +331,7 @@ public abstract class RangeIterator extends AbstractIterator<Token> implements C
     {
         return (min != null && max != null) &&
                b.getCount() != 0 &&
-               (min.compareTo(b.getMaximum()) <= 0 && b.getCurrent().compareTo(max) <= 0);
+               (min.compareTo(b.getMaximum()) <= 0 && b.getCurrent() <= max);
     }
 
     @SuppressWarnings("unchecked")

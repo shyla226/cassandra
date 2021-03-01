@@ -217,7 +217,7 @@ public class Operation extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         if (range != null)
             range.skipTo(nextToken);
@@ -375,7 +375,8 @@ public class Operation extends RangeIterator
                 }
 
                 FilterTree filterTree  = new FilterTree(op, analyzedExpressions, null, rightOp != null ? rightOp.filterTree : null);
-                return new Operation(range.build(), filterTree, controller);
+                RangeIterator rangeIterator = range.build();
+                return rangeIterator == null ? null : new Operation(rangeIterator, filterTree, controller);
             }
             else // when OR is used
             {

@@ -78,7 +78,7 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(long nextToken)
     {
         for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < tokens.size(); i++)
         {

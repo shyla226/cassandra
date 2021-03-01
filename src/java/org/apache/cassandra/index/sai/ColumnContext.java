@@ -259,7 +259,7 @@ public class ColumnContext
 
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return null;
         }
 
         SimpleRangeUnionIterator.Builder builder = SimpleRangeUnionIterator.builder();
