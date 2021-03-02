@@ -41,14 +41,10 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  */
 public class PrimaryKey implements Comparable<PrimaryKey>
 {
-    public static final PrimaryKey MINIMUM = new PrimaryKey(Kind.MARKER, null, null, null, Long.MIN_VALUE);
-    public static final PrimaryKey MAXIMUM = new PrimaryKey(Kind.MARKER, null, null, null, Long.MAX_VALUE);
-
     private static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
     public enum Kind
     {
-        MARKER,
         TOKEN,
         MAPPED,
         UNMAPPED,
@@ -179,8 +175,6 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
     public int size()
     {
-        assert kind != Kind.MARKER;
-
         return partitionKey.getKey().remaining() + clustering.dataSize();
     }
 
@@ -203,8 +197,6 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
     public ByteSource asComparableBytes(ByteComparable.Version version)
     {
-        assert kind != Kind.MARKER;
-
         ByteSource[] sources = new ByteSource[clustering.size() + 2];
         sources[0] = partitionKey.getToken().asComparableBytes(version);
         sources[1] = ByteSource.of(partitionKey.getKey(), version);
@@ -220,13 +212,13 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
     public Clustering clustering()
     {
-        assert clustering != null && kind != Kind.TOKEN && kind != Kind.MARKER;
+        assert clustering != null && kind != Kind.TOKEN;
         return clustering;
     }
 
     public ClusteringComparator clusteringComparator()
     {
-        assert clusteringComparator != null && kind != Kind.TOKEN && kind != Kind.MARKER;
+        assert clusteringComparator != null && kind != Kind.TOKEN;
         return clusteringComparator;
     }
 
@@ -239,12 +231,6 @@ public class PrimaryKey implements Comparable<PrimaryKey>
     @Override
     public int compareTo(PrimaryKey o)
     {
-        if (((this == MINIMUM) && (o == MINIMUM)) || ((this == MAXIMUM) && (o == MAXIMUM)))
-            return 0;
-        if ((this == MINIMUM) || (o == MAXIMUM))
-            return -1;
-        if ((this == MAXIMUM) || (o == MINIMUM))
-            return 1;
         int cmp = partitionKey.compareTo(o.partitionKey);
         System.out.println("clustering(size = " + clustering.size() + ", kind = " + kind + ", o.clustering(size = " + o.clustering.size() + ", kind = " + o.kind + ")");
         return cmp != 0 ? cmp : clusteringComparator().compare(clustering, o.clustering);

@@ -99,7 +99,7 @@ public class RangeUnionIterator extends RangeIterator
             }
         }
 
-        PrimaryKey minCurrent = ranges.stream().map(RangeIterator::getCurrent).min(Comparator.naturalOrder()).orElse(PrimaryKey.MAXIMUM);
+        PrimaryKey minCurrent = ranges.stream().map(RangeIterator::getCurrent).min(Comparator.naturalOrder()).get();
 
         if (candidate.compareTo(minCurrent) < 0)
         {

@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -217,8 +216,8 @@ public class TrieMemoryIndex extends MemoryIndex
 
     public static class Collector
     {
-        PrimaryKey minimumKey = PrimaryKey.MAXIMUM;
-        PrimaryKey maximumKey = PrimaryKey.MINIMUM;
+        PrimaryKey minimumKey = null;
+        PrimaryKey maximumKey = null;
         PriorityQueue<PrimaryKey> mergedKeys = new PriorityQueue<>(lastQueueSize.get());
 
         AbstractBounds<PartitionPosition> keyRange;
@@ -243,8 +242,8 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     mergedKeys.add(first);
 
-                    minimumKey = first.compareTo(minimumKey) < 0 ? first : minimumKey;
-                    maximumKey = first.compareTo(maximumKey) > 0 ? first : maximumKey;
+                    minimumKey = minimumKey == null ? first : first.compareTo(minimumKey) < 0 ? first : minimumKey;
+                    maximumKey = maximumKey == null ? first : first.compareTo(maximumKey) > 0 ? first : maximumKey;
                 }
 
                 return;
@@ -261,8 +260,8 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     mergedKeys.add(key);
 
-                    minimumKey = key.compareTo(minimumKey) < 0 ? key : minimumKey;
-                    maximumKey = key.compareTo(maximumKey) > 0 ? key : maximumKey;
+                    minimumKey = minimumKey == null ? key : key.compareTo(minimumKey) < 0 ? key : minimumKey;
+                    maximumKey = maximumKey == null ? key : key.compareTo(maximumKey) > 0 ? key : maximumKey;
                 }
             }
             return;
