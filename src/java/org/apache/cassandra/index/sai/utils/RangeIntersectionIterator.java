@@ -242,8 +242,12 @@ public class RangeIntersectionIterator
             while (!ranges.isEmpty())
             {
                 RangeIterator range = ranges.poll();
-                range.skipTo(nextToken);
+                final Token skippedToken = range.skipTo(nextToken);
                 skipped.add(range);
+                if (nextToken.longValue() == skippedToken.getLong())
+                {
+
+                }
             }
 
             for (RangeIterator range : skipped)

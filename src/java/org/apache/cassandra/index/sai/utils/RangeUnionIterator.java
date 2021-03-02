@@ -44,6 +44,8 @@ public class RangeUnionIterator extends RangeIterator
 {
     // Due to lazy key fetching, we cannot close iterator immediately
     private final PriorityQueue<RangeIterator> ranges;
+    private final List<RangeIterator> processedRanges;
+
 
     // If the ranges are deferred then the ranges queue is not
     // necessarily in order so we need to maintain a separate queue
@@ -59,6 +61,7 @@ public class RangeUnionIterator extends RangeIterator
         this.ranges = ranges;
         // Don't use Comparator.comparing here, it auto-boxes the longs
         this.candidates = new PriorityQueue<>(ranges.size(), (t1, t2) -> Long.compare(t1.getLong(), t2.getLong()));
+        processedRanges = new ArrayList<>(ranges.size());
         this.merger = new Token.ReusableTokenMerger(ranges.size());
         this.toRelease = new ArrayList<>(ranges);
     }
@@ -66,7 +69,7 @@ public class RangeUnionIterator extends RangeIterator
     public Token computeNext()
     {
         Token candidate;
-        List<RangeIterator> processedRanges = new ArrayList<>(ranges.size());
+        processedRanges.clear();
 
         // Only poll the ranges for a new candidate if the candidates queue is empty.
         // Otherwise, always start with a candidate from the candidates queue until
