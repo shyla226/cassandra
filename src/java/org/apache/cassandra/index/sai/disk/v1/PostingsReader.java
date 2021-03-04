@@ -210,15 +210,15 @@ public class PostingsReader implements OrdinalPostingList
      * Note: Callers must use the return value of this method before calling {@link #nextPosting()}, as calling
      * that method will return the next posting, not the one to which we have just advanced.
      *
-     * @param targetRowID target row ID to advance to
+     * @param targetToken target row ID to advance to
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
     @Override
-    public long advance(long targetRowID) throws IOException
+    public long advance(long targetToken, LongArray rowIDToToken) throws IOException
     {
         listener.onAdvance();
-        int block = binarySearchBlock(targetRowID);
+        int block = binarySearchBlock(targetToken, rowIDToToken);
 
         if (block < 0)
         {
@@ -228,24 +228,27 @@ public class PostingsReader implements OrdinalPostingList
         if (postingsBlockIdx == block + 1)
         {
             // we're in the same block, just iterate through
-            return slowAdvance(targetRowID);
+            return slowAdvance(targetToken, rowIDToToken);
         }
         assert block > 0;
         // Even if there was an exact match, block might contain duplicates.
         // We iterate to the target token from the beginning.
         lastPosInBlock(block - 1);
-        return slowAdvance(targetRowID);
+        return slowAdvance(targetToken, rowIDToToken);
     }
 
-    private long slowAdvance(long targetRowID) throws IOException
+    private long slowAdvance(long targetToken, LongArray rowIDToToken) throws IOException
     {
         while (totalPostingsRead < numPostings)
         {
-            long segmentRowId = peekNext();
+            final long segmentRowId = peekNext();
 
             advanceOnePosition(segmentRowId);
 
-            if (segmentRowId >= targetRowID)
+            final long token = rowIDToToken.get(segmentRowId);
+
+            //if (segmentRowId >= targetRowID)
+            if (token >= targetToken)
             {
                 return segmentRowId;
             }
@@ -253,33 +256,41 @@ public class PostingsReader implements OrdinalPostingList
         return END_OF_STREAM;
     }
 
-    private int binarySearchBlock(long targetRowID)
+    private int binarySearchBlock(long targetToken, LongArray rowIDToToken)
     {
         int low = postingsBlockIdx - 1;
         int high = Math.toIntExact(blockMaxValues.length()) - 1;
 
+        final long lowToken = rowIDToToken.get(blockMaxValues.get(low));
+
         // in current block
-        if (low <= high && targetRowID <= blockMaxValues.get(low))
+//        if (low <= high && targetRowID <= blockMaxValues.get(low))
+//            return low;
+
+        // in current block
+        if (low <= high && targetToken <= lowToken)
             return low;
 
         while (low <= high)
         {
             int mid = low + ((high - low) >> 1) ;
 
-            long midVal = blockMaxValues.get(mid);
+            //long midVal = blockMaxValues.get(mid);
+            final long midToken = rowIDToToken.get(blockMaxValues.get(mid));
 
-            if (midVal < targetRowID)
+            if (midToken < targetToken)
             {
                 low = mid + 1;
             }
-            else if (midVal > targetRowID)
+            else if (midToken > targetToken)
             {
                 high = mid - 1;
             }
             else
             {
                 // target found, but we need to check for duplicates
-                if (mid > 0 && blockMaxValues.get(mid - 1) == targetRowID)
+                final long token = rowIDToToken.get(blockMaxValues.get(mid - 1));
+                if (mid > 0 && token == targetToken)
                 {
                     // there are duplicates, pivot left
                     high = mid - 1;
@@ -298,7 +309,7 @@ public class PostingsReader implements OrdinalPostingList
     {
         // blockMaxValues is integer only
         actualSegmentRowId = blockMaxValues.get(block);
-        //upper bound, since we might've advanced to the last block, but upper bound is enough
+        // upper bound, since we might've advanced to the last block, but upper bound is enough
         totalPostingsRead += (blockSize - blockIdx) + (block - postingsBlockIdx + 1) * blockSize;
 
         postingsBlockIdx = block + 1;

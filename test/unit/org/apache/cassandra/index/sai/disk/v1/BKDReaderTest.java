@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.disk.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.utils.LongArrays;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.lucene.index.PointValues.Relation;
@@ -267,18 +268,18 @@ public class BKDReaderTest extends NdiRandomizedTest
 
         intersection = reader.intersect(ALL_MATCH, NO_OP_BKD_LISTENER, new QueryContext());
         assertEquals(numRows, intersection.size());
-        assertEquals(100, intersection.advance(100));
-        assertEquals(200, intersection.advance(200));
-        assertEquals(300, intersection.advance(300));
-        assertEquals(400, intersection.advance(400));
+        assertEquals(100, intersection.advance(100, LongArrays.identity().build()));
+        assertEquals(200, intersection.advance(200, LongArrays.identity().build()));
+        assertEquals(300, intersection.advance(300, LongArrays.identity().build()));
+        assertEquals(400, intersection.advance(400, LongArrays.identity().build()));
 
-        assertEquals(401, intersection.advance(401));
+        assertEquals(401, intersection.advance(401, LongArrays.identity().build()));
         long expectedRowID = 402;
         for (long id = intersection.nextPosting(); expectedRowID < 500; id = intersection.nextPosting())
         {
             assertEquals(expectedRowID++, id);
         }
-        assertEquals(PostingList.END_OF_STREAM, intersection.advance(numRows + 1));
+        assertEquals(PostingList.END_OF_STREAM, intersection.advance(numRows + 1, LongArrays.identity().build()));
 
         intersection.close();
     }

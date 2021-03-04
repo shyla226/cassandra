@@ -26,6 +26,7 @@ import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -96,14 +97,14 @@ public class MergePostingList implements PostingList
 
     @SuppressWarnings("resource")
     @Override
-    public long advance(long targetRowID) throws IOException
+    public long advance(long targetRowID, LongArray rowIDToToken) throws IOException
     {
         temp.clear();
 
         while (!postingLists.isEmpty())
         {
             PeekablePostingList peekable = postingLists.poll();
-            peekable.advanceWithoutConsuming(targetRowID);
+            peekable.advanceWithoutConsuming(targetRowID, rowIDToToken);
             if (peekable.peek() != PostingList.END_OF_STREAM)
                 temp.add(peekable);
         }

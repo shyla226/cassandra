@@ -24,6 +24,7 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -126,9 +127,9 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(long targetToken, LongArray rowIDToToken) throws IOException
         {
-            return monitored.advance(targetRowID);
+            return monitored.advance(targetToken, rowIDToToken);
         }
 
         @Override

@@ -166,14 +166,14 @@ public class PostingListRangeIterator extends RangeIterator
     {
         if (needsSkipping)
         {
-            int targetRowID = Math.toIntExact(segmentRowIdToToken.findTokenRowID(skipToToken));
-            // skipToToken is larger than max token in token file
-            if (targetRowID < 0)
-            {
-                return PostingList.END_OF_STREAM;
-            }
+//            int targetRowID = Math.toIntExact(segmentRowIdToToken.findTokenRowID(skipToToken));
+//            // skipToToken is larger than max token in token file
+//            if (targetRowID < 0)
+//            {
+//                return PostingList.END_OF_STREAM;
+//            }
 
-            long segmentRowId = postingList.advance(targetRowID);
+            final long segmentRowId = postingList.advance(skipToToken, segmentRowIdToToken);
 
             needsSkipping = false;
             return segmentRowId;
@@ -191,7 +191,7 @@ public class PostingListRangeIterator extends RangeIterator
     {
         assert segmentRowId != PostingList.END_OF_STREAM;
 
-        long tokenValue = segmentRowIdToToken.get(segmentRowId);
+        final long tokenValue = segmentRowIdToToken.get(segmentRowId);
 
         // Used to remove duplicated key offset
         return producer.produceToken(tokenValue, segmentRowId);

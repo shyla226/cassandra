@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 /**
@@ -56,7 +57,7 @@ public class PackedLongsPostingList implements PostingList
     }
 
     @Override
-    public long advance(long targetRowID) throws IOException
+    public long advance(long targetToken, LongArray rowIDToToken) throws IOException
     {
         throw new UnsupportedOperationException();
     }

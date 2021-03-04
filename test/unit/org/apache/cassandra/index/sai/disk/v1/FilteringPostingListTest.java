@@ -24,6 +24,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.utils.LongArrays;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.lucene.util.FixedBitSet;
 
@@ -133,7 +134,7 @@ public class FilteringPostingListTest extends NdiRandomizedTest
 
         try
         {
-            long id = filteringPostings.advance(target);
+            long id = filteringPostings.advance(target, LongArrays.identity().build());
 
             assertEquals(expectedAdvanceTo, id);
 
@@ -144,7 +145,7 @@ public class FilteringPostingListTest extends NdiRandomizedTest
         }
         catch (Exception e)
         {
-            long id = filteringPostings.advance(target);
+            long id = filteringPostings.advance(target, LongArrays.identity().build());
 
             assertEquals(expectedAdvanceTo, id);
 
@@ -155,7 +156,7 @@ public class FilteringPostingListTest extends NdiRandomizedTest
         }
 
         ArrayPostingList expected = new ArrayPostingList(postingsArray);
-        expected.advance(target);
+        expected.advance(target, LongArrays.identity().build());
 
         // Advance to the first actual match...
         while (expected.getOrdinal() <= from)

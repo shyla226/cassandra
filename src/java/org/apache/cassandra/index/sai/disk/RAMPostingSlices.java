@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.Counter;
@@ -70,7 +71,7 @@ class RAMPostingSlices
             }
 
             @Override
-            public long advance(long targetRowID)
+            public long advance(long targetToken, LongArray rowIDToToken)
             {
                 throw new UnsupportedOperationException();
             }

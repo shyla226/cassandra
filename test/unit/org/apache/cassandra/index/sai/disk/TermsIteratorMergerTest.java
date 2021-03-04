@@ -29,6 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertTrue;
@@ -132,7 +133,7 @@ public class TermsIteratorMergerTest extends SAITester
                 }
 
                 @Override
-                public long advance(long targetRowID) throws IOException
+                public long advance(long targetToken, LongArray rowIDToToken) throws IOException
                 {
                     throw new UnsupportedOperationException();
                 }

@@ -24,6 +24,7 @@ import com.google.common.base.Preconditions;
 
 import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.cursors.IntCursor;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -102,7 +103,7 @@ public class MemtableTermsIterator implements TermsIterator
             }
 
             @Override
-            public long advance(long targetRowID)
+            public long advance(long targetToken, LongArray rowIDToToken)
             {
                 throw new UnsupportedOperationException();
             }

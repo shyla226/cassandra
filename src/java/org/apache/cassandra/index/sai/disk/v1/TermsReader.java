@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
@@ -294,9 +295,9 @@ public class TermsReader implements Closeable
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(long targetToken, LongArray rowIDToToken) throws IOException
         {
-            long next = wrapped.advance(targetRowID);
+            long next = wrapped.advance(targetToken, rowIDToToken);
             if (next == PostingList.END_OF_STREAM)
                 return next;
             return next + offset;

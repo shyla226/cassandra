@@ -56,7 +56,7 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
-    public long advance(long targetRowID)
+    public long advance(long targetToken, LongArray rowIDToToken)
     {
         for (int i = idx; i < postings.length; ++i)
         {
@@ -64,7 +64,7 @@ public class ArrayPostingList implements OrdinalPostingList
 
             idx++;
 
-            if (segmentRowId >= targetRowID)
+            if (rowIDToToken.get(segmentRowId) >= targetToken)
             {
                 return segmentRowId;
             }

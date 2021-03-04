@@ -29,6 +29,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.utils.LongArrays;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
@@ -140,7 +141,7 @@ public class TermsReaderTest extends NdiRandomizedTest
                     // tokens are equal to their corresponding row IDs
                     final int tokenToSkip = expectedPostingList.get(idxToSkip);
 
-                    long advanceResult = actualPostingList.advance(tokenToSkip);
+                    long advanceResult = actualPostingList.advance(tokenToSkip, LongArrays.identity().build());
                     assertEquals(tokenToSkip, advanceResult);
 
                     for (int i = idxToSkip + 1; i < expectedPostingList.size(); ++i)

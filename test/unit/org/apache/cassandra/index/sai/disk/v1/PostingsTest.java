@@ -29,6 +29,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.utils.LongArrays;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.store.IndexInput;
@@ -82,9 +83,9 @@ public class PostingsTest extends NdiRandomizedTest
         try (PostingsReader reader = new PostingsReader(input, postingPointer, listener))
         {
             assertEquals(0, listener.decodes); // nothing is decoded up-front
-            assertEquals(50, reader.advance(45));
+            assertEquals(50, reader.advance(45, LongArrays.identity().build()));
             assertEquals(5, listener.decodes); // slow advance also decodes
-            assertEquals(60, reader.advance(60));
+            assertEquals(60, reader.advance(60, LongArrays.identity().build()));
             assertEquals(6, listener.decodes); // slow advance also decodes
             assertEquals(PostingList.END_OF_STREAM, reader.nextPosting());
             assertEquals(reader.size(), listener.decodes); // nothing more was decoded
@@ -150,8 +151,8 @@ public class PostingsTest extends NdiRandomizedTest
                 }
 
                 expectedPostingList.reset();
-                assertEquals(expectedPostingList.advance(tokenToAdvance),
-                             reader.advance(tokenToAdvance));
+                assertEquals(expectedPostingList.advance(tokenToAdvance, LongArrays.identity().build()),
+                             reader.advance(tokenToAdvance, LongArrays.identity().build()));
 
                 assertPostingListEquals(expectedPostingList, reader);
                 assertEquals(1, listener.advances);
@@ -288,8 +289,8 @@ public class PostingsTest extends NdiRandomizedTest
 
             for (int target : targetIDs)
             {
-                final long actualRowId = reader.advance(target);
-                final long expectedRowId = expected.advance(target);
+                final long actualRowId = reader.advance(target, LongArrays.identity().build());
+                final long expectedRowId = expected.advance(target, LongArrays.identity().build());
 
                 assertEquals(expectedRowId, actualRowId);
 

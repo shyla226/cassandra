@@ -22,6 +22,7 @@ import java.io.IOException;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.lucene.util.FixedBitSet;
 
 
@@ -82,9 +83,9 @@ public class FilteringPostingList implements PostingList
     }
 
     @Override
-    public  long advance(long targetRowID) throws IOException
+    public  long advance(long targetToken, LongArray rowIDToToken) throws IOException
     {
-        long segmentRowId = delegate.advance(targetRowID);
+        long segmentRowId = delegate.advance(targetToken, rowIDToToken);
 
         if (segmentRowId == PostingList.END_OF_STREAM)
         {

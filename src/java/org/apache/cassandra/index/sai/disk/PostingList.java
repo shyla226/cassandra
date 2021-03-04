@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -54,11 +55,13 @@ public interface PostingList extends Closeable
      * Note: Callers must use the return value of this method before calling {@link #nextPosting()}, as calling
      * that method will return the next posting, not the one to which we have just advanced.
      *
-     * @param targetRowID target row ID to advance to
+     * @param targetToken target row ID to advance to
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
-    long advance(long targetRowID) throws IOException;
+    long advance(long targetToken, LongArray rowIDToToken) throws IOException;
+
+
 
     /**
      * @return peekable wrapper of current posting list
@@ -94,10 +97,10 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(long targetRowID, LongArray rowIDToToken) throws IOException
         {
             open();
-            return postingList == null ? END_OF_STREAM : postingList.advance(targetRowID);
+            return postingList == null ? END_OF_STREAM : postingList.advance(targetRowID, rowIDToToken);
         }
 
         @Override
@@ -145,16 +148,16 @@ public interface PostingList extends Closeable
             }
         }
 
-        public long advanceWithoutConsuming(long targetRowID) throws IOException
+        public long advanceWithoutConsuming(long targetToken, LongArray rowIDToToken) throws IOException
         {
             if (peek() == END_OF_STREAM)
                 return END_OF_STREAM;
 
-            if (peek() >= targetRowID)
+            if (rowIDToToken.get(peek()) >= targetToken)
                 return peek();
 
             peeked = true;
-            next = wrapped.advance(targetRowID);
+            next = wrapped.advance(targetToken, rowIDToToken);
             return next;
         }
 
@@ -176,16 +179,16 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(long targetToken, LongArray rowIDToToken) throws IOException
         {
-            if (peeked && next >= targetRowID)
+            if (peeked && rowIDToToken.get(next) >= targetToken)
             {
                 peeked = false;
                 return next;
             }
 
             peeked = false;
-            return wrapped.advance(targetRowID);
+            return wrapped.advance(targetToken, rowIDToToken);
         }
 
         @Override
