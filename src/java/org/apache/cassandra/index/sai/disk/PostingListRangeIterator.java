@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.utils.Throwables;
@@ -53,6 +54,7 @@ public class PostingListRangeIterator extends RangeIterator
     private final IndexComponents components;
 
     private final PostingList postingList;
+    private final LongArray segmentRowIdToToken;
     private final PrimaryKeyMap primaryKeyMap;
     private final IndexSearcher.SearcherContext context;
 
@@ -65,12 +67,12 @@ public class PostingListRangeIterator extends RangeIterator
      * immediately so the posting list size can be used.
      */
     public PostingListRangeIterator(IndexSearcher.SearcherContext context,
-                                    PrimaryKeyMap primaryKeyMap,
                                     IndexComponents components)
     {
         super(context.minimumKey, context.maximumKey, context.count());
 
-        this.primaryKeyMap = primaryKeyMap;
+        this.segmentRowIdToToken = context.segmentRowIdToToken;
+        this.primaryKeyMap = context.primaryKeyMap;
         this.postingList = context.postingList;
         this.context = context;
         this.queryContext = context.context;
@@ -80,7 +82,7 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        if (skipToToken.compareTo(nextKey) >= 0)
+        if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
             return;
 
         skipToToken = nextKey;
@@ -138,13 +140,15 @@ public class PostingListRangeIterator extends RangeIterator
     {
         if (needsSkipping)
         {
+            long sstableRowId = skipToToken.sstableRowId(segmentRowIdToToken);
+
             // skipToToken is larger than max token in token file
-            if (skipToToken.sstableRowId() < 0)
+            if (sstableRowId < 0)
             {
                 return PostingList.END_OF_STREAM;
             }
 
-            long segmentRowId = postingList.advance(skipToToken.sstableRowId());
+            long segmentRowId = postingList.advance(sstableRowId);
 
             needsSkipping = false;
             return segmentRowId;

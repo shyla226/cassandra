@@ -18,7 +18,9 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Test;
@@ -115,7 +117,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         // Next test that an intersection only returns the query values
         List<Long> expected = Lists.list(8L, 9L);
         int expectedCount = 0;
-        PostingList intersection = reader1.intersect(buildQuery(8, 9), NO_OP_BKD_LISTENER, new QueryContext());
+        PostingList intersection  = intersect(reader1.intersect(buildQuery(8, 9), NO_OP_BKD_LISTENER, new QueryContext()));
         for (Long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {
             assertEquals(expected.get(expectedCount++), id);
@@ -139,7 +141,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         final int queryMin = 8;
         final int queryMax = 9;
 
-        intersection = reader.intersect(buildQuery(queryMin, queryMax), NO_OP_BKD_LISTENER, new QueryContext());
+        intersection = intersect(reader.intersect(buildQuery(queryMin, queryMax), NO_OP_BKD_LISTENER, new QueryContext()));
 
         for (Long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {
@@ -196,13 +198,11 @@ public class BKDReaderTest extends NdiRandomizedTest
             }
         }
 
-        try (PostingList intersection = reader.intersect(NONE_MATCH, NO_OP_BKD_LISTENER, new QueryContext()))
-        {
-            assertNull(intersection);
-        }
+        PostingList intersection = intersect(reader.intersect(NONE_MATCH, NO_OP_BKD_LISTENER, new QueryContext()));
+        assertNull(intersection);
 
-        try (PostingList collectAllIntersection = reader.intersect(ALL_MATCH, NO_OP_BKD_LISTENER, new QueryContext());
-             PostingList filteringIntersection = reader.intersect(ALL_MATCH_WITH_FILTERING, NO_OP_BKD_LISTENER, new QueryContext()))
+        try (PostingList collectAllIntersection = intersect(reader.intersect(ALL_MATCH, NO_OP_BKD_LISTENER, new QueryContext()));
+             PostingList filteringIntersection = intersect(reader.intersect(ALL_MATCH_WITH_FILTERING, NO_OP_BKD_LISTENER, new QueryContext())))
         {
             assertEquals(numRows, collectAllIntersection.size());
             assertEquals(numRows, filteringIntersection.size());
@@ -221,7 +221,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         final int queryMin = 42;
         final int queryMax = 87;
 
-        final PostingList intersection = reader.intersect(buildQuery(queryMin, queryMax), NO_OP_BKD_LISTENER, new QueryContext());
+        intersection = intersect(reader.intersect(buildQuery(queryMin, queryMax), NO_OP_BKD_LISTENER, new QueryContext()));
 
         assertThat(intersection, is(instanceOf(MergePostingList.class)));
         long expectedRowID = queryMin;
@@ -238,17 +238,6 @@ public class BKDReaderTest extends NdiRandomizedTest
     @Test
     public void testAdvance() throws IOException
     {
-        doTestAdvance(false);
-    }
-
-    @Test
-    public void testAdvanceCrypto() throws IOException
-    {
-        doTestAdvance(true);
-    }
-
-    private void doTestAdvance(boolean crypto) throws IOException
-    {
         final IndexComponents indexComponents = newIndexComponents();
         final int numRows = between(1000, 2000);
         final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
@@ -262,10 +251,10 @@ public class BKDReaderTest extends NdiRandomizedTest
 
         final BKDReader reader = finishAndOpenReaderOneDim(2, buffer, indexComponents);
 
-        PostingList intersection = reader.intersect(NONE_MATCH, NO_OP_BKD_LISTENER, new QueryContext());
+        PostingList intersection = intersect(reader.intersect(NONE_MATCH, NO_OP_BKD_LISTENER, new QueryContext()));
         assertNull(intersection);
 
-        intersection = reader.intersect(ALL_MATCH, NO_OP_BKD_LISTENER, new QueryContext());
+        intersection = intersect(reader.intersect(ALL_MATCH, NO_OP_BKD_LISTENER, new QueryContext()));
         assertEquals(numRows, intersection.size());
         assertEquals(100, intersection.advance(100));
         assertEquals(200, intersection.advance(200));
@@ -303,8 +292,19 @@ public class BKDReaderTest extends NdiRandomizedTest
 
         final BKDReader reader = finishAndOpenReaderOneDim(50, buffer, indexComponents);
 
-        final PostingList intersection = reader.intersect(buildQuery(1017, 1096), NO_OP_BKD_LISTENER, new QueryContext());
+        final PostingList intersection = intersect(reader.intersect(buildQuery(1017, 1096), NO_OP_BKD_LISTENER, new QueryContext()));
         assertNull(intersection);
+    }
+
+    private PostingList intersect(List<PostingList.PeekablePostingList> postings)
+    {
+        if (postings == null || postings.isEmpty())
+            return null;
+
+        PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+        queue.addAll(postings);
+
+        return MergePostingList.merge(queue);
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)

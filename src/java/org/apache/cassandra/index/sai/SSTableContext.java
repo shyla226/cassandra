@@ -20,9 +20,13 @@ package org.apache.cassandra.index.sai;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v1.BlockPackedReader;
+import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -37,14 +41,20 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 public class SSTableContext extends SharedCloseableImpl
 {
     public final SSTableReader sstable;
+    public final LongArray.Factory tokenReaderFactory;
     public final PrimaryKeyMap primaryKeyMap;
 
     private final IndexComponents groupComponents;
 
-    private SSTableContext(SSTableReader sstable, PrimaryKeyMap primaryKeyMap, Cleanup cleanup, IndexComponents groupComponents)
+    private SSTableContext(SSTableReader sstable,
+                           LongArray.Factory tokenReaderFactory,
+                           PrimaryKeyMap primaryKeyMap,
+                           Cleanup cleanup,
+                           IndexComponents groupComponents)
     {
         super(cleanup);
         this.sstable = sstable;
+        this.tokenReaderFactory = tokenReaderFactory;
         this.primaryKeyMap = primaryKeyMap;
         this.groupComponents = groupComponents;
     }
@@ -52,9 +62,17 @@ public class SSTableContext extends SharedCloseableImpl
     private SSTableContext(SSTableContext copy)
     {
         super(copy);
-        this.sstable = copy.sstable;
-        this.primaryKeyMap = copy.primaryKeyMap;
-        this.groupComponents = copy.groupComponents;
+        try
+        {
+            this.sstable = copy.sstable;
+            this.tokenReaderFactory = copy.tokenReaderFactory;
+            this.primaryKeyMap = copy.primaryKeyMap;
+            this.groupComponents = copy.groupComponents;
+        }
+        catch (Throwable t)
+        {
+            throw Throwables.unchecked(t);
+        }
     }
 
     public static SSTableContext create(SSTableReader sstable)
@@ -62,9 +80,13 @@ public class SSTableContext extends SharedCloseableImpl
         IndexComponents groupComponents = IndexComponents.perSSTable(sstable);
 
         Ref<SSTableReader> sstableRef = null;
+        FileHandle token = null;
+        LongArray.Factory tokenReaderFactory;
         PrimaryKeyMap primaryKeyMap;
         try
         {
+            MetadataSource source = MetadataSource.loadGroupMetadata(groupComponents);
+
             sstableRef = sstable.tryRef();
 
             if (sstableRef == null)
@@ -72,11 +94,14 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
+            token = groupComponents.createFileHandle(IndexComponents.TOKEN_VALUES);
+
+            tokenReaderFactory = new BlockPackedReader(token, IndexComponents.TOKEN_VALUES, groupComponents, source);
             primaryKeyMap = new PrimaryKeyMap.DefaultPrimaryKeyMap(groupComponents, sstable.metadata());
 
-            Cleanup cleanup = new Cleanup(primaryKeyMap, sstableRef);
+            Cleanup cleanup = new Cleanup(token, primaryKeyMap, sstableRef);
 
-            return new SSTableContext(sstable, primaryKeyMap, cleanup, groupComponents);
+            return new SSTableContext(sstable, tokenReaderFactory, primaryKeyMap, cleanup, groupComponents);
         }
         catch (Throwable t)
         {
@@ -96,7 +121,7 @@ public class SSTableContext extends SharedCloseableImpl
     public static int openFilesPerSSTable()
     {
         //TODO How many really?
-        return 1;
+        return 2;
     }
 
     @Override
@@ -107,11 +132,13 @@ public class SSTableContext extends SharedCloseableImpl
 
     private static class Cleanup implements RefCounted.Tidy
     {
+        private final FileHandle token;
         private final PrimaryKeyMap primaryKeyMap;
         private final Ref<SSTableReader> sstableRef;
 
-        private Cleanup(PrimaryKeyMap primaryKeyMap, Ref<SSTableReader> sstableRef)
+        private Cleanup(FileHandle token, PrimaryKeyMap primaryKeyMap, Ref<SSTableReader> sstableRef)
         {
+            this.token = token;
             this.primaryKeyMap = primaryKeyMap;
             this.sstableRef = sstableRef;
         }
@@ -120,7 +147,7 @@ public class SSTableContext extends SharedCloseableImpl
         public void tidy()
         {
             Throwable t = sstableRef.ensureReleased(null);
-            t = Throwables.close(t, primaryKeyMap);
+            t = Throwables.close(t, token, primaryKeyMap);
 
             Throwables.maybeFail(t);
         }

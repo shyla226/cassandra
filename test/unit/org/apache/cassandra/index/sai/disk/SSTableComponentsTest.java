@@ -21,7 +21,9 @@ package org.apache.cassandra.index.sai.disk;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Before;
@@ -71,19 +73,22 @@ public class SSTableComponentsTest extends SAITester
 
         PrimaryKey.PrimaryKeyFactory factory = PrimaryKey.factory(tableMetadata);
 
-        Map<Integer, PrimaryKey> expected = new HashMap<>();
+        List<PrimaryKey> expected = new ArrayList<>();
 
-        expected.put(0, factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0000", "0001"), 0));
-        expected.put(1, factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0000", "0002"), 1));
-        expected.put(2, factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0001", "0001"), 2));
-        expected.put(3, factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0001", "0002"), 3));
-        expected.put(4, factory.createKey(makeKey(tableMetadata, "1"), makeClustering(tableMetadata, "0000", "0001"), 4));
-        expected.put(5, factory.createKey(makeKey(tableMetadata, "2"), makeClustering(tableMetadata, "0000", "0002"), 5));
-        expected.put(6, factory.createKey(makeKey(tableMetadata, "3"), makeClustering(tableMetadata, "0001", "0001"), 6));
-        expected.put(7, factory.createKey(makeKey(tableMetadata, "4"), makeClustering(tableMetadata, "0001", "0002"), 7));
+        expected.add(factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0000", "0001")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0000", "0002")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0001", "0001")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "0"), makeClustering(tableMetadata, "0001", "0002")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "1"), makeClustering(tableMetadata, "0000", "0001")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "2"), makeClustering(tableMetadata, "0000", "0002")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "3"), makeClustering(tableMetadata, "0001", "0001")));
+        expected.add(factory.createKey(makeKey(tableMetadata, "4"), makeClustering(tableMetadata, "0001", "0002")));
 
-        for (Map.Entry<Integer, PrimaryKey> entry : expected.entrySet())
-            writer.nextRow(entry.getValue());
+        expected.sort(PrimaryKey::compareTo);
+
+        int sstableRowId = 0;
+        for (PrimaryKey key : expected)
+            writer.nextRow(factory.createKey(key.partitionKey, key.clustering(), sstableRowId++));
 
         writer.complete();
 
@@ -91,15 +96,12 @@ public class SSTableComponentsTest extends SAITester
 
         PrimaryKeyMap primaryKeyMap = new PrimaryKeyMap.DefaultPrimaryKeyMap(indexComponents, tableMetadata);
 
-        for (Map.Entry<Integer, PrimaryKey> entry : expected.entrySet())
+        for (int rowId = 0; rowId < expected.size(); rowId++)
         {
-            PrimaryKey key = primaryKeyMap.primaryKeyFromRowId(entry.getKey());
-            System.out.println("entry.key = " + entry.getKey() + " key = " + key.sstableRowId() + " - " + primaryKeyMap.primaryKeyFromRowId(entry.getKey()));
+            assertTrue(primaryKeyMap.primaryKeyFromRowId(rowId).compareTo(expected.get(rowId)) == 0);
         }
-//            assertTrue(primaryKeyMap.primaryKeyFromRowId(entry.getKey()).compareTo(entry.getValue()) == 0);
 
         primaryKeyMap.close();
-
     }
 
     private DecoratedKey makeKey(TableMetadata table, String...partitionKeys)

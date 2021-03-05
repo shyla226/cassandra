@@ -48,7 +48,6 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         TOKEN,
         MAPPED,
         UNMAPPED,
-
     }
 
     public final Kind kind;
@@ -114,6 +113,9 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
             if (comparator.size() == 0)
                 return new PrimaryKey(key, Clustering.EMPTY, comparator);
+
+            if (peekable.peek() == ByteSource.TERMINATOR)
+                return new PrimaryKey(key, Clustering.STATIC_CLUSTERING, comparator);
 
             ByteBuffer[] values = new ByteBuffer[comparator.size()];
 
@@ -181,8 +183,8 @@ public class PrimaryKey implements Comparable<PrimaryKey>
     @Override
     public String toString()
     {
-        return String.format("PrimaryKey: { partition : %s, clustering: %s} "+getClass().getSimpleName(),
-                             ByteBufferUtil.bytesToHex(partitionKey.getKey()),
+        return String.format("PrimaryKey: { partition : %s, clustering: %s} ",
+                             partitionKey,
                              String.join(",", Arrays.stream(clustering.getBufferArray())
                                                     .map(ByteBufferUtil::bytesToHex)
                                                     .collect(Collectors.toList())));
@@ -216,23 +218,36 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         return clustering;
     }
 
+    public boolean hasStaticClustering()
+    {
+        return clustering != null && clustering == Clustering.STATIC_CLUSTERING;
+    }
+
     public ClusteringComparator clusteringComparator()
     {
         assert clusteringComparator != null && kind != Kind.TOKEN;
         return clusteringComparator;
     }
 
+    public long sstableRowId(LongArray tokenToRowId)
+    {
+        return kind == Kind.MAPPED ? sstableRowId : tokenToRowId.findTokenRowID(partitionKey.getToken().getLongValue());
+    }
+
     public long sstableRowId()
     {
-        assert kind == Kind.MAPPED;
+        assert kind == Kind.MAPPED : "Should be MAPPED to read sstableRowId but was " + kind;
         return sstableRowId;
     }
 
     @Override
     public int compareTo(PrimaryKey o)
     {
+        if (kind == Kind.TOKEN || o.kind == Kind.TOKEN)
+            return partitionKey.getToken().compareTo(o.partitionKey.getToken());
         int cmp = partitionKey.compareTo(o.partitionKey);
-        System.out.println("clustering(size = " + clustering.size() + ", kind = " + kind + ", o.clustering(size = " + o.clustering.size() + ", kind = " + o.kind + ")");
-        return cmp != 0 ? cmp : clusteringComparator().compare(clustering, o.clustering);
+        if (clustering == Clustering.STATIC_CLUSTERING || o.clustering == Clustering.STATIC_CLUSTERING)
+            return cmp;
+        return (cmp != 0) ? cmp : clusteringComparator().compare(clustering, o.clustering);
     }
 }

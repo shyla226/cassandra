@@ -140,8 +140,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             if (!operation.hasNext())
                 return endOfData();
             currentKey = operation.next();
-
-
+            System.out.println("SAIS operation.next = " + currentKey);
 
             // IMPORTANT: The correctness of the entire query pipeline relies on the fact that we consume a token
             // and materialize its keys before moving on to the next token in the flow. This sequence must not be broken
@@ -156,6 +155,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 {
                     if (current.contains(currentKey.partitionKey))
                     {
+                        System.out.println(current.getClass().getSimpleName());
+                        System.out.println(current.inclusiveLeft() + " " + current.inclusiveRight() + " " + current.isStartInclusive() + " " + current.isEndInclusive());
+                        System.out.println("SAIS " + current + " contains " + currentKey);
                         UnfilteredRowIterator partition = apply(currentKey);
                         if (partition != null)
                             return partition;
@@ -175,25 +177,27 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         // we already knew that key is not included in "current" abstract bounds,
                         // so "left" may have the same partition position as "key" when "left" is exclusive.
                         assert current.left.compareTo(currentKey.partitionKey) >= 0;
+                        System.out.println(current.left.getClass().getSimpleName());
                         operation.skipTo(keyFactory.createKey(current.left.getToken()));
-                        if (!operation.hasNext())
-                            return endOfData();
-                        currentKey = operation.next();
                         break;
                     }
                 }
                 if (!operation.hasNext())
                     return endOfData();
                 currentKey = operation.next();
+                System.out.println("SAIS loop operation.next = " + currentKey);
             }
         }
 
         public UnfilteredRowIterator apply(PrimaryKey key)
         {
-            // We should never see the same key twice
-            // TODO Shouldn't see the same key twice?
-            if (lastKey != null)
-                assert key.compareTo(lastKey) != 0;
+            if ((lastKey != null && lastKey.compareTo(key) == 0) || !controller.needsRow(key))
+            {
+                System.out.println("SAIS.apply keys match returning null");
+                return null;
+            }
+
+            System.out.println("Applying " + key);
 
             lastKey = key;
 

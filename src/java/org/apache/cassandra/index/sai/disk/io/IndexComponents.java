@@ -113,6 +113,10 @@ public class IndexComponents
 
         // per-sstable components
         /**
+         * Partition key token value for rows including row tombstone and static row. (access key is rowId)
+         */
+        TOKEN_VALUES("TokenValues"),
+        /**
          * SSTableRowId to PrimaryKey map
          */
         PRIMARY_KEYS("PrimaryKeys"),
@@ -211,6 +215,8 @@ public class IndexComponents
 
     private static final NDIType[] ALL_PER_COLUMN_COMPONENTS = ObjectArrays.concat(NUMERIC_PER_COLUMN_COMPONENTS, STRING_COMPONENTS, NDIType.class);
 
+    public static final IndexComponent TOKEN_VALUES = NDIType.TOKEN_VALUES.newComponent();
+
     public static final IndexComponent PRIMARY_KEYS = NDIType.PRIMARY_KEYS.newComponent();
 
     public static final IndexComponent GROUP_META = NDIType.GROUP_META.newComponent();
@@ -221,7 +227,7 @@ public class IndexComponents
     /**
      * Files that are shared by all storage-attached indexes for each SSTable
      */
-    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, PRIMARY_KEYS, GROUP_META);
+    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, TOKEN_VALUES, PRIMARY_KEYS, GROUP_META);
 
     public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, columnCompletionMarker;
 

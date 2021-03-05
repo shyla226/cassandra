@@ -56,7 +56,7 @@ public interface SSTableComponentsWriter
 
     SSTableComponentsWriter NONE = (key) -> {};
 
-    void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException;
+    void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException, IOException;
 
     default void complete() throws IOException
     {}
@@ -66,6 +66,8 @@ public interface SSTableComponentsWriter
 
     class OnDiskSSTableComponentsWriter implements SSTableComponentsWriter
     {
+        private final NumericValuesWriter tokenWriter;
+        private final MetadataWriter metadataWriter;
         private final Descriptor descriptor;
         private final IndexComponents indexComponents;
         private final MemtableTrie<Long> rowMapping;
@@ -78,10 +80,16 @@ public interface SSTableComponentsWriter
             this.descriptor = descriptor;
             indexComponents = IndexComponents.perSSTable(descriptor, compressionParams);
             this.rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
+            this.metadataWriter = new MetadataWriter(indexComponents.createOutput(IndexComponents.GROUP_META));
+            this.tokenWriter = new NumericValuesWriter(IndexComponents.TOKEN_VALUES,
+                                                       indexComponents.createOutput(IndexComponents.TOKEN_VALUES),
+                                                       metadataWriter, false);
         }
 
-        public void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException
+        public void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException, IOException
         {
+            System.out.println("nextRow(" + key + ", " + key.sstableRowId() + ")");
+            tokenWriter.add(key.partitionKey.getToken().getLongValue());
             if (key.size() <= MAX_RECURSIVE_KEY_LENGTH)
                 rowMapping.putRecursive(v -> key.asComparableBytes(v), key.sstableRowId(), (existing, neww) -> neww);
             else
@@ -95,12 +103,12 @@ public interface SSTableComponentsWriter
         {
             try (NumericIndexWriter writer = new NumericIndexWriter(indexComponents, 128, maxSSTableRowId, rowCount, false);
                  IndexOutput bkdOutput = indexComponents.createOutput(IndexComponents.PRIMARY_KEYS);
-                 MetadataWriter metadataWriter = new MetadataWriter(indexComponents.createOutput(IndexComponents.GROUP_META));
                  IndexOutput metaOutput = metadataWriter.builder(IndexComponents.PRIMARY_KEYS.name))
             {
                 PartitionKeysMeta meta = writer.writeIndex(bkdOutput, new OneDimPointValues(rowMapping, 128));
                 meta.write(metaOutput);
             }
+            IOUtils.close(tokenWriter, metadataWriter);
             indexComponents.createGroupCompletionMarker();
         }
 

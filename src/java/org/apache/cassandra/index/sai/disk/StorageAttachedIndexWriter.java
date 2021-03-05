@@ -157,8 +157,6 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             {
                 w.addRow(primaryKey, staticRow);
             }
-
-            sstableRowId++;
         }
         catch (Throwable t)
         {

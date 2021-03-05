@@ -34,6 +34,9 @@ public interface PrimaryKeyMap extends Closeable
 {
     PrimaryKey primaryKeyFromRowId(long sstableRowId);
 
+    default PrimaryKeyMap copyOf()
+    { return IDENTITY; }
+
     default void close() throws IOException
     {}
 
@@ -41,6 +44,8 @@ public interface PrimaryKeyMap extends Closeable
 
     class DefaultPrimaryKeyMap implements PrimaryKeyMap
     {
+        private final IndexComponents indexComponents;
+        private final TableMetadata tableMetadata;
         private final FileHandle primaryKeys;
         private final BKDReader reader;
         private final BKDReader.IteratorState iterator;
@@ -48,6 +53,9 @@ public interface PrimaryKeyMap extends Closeable
 
         public DefaultPrimaryKeyMap(IndexComponents indexComponents, TableMetadata tableMetadata) throws IOException
         {
+            this.indexComponents = indexComponents;
+            this.tableMetadata = tableMetadata;
+
             MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexComponents);
 
             PartitionKeysMeta partitionKeysMeta = new PartitionKeysMeta(metadataSource.get(indexComponents.PRIMARY_KEYS.name));
@@ -60,10 +68,34 @@ public interface PrimaryKeyMap extends Closeable
             this.keyFactory = PrimaryKey.factory(tableMetadata);
         }
 
+        private DefaultPrimaryKeyMap(BKDReader reader, PrimaryKey.PrimaryKeyFactory keyFactory) throws IOException
+        {
+            this.indexComponents = null;
+            this.tableMetadata = null;
+            this.reader = null;
+            this.primaryKeys = null;
+            this.iterator = reader.iteratorState();
+            this.keyFactory = keyFactory;
+        }
+
+        public PrimaryKeyMap copyOf()
+        {
+            try
+            {
+                return new DefaultPrimaryKeyMap(reader, keyFactory);
+            }
+            catch (Throwable e)
+            {
+                Throwables.unchecked(e);
+            }
+            return null;
+        }
+
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)
         {
             iterator.seekTo(sstableRowId);
-            return keyFactory.createKey(iterator.asByteComparable(), sstableRowId);
+            PrimaryKey key = keyFactory.createKey(iterator.asByteComparable(), sstableRowId);
+            return key;
         }
 
         @Override

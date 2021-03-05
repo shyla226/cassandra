@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai;
 
 import java.io.Closeable;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -95,7 +96,7 @@ public class SSTableIndex
 
             //TODO Need a compressor here
             metadata = SegmentMetadata.load(source, columnContext.keyFactory(), null);
-            segment = new Segment(columnContext, sstableContext, indexFiles, metadata);
+            segment = new Segment(columnContext, this.sstableContext, indexFiles, metadata);
 
         }
         catch (Throwable t)
@@ -173,9 +174,9 @@ public class SSTableIndex
         return metadata.maxKey;
     }
 
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context)
     {
-        return segment.intersects(keyRange) ? segment.search(expression, context, defer) : RangeIterator.empty();
+        return segment.intersects(keyRange) ? segment.search(expression, context) : Collections.EMPTY_LIST;
     }
 
     public SegmentMetadata segment()

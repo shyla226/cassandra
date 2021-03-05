@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -46,6 +49,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
  */
 public abstract class IndexSearcher implements Closeable
 {
+    private final LongArray.Factory rowIdToTokenFactory;
     private final PrimaryKeyMap primaryKeyMap;
     final SSTableIndex.PerIndexFiles indexFiles;
 
@@ -53,9 +57,10 @@ public abstract class IndexSearcher implements Closeable
 
     final IndexComponents indexComponents;
 
-    IndexSearcher(Segment segment)
+    IndexSearcher(Segment segment) throws IOException
     {
         this.indexComponents = segment.indexFiles.components();
+        this.rowIdToTokenFactory = segment.segmentRowIdToTokenFactory;
         this.primaryKeyMap = segment.primaryKeyMap;
         this.indexFiles = segment.indexFiles;
         this.metadata = segment.metadata;
@@ -95,25 +100,26 @@ public abstract class IndexSearcher implements Closeable
      *
      * @param expression to filter on disk index
      * @param queryContext to track per sstable cache and per query metrics
-     * @param defer create the iterator in a deferred state
      *
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract RangeIterator search(Expression expression, SSTableQueryContext queryContext, boolean defer);
+    public abstract List<RangeIterator> search(Expression expression, SSTableQueryContext queryContext);
 
-    RangeIterator toIterator(PostingList postingList, SSTableQueryContext queryContext)
+    List<RangeIterator> toIterators(List<PostingList.PeekablePostingList> postingLists, SSTableQueryContext queryContext)
     {
-        if (postingList == null)
-            return RangeIterator.empty();
+        if (postingLists == null || postingLists.isEmpty())
+            return Collections.EMPTY_LIST;
 
-        SearcherContext searcherContext = new SearcherContext(queryContext, postingList.peekable());
+        List<RangeIterator> iterators = new ArrayList<>();
 
-        if (searcherContext.noOverlap)
-            return RangeIterator.empty();
+        for (PostingList.PeekablePostingList postingList : postingLists)
+        {
+            SearcherContext searcherContext = new SearcherContext(queryContext, postingList);
+            if (!searcherContext.noOverlap)
+                iterators.add(new PostingListRangeIterator(searcherContext, indexComponents));
+        }
 
-        RangeIterator iterator = new PostingListRangeIterator(searcherContext, primaryKeyMap, indexComponents);
-
-        return iterator;
+        return iterators;
     }
 
     public class SearcherContext
@@ -124,13 +130,17 @@ public abstract class IndexSearcher implements Closeable
         boolean noOverlap;
         final SSTableQueryContext context;
         final PostingList.PeekablePostingList postingList;
+        final LongArray segmentRowIdToToken;
+        final PrimaryKeyMap primaryKeyMap;
 
         SearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
         {
             this.context = context;
             this.postingList = postingList;
+            this.segmentRowIdToToken = new LongArray.DeferredLongArray(() -> rowIdToTokenFactory.openTokenReader(0, context));
+            this.primaryKeyMap = IndexSearcher.this.primaryKeyMap.copyOf();
 
-            minimumKey = primaryKeyMap.primaryKeyFromRowId(postingList.peek());
+            minimumKey = this.primaryKeyMap.primaryKeyFromRowId(postingList.peek());
 
             // use segment's metadata for the range iterator, may not be accurate, but should not matter to performance.
             maximumKey = metadata.maxKey;

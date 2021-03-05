@@ -18,6 +18,9 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.nio.ByteBuffer;
+import java.util.Comparator;
+import java.util.List;
+import java.util.PriorityQueue;
 
 import org.junit.Test;
 
@@ -92,7 +95,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         ))
         {
             final Counter visited = Counter.newCounter();
-            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
+            try (final PostingList ignored = intersect(reader.intersect(new BKDReader.IntersectVisitor()
             {
                 @Override
                 public boolean visit(byte[] packedValue)
@@ -108,7 +111,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                 {
                     return PointValues.Relation.CELL_CROSSES_QUERY;
                 }
-            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
+            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext())))
             {
                 assertEquals(numRows, visited.get());
             }
@@ -145,7 +148,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         ))
         {
             final Counter visited = Counter.newCounter();
-            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
+            try (final PostingList ignored = intersect(reader.intersect(new BKDReader.IntersectVisitor()
             {
                 @Override
                 public boolean visit(byte[] packedValue)
@@ -164,7 +167,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                 {
                     return PointValues.Relation.CELL_CROSSES_QUERY;
                 }
-            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
+            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext())))
             {
                 assertEquals(maxSegmentRowId, visited.get());
             }
@@ -197,5 +200,16 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         };
 
         return new MemtableTermsIterator(minTerm, maxTerm, iterator);
+    }
+
+    private PostingList intersect(List<PostingList.PeekablePostingList> postings)
+    {
+        if (postings == null || postings.isEmpty())
+            return null;
+
+        PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+        queue.addAll(postings);
+
+        return MergePostingList.merge(queue);
     }
 }

@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
@@ -51,6 +52,7 @@ public class Segment implements Closeable
     private final Token.KeyBound maxKeyBound;
 
     // per sstable
+    public final LongArray.Factory segmentRowIdToTokenFactory;
     public final PrimaryKeyMap primaryKeyMap;
     // per-index
     public final SSTableIndex.PerIndexFiles indexFiles;
@@ -67,6 +69,7 @@ public class Segment implements Closeable
         this.maxKey = metadata.maxKey.partitionKey.getToken();
         this.maxKeyBound = maxKey.maxKeyBound();
 
+        this.segmentRowIdToTokenFactory = sstableContext.tokenReaderFactory.withOffset(metadata.segmentRowIdOffset);
         this.primaryKeyMap = sstableContext.primaryKeyMap;
         this.indexFiles = indexFiles;
         this.metadata = metadata;
@@ -76,8 +79,9 @@ public class Segment implements Closeable
     }
 
     @VisibleForTesting
-    public Segment(PrimaryKeyMap primaryKeyMap, SSTableIndex.PerIndexFiles indexFiles, SegmentMetadata metadata, AbstractType<?> columnType)
+    public Segment(LongArray.Factory tokenFactory, PrimaryKeyMap primaryKeyMap, SSTableIndex.PerIndexFiles indexFiles, SegmentMetadata metadata, AbstractType<?> columnType)
     {
+        this.segmentRowIdToTokenFactory = tokenFactory;
         this.primaryKeyMap = primaryKeyMap;
         this.indexFiles = indexFiles;
         this.metadata = metadata;
@@ -92,6 +96,7 @@ public class Segment implements Closeable
     @VisibleForTesting
     public Segment(Token minKey, Token maxKey)
     {
+        this.segmentRowIdToTokenFactory = null;
         this.primaryKeyMap = null;
         this.indexFiles = null;
         this.metadata = null;
@@ -135,12 +140,11 @@ public class Segment implements Closeable
      *
      * @param expression to filter on disk index
      * @param context to track per sstable cache and per query metrics
-     * @param defer create the iterator in a deferred state
      * @return range iterator that matches given expression
      */
-    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression expression, SSTableQueryContext context)
     {
-        return index.search(expression, context, defer);
+        return index.search(expression, context);
     }
 
     public AbstractType<?> getColumnType()
