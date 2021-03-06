@@ -95,6 +95,8 @@ public class PrimaryKey implements Comparable<PrimaryKey>
             return createKeyFromPeekable(peekable, -1);
         }
 
+        //TODO Get rid of this one
+        @VisibleForTesting
         public PrimaryKey createKey(DecoratedKey key)
         {
             return new PrimaryKey(key, Clustering.EMPTY, EMPTY_COMPARATOR);
@@ -111,11 +113,8 @@ public class PrimaryKey implements Comparable<PrimaryKey>
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
             DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
 
-            if (comparator.size() == 0)
+            if ((comparator.size() == 0) || peekable.peek() == ByteSource.TERMINATOR)
                 return new PrimaryKey(key, Clustering.EMPTY, comparator);
-
-            if (peekable.peek() == ByteSource.TERMINATOR)
-                return new PrimaryKey(key, Clustering.STATIC_CLUSTERING, comparator);
 
             ByteBuffer[] values = new ByteBuffer[comparator.size()];
 
@@ -218,9 +217,9 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         return clustering;
     }
 
-    public boolean hasStaticClustering()
+    public boolean hasEmptyClustering()
     {
-        return clustering != null && clustering == Clustering.STATIC_CLUSTERING;
+        return clustering == null || clustering.isEmpty();
     }
 
     public ClusteringComparator clusteringComparator()
@@ -246,7 +245,7 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         if (kind == Kind.TOKEN || o.kind == Kind.TOKEN)
             return partitionKey.getToken().compareTo(o.partitionKey.getToken());
         int cmp = partitionKey.compareTo(o.partitionKey);
-        if (clustering == Clustering.STATIC_CLUSTERING || o.clustering == Clustering.STATIC_CLUSTERING)
+        if (clustering.isEmpty() || o.clustering.isEmpty())
             return cmp;
         return (cmp != 0) ? cmp : clusteringComparator().compare(clustering, o.clustering);
     }

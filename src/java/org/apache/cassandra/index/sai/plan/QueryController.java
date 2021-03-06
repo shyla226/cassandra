@@ -151,9 +151,7 @@ public class QueryController
 
     public boolean needsRow(PrimaryKey key)
     {
-        boolean result = key.hasStaticClustering() || command.clusteringIndexFilter(key.partitionKey).selects(key.clustering());
-        System.out.println("needsRow(" + key + ") = " + result);
-        return result;
+        return key.hasEmptyClustering() || command.clusteringIndexFilter(key.partitionKey).selects(key.clustering());
     }
 
     public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
@@ -224,7 +222,7 @@ public class QueryController
 
     private ClusteringIndexFilter makeFilter(PrimaryKey key)
     {
-        if (key.hasStaticClustering())
+        if (key.hasEmptyClustering())
             return command.clusteringIndexFilter(key.partitionKey);
         else
             return new ClusteringIndexNamesFilter(FBUtilities.singleton(key.clustering(), key.clusteringComparator()), false);

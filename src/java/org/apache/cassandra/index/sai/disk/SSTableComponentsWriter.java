@@ -88,7 +88,6 @@ public interface SSTableComponentsWriter
 
         public void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException, IOException
         {
-            System.out.println("nextRow(" + key + ", " + key.sstableRowId() + ")");
             tokenWriter.add(key.partitionKey.getToken().getLongValue());
             if (key.size() <= MAX_RECURSIVE_KEY_LENGTH)
                 rowMapping.putRecursive(v -> key.asComparableBytes(v), key.sstableRowId(), (existing, neww) -> neww);
