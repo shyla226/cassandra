@@ -30,6 +30,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
@@ -54,6 +55,8 @@ class PartitionWriter implements AutoCloseable
     private final SequentialWriter writer;
     private final Collection<SSTableFlushObserver> observers;
     private final RowIndexWriter rowTrie;
+    private final SerializationHelper helper;
+    private final Version version;
 
     private long initialPosition;
     private long startPosition;
@@ -88,6 +91,8 @@ class PartitionWriter implements AutoCloseable
         this.observers = observers;
         this.rowTrie = new RowIndexWriter(comparator, indexWriter);
         this.unfilteredSerializer = UnfilteredSerializer.serializer;
+        this.helper = new SerializationHelper(header);
+        this.version = version;
     }
 
     public void reset()
@@ -127,7 +132,7 @@ class PartitionWriter implements AutoCloseable
     {
         assert state == State.AWAITING_STATIC_ROW;
         long staticRowPosition = writer.position();
-        unfilteredSerializer.serializeStaticRow(staticRow, header, writer);
+        unfilteredSerializer.serializeStaticRow(staticRow, helper, writer, version.correspondingMessagingVersion());
         if (!observers.isEmpty())
             observers.forEach(o -> o.staticRow(staticRow, staticRowPosition));
         state = State.AWAITING_ROWS;
@@ -159,7 +164,7 @@ class PartitionWriter implements AutoCloseable
         }
 
         long unfilteredPosition = writer.position();
-        unfilteredSerializer.serialize(unfiltered, header, writer, pos - previousRowStart);
+        unfilteredSerializer.serialize(unfiltered, helper, writer, pos - previousRowStart, version.correspondingMessagingVersion());
 
         // notify observers about each new row
         if (!observers.isEmpty())

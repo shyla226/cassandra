@@ -182,6 +182,11 @@ public class FileHandle extends SharedCloseableImpl
         return rebufferer;
     }
 
+    public void invalidateIfCached(long position)
+    {
+        rebuffererFactory.invalidateIfCached(position);
+    }
+
     /**
      * Perform clean up of all resources held by {@link FileHandle}.
      */

@@ -212,7 +212,7 @@ public class PartitionIndex implements Closeable
 
     protected Rebufferer instantiateRebufferer()
     {
-        return fh.instantiateRebufferer(null);
+        return fh.instantiateRebufferer();
     }
 
 

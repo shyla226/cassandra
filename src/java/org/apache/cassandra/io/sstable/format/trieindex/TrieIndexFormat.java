@@ -128,7 +128,7 @@ public class TrieIndexFormat implements SSTableFormat
     // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
     static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.STATS);
 
-    static class ReaderFactory extends SSTableReader.Factory
+    static class ReaderFactory implements SSTableReader.Factory
     {
         @Override
         public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header, FileHandle dfile, IFilter bf)

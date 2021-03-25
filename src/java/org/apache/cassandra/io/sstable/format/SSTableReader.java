@@ -2253,6 +2253,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     public interface Factory
     {
+        Set<Component> requiredComponents();
+
         PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata);
 
         // TODO in the implementation of those methods we will refer the current static methods which are implemented in AbstractdBigTableReader

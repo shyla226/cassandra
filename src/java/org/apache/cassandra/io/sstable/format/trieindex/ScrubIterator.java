@@ -20,12 +20,12 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-public class ScrubIterator extends PartitionIndex.IndexPosIterator implements ScrubPartitionIterator
+public class ScrubIterator extends PartitionIndex.IndexPosIterator implements PartitionIndexIterator
 {
     ByteBuffer key;
     long dataPosition;
@@ -58,7 +58,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
     }
 
     @Override
-    public void advance() throws IOException
+    public boolean advance() throws IOException
     {
         long pos = nextIndexPos();
         if (pos != PartitionIndex.NOT_FOUND)
@@ -76,11 +76,44 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
                 key = null;
                 dataPosition = ~pos;
             }
+            return true;
         }
         else
         {
             key = null;
             dataPosition = -1;
+            return false;
         }
+    }
+
+    @Override
+    public boolean isExhausted()
+    {
+        return dataPosition != -1;
+    }
+
+    @Override
+    public long indexPosition()
+    {
+        return 0;
+    }
+
+    @Override
+    public void indexPosition(long position) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long indexLength()
+    {
+        return 0;
+    }
+
+    @Override
+    public void reset() throws IOException
+    {
+        go(root);
+        advance();
     }
 }
