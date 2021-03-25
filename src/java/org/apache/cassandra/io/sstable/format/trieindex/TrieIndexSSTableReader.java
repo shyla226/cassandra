@@ -63,6 +63,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.Downsampling;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IndexSummary;
+import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
@@ -71,7 +72,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
-import org.apache.cassandra.io.sstable.format.SSTableScanner;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -559,6 +559,55 @@ public class TrieIndexSSTableReader extends SSTableReader
         return new FileHandle[]{ partitionIndex.getFileHandle(), rowIndexFile, dfile };
     }
 
+    /**
+     * @param bounds Must not be wrapped around ranges
+     * @return PartitionIndexIterator within the given bounds
+     * @throws IOException
+     */
+    public PartitionIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds) throws IOException
+    {
+        return new KeysRange(bounds).iterator();
+    }
+
+    private final class KeysRange
+    {
+        PartitionPosition left;
+        boolean inclusiveLeft;
+        PartitionPosition right;
+        boolean inclusiveRight;
+
+        KeysRange(AbstractBounds<PartitionPosition> bounds)
+        {
+            assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : "[" + bounds.left + "," + bounds.right + "]";
+
+            left = bounds.left;
+            inclusiveLeft = bounds.inclusiveLeft();
+            if (filterFirst() && first.compareTo(left) > 0)
+            {
+                left = first;
+                inclusiveLeft = true;
+            }
+
+            right = bounds.right;
+            inclusiveRight = bounds.inclusiveRight();
+            if (filterLast() && last.compareTo(right) < 0)
+            {
+                right = last;
+                inclusiveRight = true;
+            }
+        }
+
+        PartitionIterator iterator() throws IOException
+        {
+            return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight);
+        }
+
+        public Iterator<IndexFileEntry> iterator(RandomAccessReader dataFileReader)
+        {
+            return coveredKeysFlow(dataFileReader, left, inclusiveLeft, right, inclusiveRight);
+        }
+    }
+
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
     {
         AbstractBounds<PartitionPosition> cover = Bounds.bounds(left, inclusiveLeft, right, inclusiveRight);
@@ -616,10 +665,10 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
-        Iterator<IndexPosIterator> partitionKeyIterators = SSTableScanner.makeBounds(this, Collections.singleton(range))
-                                                                         .stream()
-                                                                         .map(this::indexPosIteratorForRange)
-                                                                         .iterator();
+        Iterator<IndexPosIterator> partitionKeyIterators = TrieIndexScanner.makeBounds(this, Collections.singleton(range))
+                                                                           .stream()
+                                                                           .map(this::indexPosIteratorForRange)
+                                                                           .iterator();
 
         if (!partitionKeyIterators.hasNext())
             return Collections.emptyList();
@@ -897,35 +946,42 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
     {
-        return null;
+        RowIndexEntry<?> position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
+        if (position == null)
+            return null;
+        return SSTableIdentityIterator.create(this, dfile.get(), position, key, tombstoneOnly);
     }
 
-    // todo must be overridden
+    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, RowIndexEntry<?> indexEntry, boolean tombstoneOnly)
+    {
+        return SSTableIdentityIterator.create(this, dfile.get(), indexEntry, key, tombstoneOnly);
+    }
+
     @Override
     public ISSTableScanner getScanner()
     {
-        return null;
+        return TrieIndexScanner.getScanner(this);
     }
 
-    // todo must be overridden
     @Override
     public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
     {
-        return null;
+        if (ranges != null)
+            return TrieIndexScanner.getScanner(this, ranges);
+        else
+            return getScanner();
     }
 
-    // todo must be overridden
     @Override
     public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
     {
-        return null;
+        return TrieIndexScanner.getScanner(this, rangeIterator);
     }
 
-    // todo must be overridden
     @Override
     public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
     {
-        return null;
+        return TrieIndexScanner.getScanner(this, columns, dataRange, listener);
     }
 
     // todo must be overridden

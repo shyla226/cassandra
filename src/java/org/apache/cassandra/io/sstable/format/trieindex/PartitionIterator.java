@@ -133,7 +133,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         return currentEntry != null ? currentEntry.position : -1;
     }
 
-    public RowIndexEntry entry()
+    public RowIndexEntry<?> entry()
     {
         return currentEntry;
     }

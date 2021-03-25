@@ -15,15 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.io.sstable.format;
+package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.db.DataRange;
@@ -41,22 +44,25 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.apache.cassandra.dht.AbstractBounds.maxLeft;
 import static org.apache.cassandra.dht.AbstractBounds.minRight;
 
-public class SSTableScanner implements ISSTableScanner
+public class TrieIndexScanner implements ISSTableScanner
 {
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
     protected final RandomAccessReader dfile;
-    public final SSTableReader sstable;
+    public final TrieIndexSSTableReader sstable;
 
     private final Iterator<AbstractBounds<PartitionPosition>> rangeIterator;
 
@@ -69,39 +75,39 @@ public class SSTableScanner implements ISSTableScanner
     protected CloseableIterator<UnfilteredRowIterator> iterator;
 
     // Full scan of the sstables
-    public static ISSTableScanner getScanner(SSTableReader sstable)
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable)
     {
         return getScanner(sstable, Iterators.singletonIterator(fullRange(sstable)));
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable,
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable,
                                              ColumnFilter columns,
                                              DataRange dataRange,
                                              SSTableReadsListener listener)
     {
-        return new SSTableScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
+        return new TrieIndexScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        List<Pair<Long, Long>> positions = sstable.getPositionsForRanges(tokenRanges);
+        List<PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
         if (positions.isEmpty())
             return new EmptySSTableScanner(sstable);
 
         return getScanner(sstable, makeBounds(sstable, tokenRanges).iterator());
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
     {
-        return new SSTableScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator, SSTableReadsListener.NOOP_LISTENER);
+        return new TrieIndexScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator, SSTableReadsListener.NOOP_LISTENER);
     }
 
-    private SSTableScanner(SSTableReader sstable,
-                           ColumnFilter columns,
-                           DataRange dataRange,
-                           Iterator<AbstractBounds<PartitionPosition>> rangeIterator,
-                           SSTableReadsListener listener)
+    private TrieIndexScanner(TrieIndexSSTableReader sstable,
+                             ColumnFilter columns,
+                             DataRange dataRange,
+                             Iterator<AbstractBounds<PartitionPosition>> rangeIterator,
+                             SSTableReadsListener listener)
     {
         assert sstable != null;
 
@@ -191,19 +197,21 @@ public class SSTableScanner implements ISSTableScanner
         }
     }
 
-    public FileProgressIndicator getProgress()
-    {
-        return dfile.getProgress();
-    }
-
-    public long getFilePointer()
-    {
-        return dfile.getFilePointer();
-    }
-
     public long getBytesScanned()
     {
         return bytesScanned;
+    }
+
+    @Override
+    public Set<SSTableReader> getBackingSSTables()
+    {
+        return ImmutableSet.of(sstable);
+    }
+
+    @Override
+    public long getLengthInBytes()
+    {
+        return sstable.uncompressedLength();
     }
 
     public long getCompressedLengthInBytes()
@@ -211,9 +219,10 @@ public class SSTableScanner implements ISSTableScanner
         return sstable.onDiskLength();
     }
 
-    public String getBackingFiles()
+    @Override
+    public long getCurrentPosition()
     {
-        return sstable.toString();
+        return dfile.getFilePointer();
     }
 
     public int level()
@@ -254,8 +263,8 @@ public class SSTableScanner implements ISSTableScanner
     protected class KeyScanningIterator extends AbstractIterator<UnfilteredRowIterator> implements CloseableIterator<UnfilteredRowIterator>
     {
         private DecoratedKey currentKey;
-        private RowIndexEntry currentEntry;
-        private PartitionIndexIterator iterator;
+        private RowIndexEntry<?> currentEntry;
+        private PartitionIterator iterator;
         private LazilyInitializedUnfilteredRowIterator currentRowIterator;
 
         protected UnfilteredRowIterator computeNext()
@@ -269,7 +278,7 @@ public class SSTableScanner implements ISSTableScanner
                 while (true)
                 {
                     if (startScan != -1)
-                        bytesScanned += getFilePointer() - startScan;
+                        bytesScanned += getCurrentPosition() - startScan;
 
                     if (iterator != null)
                     {
@@ -302,17 +311,17 @@ public class SSTableScanner implements ISSTableScanner
                         try
                         {
                             if (startScan != -1)
-                                bytesScanned += getFilePointer() - startScan;
+                                bytesScanned += getCurrentPosition() - startScan;
 
                             startScan = currentEntry.position;
                             if (dataRange == null)
                             {
-                                return sstable.simpleIterator(dfile, partitionKey(), currentEntry, false);
+                                return sstable.simpleIterator(() -> dfile, partitionKey(), currentEntry, false);
                             }
                             else
                             {
                                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(SSTableScanner.this.metadata()), columns, filter.isReversed());
+                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed());
                             }
                         }
                         catch (CorruptSSTableException e)
@@ -363,11 +372,6 @@ public class SSTableScanner implements ISSTableScanner
             this.sstable = sstable;
         }
 
-        public FileProgressIndicator getProgress()
-        {
-            return FileProgressIndicator.NONE;
-        }
-
         public long getFilePointer()
         {
             return 0;
@@ -388,11 +392,6 @@ public class SSTableScanner implements ISSTableScanner
             return sstable.getSSTableLevel();
         }
 
-        public String getBackingFiles()
-        {
-            return sstable.getFilename().getPath();
-        }
-
         public TableMetadata metadata()
         {
             return sstable.metadata();
@@ -411,6 +410,24 @@ public class SSTableScanner implements ISSTableScanner
         public UnfilteredRowIterator next()
         {
             return null;
+        }
+
+        @Override
+        public long getLengthInBytes()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getCurrentPosition()
+        {
+            return 0;
+        }
+
+        @Override
+        public Set<SSTableReader> getBackingSSTables()
+        {
+            return Collections.emptySet();
         }
     }
 }

@@ -34,6 +34,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -84,10 +85,9 @@ class PartitionWriter implements AutoCloseable
     {
         this.header = header;
         this.writer = writer;
-        EncodingVersion version1 = version.encodingVersion();
         this.observers = observers;
         this.rowTrie = new RowIndexWriter(comparator, indexWriter);
-        this.unfilteredSerializer = UnfilteredSerializer.serializers.get(version1);
+        this.unfilteredSerializer = UnfilteredSerializer.serializer;
     }
 
     public void reset()
@@ -211,8 +211,7 @@ class PartitionWriter implements AutoCloseable
 
     private void addIndexBlock() throws IOException
     {
-        IndexInfo cIndexInfo = new IndexInfo(startPosition,
-                                             startOpenMarker);
+        IndexInfo cIndexInfo = new IndexInfo(startPosition, startOpenMarker);
         rowTrie.add(firstClustering, lastClustering, cIndexInfo);
         firstClustering = null;
         ++rowIndexCount;

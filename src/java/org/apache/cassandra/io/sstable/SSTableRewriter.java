@@ -123,16 +123,16 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         // we do this before appending to ensure we can resetAndTruncate() safely if the append fails
         DecoratedKey key = partition.partitionKey();
         maybeReopenEarly(key);
-        BigTableRowIndexEntry index = writer.append(partition);
+        RowIndexEntry<?> index = writer.append(partition);
         if (DatabaseDescriptor.shouldMigrateKeycacheOnCompaction())
         {
-            if (!transaction.isOffline() && index != null)
+            if (!transaction.isOffline() && index instanceof BigTableRowIndexEntry)
             {
                 for (SSTableReader reader : transaction.originals())
                 {
                     if (reader.getCachedPosition(key, false) != null)
                     {
-                        cachedKeys.put(key, index);
+                        cachedKeys.put(key, (BigTableRowIndexEntry) index);
                         break;
                     }
                 }

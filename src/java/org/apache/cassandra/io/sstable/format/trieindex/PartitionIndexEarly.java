@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.TailOverridingRebufferer;
 
 /**
  * Early-opened partition index. Part of the data is already written to file, but some nodes, including the ones in the
