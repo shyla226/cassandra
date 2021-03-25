@@ -171,7 +171,7 @@ public class TrieIndexFormat implements SSTableFormat
             File indexFile = new File(descriptor.filenameFor(Component.PARTITION_INDEX));
             if (!indexFile.exists())
                 return null;
-            try (FileHandle.Builder fhBuilder = SSTable.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+            try (FileHandle.Builder fhBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
                  PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
             {
                 return Pair.create(pIndex.firstKey(), pIndex.lastKey());

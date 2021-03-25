@@ -113,7 +113,7 @@ class PartitionWriter implements AutoCloseable
     void writePartitionHeader(DecoratedKey partitionKey, DeletionTime partitionLevelDeletion) throws IOException
     {
         assert state == State.AWAITING_PARTITION_HEADER;
-        ByteBufferUtil.writeWithShortLength(partitionKey.getTempKey(), writer);
+        ByteBufferUtil.writeWithShortLength(partitionKey.getKey(), writer);
 
         long deletionTimePosition = writer.position();
         DeletionTime deletionTime = partitionLevelDeletion;

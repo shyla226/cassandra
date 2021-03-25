@@ -291,7 +291,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         if (Guardrails.partitionSize.triggersOn(rowSize, null))
         {
-            String keyString = metadata().partitionKeyAsCQLLiteral(key.getTempKey());
+            String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
             Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true, null);
 
             for (SSTableWriteWarning listener : warningListeners)
@@ -567,7 +567,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                 long indexStart = rowIndexFile.position();
                 try
                 {
-                    ByteBufferUtil.writeWithShortLength(key.getTempKey(), rowIndexFile);
+                    ByteBufferUtil.writeWithShortLength(key.getKey(), rowIndexFile);
                     indexEntry.serialize(rowIndexFile, rowIndexFile.position());
                 }
                 catch (IOException e)

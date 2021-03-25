@@ -162,8 +162,8 @@ public class PartitionIndexBuilder implements AutoCloseable
         long firstKeyPos = writer.position();
         if (firstKey != null)
         {
-            ByteBufferUtil.writeWithShortLength(firstKey.getTempKey(), writer);
-            ByteBufferUtil.writeWithShortLength(lastKey.getTempKey(), writer);
+            ByteBufferUtil.writeWithShortLength(firstKey.getKey(), writer);
+            ByteBufferUtil.writeWithShortLength(lastKey.getKey(), writer);
         }
         else
         {
