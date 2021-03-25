@@ -2290,6 +2290,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     }
 
+    /**
+     * Opens BigTable format reader. Proxies open calls to (private) static methods of @{link SSTableReader}.
+     *
+     */
     public abstract static class AbstractBigTableReaderFactory implements SSTableReader.Factory {
 
         public SSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
@@ -2450,4 +2454,4 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         resetTidying();
     }
 }
-// test 
+// test

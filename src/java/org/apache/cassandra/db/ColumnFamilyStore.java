@@ -2285,7 +2285,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // make sure none of our sstables are somehow in the future (clock drift, perhaps)
         for (ColumnFamilyStore cfs : concatWithIndexes())
             for (SSTableReader sstable : cfs.getLiveSSTables())
-                now = Math.max(now, sstable.getMaxDataAge());
+                now = Math.max(now, sstable.maxDataAge);
         truncatedAt = now;
 
         Runnable truncateRunnable = new Runnable()
@@ -2745,7 +2745,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             else
             {
                 keptSSTables++;
-                logger.info("Truncation is keeping {} maxDataAge={} truncatedAt={}", sstable, sstable.getMaxDataAge(), truncatedAt);
+                logger.info("Truncation is keeping {} maxDataAge={} truncatedAt={}", sstable, sstable.maxDataAge, truncatedAt);
             }
         }
 

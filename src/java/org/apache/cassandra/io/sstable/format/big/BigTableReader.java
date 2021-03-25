@@ -317,10 +317,4 @@ public class BigTableReader extends SSTableReader
         return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 
-    @Override
-    public long getMaxDataAge()
-    {
-        return maxDataAge;
-    }
-
 }
