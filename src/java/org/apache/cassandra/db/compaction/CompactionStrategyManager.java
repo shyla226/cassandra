@@ -60,7 +60,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -309,7 +308,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         {
             for (SSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
             {
-                if (sstable.openReason != AbstractBigTableReader.OpenReason.EARLY)
+                if (sstable.openReason != SSTableReader.OpenReason.EARLY)
                     compactionStrategyFor(sstable).addSSTable(sstable);
             }
             holders.forEach(AbstractStrategyHolder::startup);

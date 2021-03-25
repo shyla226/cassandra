@@ -399,7 +399,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (data.loadsstables)
         {
             Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            sstables = AbstractBigTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+            sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
             data.addInitialSSTablesWithoutUpdatingSize(sstables);
         }
 
@@ -1479,7 +1479,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         if (operation != OperationType.CLEANUP || isIndex())
         {
-            return AbstractBigTableReader.getTotalBytes(sstables);
+            return SSTableReader.getTotalBytes(sstables);
         }
 
         // cleanup size estimation only counts bytes for keys local to this node
@@ -1487,8 +1487,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Collection<Range<Token>> ranges = StorageService.instance.getLocalReplicas(keyspace.getName()).ranges();
         for (SSTableReader sstable : sstables)
         {
-            List<AbstractBigTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
-            for (AbstractBigTableReader.PartitionPositionBounds position : positions)
+            List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
+            for (SSTableReader.PartitionPositionBounds position : positions)
                 expectedFileSize += position.upperPosition - position.lowerPosition;
         }
 
@@ -1762,7 +1762,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
                 // check if the key actually exists in this sstable, without updating cache and stats
-                if (sstr.checkEntryExists(dk, AbstractBigTableReader.Operator.EQ, false))
+                if (sstr.checkEntryExists(dk, SSTableReader.Operator.EQ, false))
                     files.add(sstr.getFilename());
             }
             return files;

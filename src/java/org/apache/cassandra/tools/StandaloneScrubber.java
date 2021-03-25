@@ -48,7 +48,6 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableHeaderFix;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.tools.BulkLoader.CmdLineOptions;
@@ -126,7 +125,7 @@ public class StandaloneScrubber
                 listResult.add(Pair.create(descriptor, components));
 
                 File snapshotDirectory = Directories.getSnapshotDirectory(descriptor, snapshotName);
-                AbstractBigTableReader.createLinks(descriptor, components, snapshotDirectory.getPath());
+                SSTableReader.createLinks(descriptor, components, snapshotDirectory.getPath());
             }
             System.out.println(String.format("Pre-scrub sstables snapshotted into snapshot %s", snapshotName));
 

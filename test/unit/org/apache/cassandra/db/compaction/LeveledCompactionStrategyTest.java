@@ -53,7 +53,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
@@ -280,7 +279,7 @@ public class LeveledCompactionStrategyTest
             scanner.next();
 
         // scanner.getCurrentPosition should be equal to total bytes of L1 sstables
-        assertEquals(scanner.getCurrentPosition(), AbstractBigTableReader.getTotalUncompressedBytes(sstables));
+        assertEquals(scanner.getCurrentPosition(), SSTableReader.getTotalUncompressedBytes(sstables));
     }
 
     @Test
@@ -733,7 +732,7 @@ public class LeveledCompactionStrategyTest
             assertTrue(level.stream().allMatch(s -> s.getSSTableLevel() == lvl));
             if (i > 0)
             {
-                level.sort(AbstractBigTableReader.sstableComparator);
+                level.sort(SSTableReader.sstableComparator);
                 SSTableReader prev = null;
                 for (SSTableReader sstable : level)
                 {
@@ -796,7 +795,7 @@ public class LeveledCompactionStrategyTest
             for (SSTableReader sstable : lvlGroup.getValue())
             {
                 newLevel.add(sstable);
-                newLevel.sort(AbstractBigTableReader.sstableComparator);
+                newLevel.sort(SSTableReader.sstableComparator);
 
                 SSTableReader prev = null;
                 boolean kept = true;

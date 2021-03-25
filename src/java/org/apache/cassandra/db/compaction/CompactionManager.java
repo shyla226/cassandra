@@ -35,7 +35,7 @@ import com.google.common.util.concurrent.*;
 
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,7 +68,6 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.SnapshotDeletingTask;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -490,7 +489,7 @@ public class CompactionManager implements CompactionManagerMBean
             public Iterable<SSTableReader> filterSSTables(LifecycleTransaction transaction)
             {
                 List<SSTableReader> sortedSSTables = Lists.newArrayList(transaction.originals());
-                Collections.sort(sortedSSTables, AbstractBigTableReader.sizeComparator.reversed());
+                Collections.sort(sortedSSTables, SSTableReader.sizeComparator.reversed());
                 Iterator<SSTableReader> iter = sortedSSTables.iterator();
                 while (iter.hasNext())
                 {
@@ -564,7 +563,7 @@ public class CompactionManager implements CompactionManagerMBean
                 }
                 logger.info("Skipping cleanup for {}/{} sstables for {}.{} since they are fully contained in owned ranges (full ranges: {}, transient ranges: {})",
                             skippedSStables, totalSSTables, cfStore.keyspace.getName(), cfStore.getTableName(), fullRanges, transientRanges);
-                sortedSSTables.sort(AbstractBigTableReader.sizeComparator);
+                sortedSSTables.sort(SSTableReader.sizeComparator);
                 return sortedSSTables;
             }
 
@@ -590,7 +589,7 @@ public class CompactionManager implements CompactionManagerMBean
                 if (cfStore.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
                     originals = Iterables.filter(originals, SSTableReader::isRepaired);
                 List<SSTableReader> sortedSSTables = Lists.newArrayList(originals);
-                Collections.sort(sortedSSTables, AbstractBigTableReader.maxTimestampAscending);
+                Collections.sort(sortedSSTables, SSTableReader.maxTimestampAscending);
                 return sortedSSTables;
             }
 
@@ -737,7 +736,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         Set<SSTableReader> fullyContainedSSTables = findSSTablesToAnticompact(sstableIterator, normalizedRanges, sessionID);
 
-        cfs.metric.bytesMutatedAnticompaction.inc(AbstractBigTableReader.getTotalBytes(fullyContainedSSTables));
+        cfs.metric.bytesMutatedAnticompaction.inc(SSTableReader.getTotalBytes(fullyContainedSSTables));
         cfs.getCompactionStrategyManager().mutateRepaired(fullyContainedSSTables, UNREPAIRED_SSTABLE, sessionID, isTransient);
         // since we're just re-writing the sstable metdata for the fully contained sstables, we don't want
         // them obsoleted when the anti-compaction is complete. So they're removed from the transaction here
@@ -1229,7 +1228,7 @@ public class CompactionManager implements CompactionManagerMBean
         long totalkeysWritten = 0;
 
         long expectedBloomFilterSize = Math.max(cfs.metadata().params.minIndexInterval,
-                                                AbstractBigTableReader.getApproximateKeyCount(txn.originals()));
+                                                SSTableReader.getApproximateKeyCount(txn.originals()));
         if (logger.isTraceEnabled())
             logger.trace("Expected bloom filter size : {}", expectedBloomFilterSize);
 
@@ -1244,7 +1243,7 @@ public class CompactionManager implements CompactionManagerMBean
         List<SSTableReader> finished;
 
         int nowInSec = FBUtilities.nowInSeconds();
-        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, txn, false, sstable.getMaxDataAge());
+        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, txn, false, sstable.maxDataAge);
              ISSTableScanner scanner = cleanupStrategy.getScanner(sstable);
              CompactionController controller = new CompactionController(cfs, txn.originals(), getDefaultGcBefore(cfs, nowInSec));
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable));
@@ -1508,7 +1507,7 @@ public class CompactionManager implements CompactionManagerMBean
         // repairedAt values for these, we still avoid anti-compacting already repaired sstables, as we currently don't
         // make use of any actual repairedAt value and splitting up sstables just for that is not worth it at this point.
         Set<SSTableReader> unrepairedSSTables = sstables.stream().filter((s) -> !s.isRepaired()).collect(Collectors.toSet());
-        cfs.metric.bytesAnticompacted.inc(AbstractBigTableReader.getTotalBytes(unrepairedSSTables));
+        cfs.metric.bytesAnticompacted.inc(SSTableReader.getTotalBytes(unrepairedSSTables));
         Collection<Collection<SSTableReader>> groupedSSTables = cfs.getCompactionStrategyManager().groupSSTablesForAntiCompaction(unrepairedSSTables);
 
         // iterate over sstables to check if the full / transient / unrepaired ranges intersect them.
@@ -1538,8 +1537,8 @@ public class CompactionManager implements CompactionManagerMBean
         for (Iterator<SSTableReader> i = txn.originals().iterator(); i.hasNext();)
         {
             SSTableReader sstable = i.next();
-            if (groupMaxDataAge < sstable.getMaxDataAge())
-                groupMaxDataAge = sstable.getMaxDataAge();
+            if (groupMaxDataAge < sstable.maxDataAge)
+                groupMaxDataAge = sstable.maxDataAge;
         }
 
         if (txn.originals().size() == 0)
@@ -1599,7 +1598,7 @@ public class CompactionManager implements CompactionManagerMBean
              CompactionController controller = new CompactionController(cfs, sstableAsSet, getDefaultGcBefore(cfs, nowInSec));
              CompactionIterator ci = getAntiCompactionIterator(scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID(), active, isCancelled))
         {
-            int expectedBloomFilterSize = Math.max(cfs.metadata().params.minIndexInterval, (int)(AbstractBigTableReader.getApproximateKeyCount(sstableAsSet)));
+            int expectedBloomFilterSize = Math.max(cfs.metadata().params.minIndexInterval, (int)(SSTableReader.getApproximateKeyCount(sstableAsSet)));
 
             fullWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, pendingRepair, false, sstableAsSet, txn));
             transWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, pendingRepair, true, sstableAsSet, txn));
@@ -1760,14 +1759,14 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     // TODO this method should be moved to IndexSummaryManager as it is BigTable implementation specific so as IndexSummaryManager
-    public List<AbstractBigTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution) throws IOException
+    public List<SSTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution) throws IOException
     {
         return runIndexSummaryRedistribution(redistribution, active);
     }
 
     // TODO this method should be moved to IndexSummaryManager as it is BigTable implementation specific so as IndexSummaryManager
     @VisibleForTesting
-    List<AbstractBigTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution, ActiveCompactionsTracker activeCompactions) throws IOException
+    List<SSTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution, ActiveCompactionsTracker activeCompactions) throws IOException
     {
         activeCompactions.beginCompaction(redistribution);
         try

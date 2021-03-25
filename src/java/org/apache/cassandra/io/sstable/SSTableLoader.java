@@ -24,7 +24,7 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.io.FSError;
@@ -33,7 +33,6 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
@@ -153,7 +152,7 @@ public class SSTableLoader implements StreamEventHandler
                                                   InetAddressAndPort endpoint = entry.getKey();
                                                   List<Range<Token>> tokenRanges = Range.normalize(entry.getValue());
 
-                                                  List<AbstractBigTableReader.PartitionPositionBounds> sstableSections = sstable.getPositionsForRanges(tokenRanges);
+                                                  List<SSTableReader.PartitionPositionBounds> sstableSections = sstable.getPositionsForRanges(tokenRanges);
                                                   long estimatedKeys = sstable.estimatedKeysForRanges(tokenRanges);
                                                   Ref<? extends SSTableReader> ref = sstable.ref();
                                                   OutgoingStream stream = new CassandraOutgoingFile(StreamOperation.BULK_LOAD, ref, sstableSections, tokenRanges, estimatedKeys);
@@ -162,7 +161,7 @@ public class SSTableLoader implements StreamEventHandler
 
                                               // to conserve heap space when bulk loading
                                               if (sstable.descriptor.formatType == SSTableFormat.Type.BIG)
-                                                  ((AbstractBigTableReader) sstable).releaseSummary();
+                                                  ((SSTableReader) sstable).releaseSummary();
                                           }
                                           catch (FSError e)
                                           {

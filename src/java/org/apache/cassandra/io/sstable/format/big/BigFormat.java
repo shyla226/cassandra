@@ -101,7 +101,7 @@ public class BigFormat implements SSTableFormat
         }
     }
 
-    static class ReaderFactory extends AbstractBigTableReader.AbstractBigTableReaderFactory
+    static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
 
         @Override
@@ -124,7 +124,7 @@ public class BigFormat implements SSTableFormat
         @Override
         public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
         {
-            return AbstractBigTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
+            return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
         }
     }
 

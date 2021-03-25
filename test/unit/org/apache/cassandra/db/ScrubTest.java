@@ -75,7 +75,6 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
@@ -433,9 +432,9 @@ public class ScrubTest
             CompressionMetadata compData = CompressionMetadata.create(sstable.getFilename());
 
             CompressionMetadata.Chunk chunk1 = compData.chunkFor(
-                    sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), AbstractBigTableReader.Operator.EQ).position);
+                    sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
             CompressionMetadata.Chunk chunk2 = compData.chunkFor(
-                    sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), AbstractBigTableReader.Operator.EQ).position);
+                    sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
 
             startPosition = Math.min(chunk1.offset, chunk2.offset);
             endPosition = Math.max(chunk1.offset + chunk1.length, chunk2.offset + chunk2.length);
@@ -444,8 +443,8 @@ public class ScrubTest
         }
         else
         { // overwrite with garbage from key1 to key2
-            long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), AbstractBigTableReader.Operator.EQ).position;
-            long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), AbstractBigTableReader.Operator.EQ).position;
+            long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position;
+            long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), SSTableReader.Operator.EQ).position;
             startPosition = Math.min(row0Start, row1Start);
             endPosition = Math.max(row0Start, row1Start);
         }

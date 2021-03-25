@@ -28,7 +28,7 @@ import com.google.common.collect.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader.UniqueIdentifier;
+import org.apache.cassandra.io.sstable.format.SSTableReader.UniqueIdentifier;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;

@@ -29,8 +29,8 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -414,7 +414,7 @@ public abstract class AbstractCompactionStrategy
         else
         {
             // what percentage of columns do we expect to compact outside of overlap?
-            if (sstable.descriptor.formatType == SSTableFormat.Type.BIG && ((AbstractBigTableReader) sstable).getIndexSummarySize() < 2)
+            if (sstable.descriptor.formatType == SSTableFormat.Type.BIG && ((SSTableReader) sstable).getIndexSummarySize() < 2)
             {
                 // we have too few samples to estimate correct percentage
                 return false;
@@ -516,7 +516,7 @@ public abstract class AbstractCompactionStrategy
     {
         int groupSize = 2;
         List<SSTableReader> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
-        Collections.sort(sortedSSTablesToGroup, AbstractBigTableReader.sstableComparator);
+        Collections.sort(sortedSSTablesToGroup, SSTableReader.sstableComparator);
 
         Collection<Collection<SSTableReader>> groupedSSTables = new ArrayList<>();
         Collection<SSTableReader> currGroup = new ArrayList<>(groupSize);

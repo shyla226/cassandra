@@ -38,7 +38,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.Pair;
@@ -157,7 +156,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
         if (sstablesWithTombstones.isEmpty())
             return Collections.emptyList();
 
-        return Collections.singletonList(Collections.min(sstablesWithTombstones, AbstractBigTableReader.sizeComparator));
+        return Collections.singletonList(Collections.min(sstablesWithTombstones, SSTableReader.sizeComparator));
     }
 
     private List<SSTableReader> getCompactionCandidates(Iterable<SSTableReader> candidateSSTables)
@@ -363,7 +362,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
         List<SSTableReader> ssTableReaders = new ArrayList<>(bucket);
 
         // Trim the largest sstables off the end to meet the maxThreshold
-        Collections.sort(ssTableReaders, AbstractBigTableReader.sizeComparator);
+        Collections.sort(ssTableReaders, SSTableReader.sizeComparator);
 
         return ImmutableList.copyOf(Iterables.limit(ssTableReaders, maxThreshold));
     }

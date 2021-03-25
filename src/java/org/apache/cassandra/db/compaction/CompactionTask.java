@@ -40,7 +40,6 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.DefaultCompactionWriter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -230,7 +229,7 @@ public class CompactionTask extends AbstractCompactionTask
                 long durationInNano = System.nanoTime() - start;
                 long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
                 long startsize = inputSizeBytes;
-                long endsize = AbstractBigTableReader.getTotalBytes(newSStables);
+                long endsize = SSTableReader.getTotalBytes(newSStables);
                 double ratio = (double) endsize / (double) startsize;
 
                 StringBuilder newSSTableNames = new StringBuilder();
@@ -424,8 +423,8 @@ public class CompactionTask extends AbstractCompactionTask
         long max = 0;
         for (SSTableReader sstable : sstables)
         {
-            if (sstable.getMaxDataAge() > max)
-                max = sstable.getMaxDataAge();
+            if (sstable.maxDataAge > max)
+                max = sstable.maxDataAge;
         }
         return max;
     }

@@ -37,7 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.Config;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -61,7 +60,7 @@ class LeveledGenerations
     private final TreeSet<SSTableReader> [] levels = new TreeSet[MAX_LEVEL_COUNT - 1];
 
     private static final Comparator<SSTableReader> nonL0Comparator = (o1, o2) -> {
-        int cmp = AbstractBigTableReader.sstableComparator.compare(o1, o2);
+        int cmp = SSTableReader.sstableComparator.compare(o1, o2);
         if (cmp == 0)
             cmp = Ints.compare(o1.descriptor.generation, o2.descriptor.generation);
         return cmp;
@@ -264,7 +263,7 @@ class LeveledGenerations
                     logger.trace("L{} contains {} SSTables ({}) in {}",
                                  i,
                                  level.size(),
-                                 FBUtilities.prettyPrintMemory(AbstractBigTableReader.getTotalBytes(level)),
+                                 FBUtilities.prettyPrintMemory(SSTableReader.getTotalBytes(level)),
                                  this);
                 }
             }

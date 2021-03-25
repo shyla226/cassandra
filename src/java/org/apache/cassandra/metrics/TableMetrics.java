@@ -42,7 +42,6 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
@@ -488,7 +487,7 @@ public class TableMetrics
                    memtablePartitions += memtable.partitionCount();
                 try(ColumnFamilyStore.RefViewFragment refViewFragment = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
                 {
-                    return AbstractBigTableReader.getApproximateKeyCount(refViewFragment.sstables) + memtablePartitions;
+                    return SSTableReader.getApproximateKeyCount(refViewFragment.sstables) + memtablePartitions;
                 }
             }
         }, null);
@@ -784,7 +783,7 @@ public class TableMetrics
             public Long getValue()
             {
                 long total = 0;
-                for (AbstractBigTableReader sst : AbstractBigTableReader.selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
+                for (SSTableReader sst : SSTableReader.selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     total += sst.getIndexSummaryOffHeapSize();
                 return total;
             }
@@ -818,7 +817,7 @@ public class TableMetrics
             protected double getNumerator()
             {
                 long hits = 0L;
-                for (AbstractBigTableReader sstable : AbstractBigTableReader.selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
+                for (SSTableReader sstable : SSTableReader.selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     hits += sstable.getKeyCacheHit();
                 return hits;
             }
@@ -826,7 +825,7 @@ public class TableMetrics
             protected double getDenominator()
             {
                 long requests = 0L;
-                for (AbstractBigTableReader sstable : AbstractBigTableReader.selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
+                for (SSTableReader sstable : SSTableReader.selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     requests += sstable.getKeyCacheRequest();
                 return Math.max(requests, 1); // to avoid NaN.
             }
@@ -1048,7 +1047,7 @@ public class TableMetrics
             {
                 // We should not have any sstable which are in an open early mode as the sstable were selected
                 // using SSTableSet.CANONICAL.
-                assert sstable.openReason != AbstractBigTableReader.OpenReason.EARLY;
+                assert sstable.openReason != SSTableReader.OpenReason.EARLY;
 
                 CompressionMetadata compressionMetadata = sstable.getCompressionMetadata();
                 compressedLengthSum += compressionMetadata.compressedFileLength;

@@ -24,7 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -40,7 +40,6 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
@@ -91,7 +90,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, AbstractBigTableReader.Operator.EQ);
+                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
                         dataFile.seek(indexEntry.position);
                         ByteBufferUtil.readWithShortLength(dataFile); // key
 

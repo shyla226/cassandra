@@ -44,7 +44,6 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -233,7 +232,7 @@ public class CachingBench extends CQLTester
         int startTombCount = countTombstoneMarkers(cfs);
         int startRowDeletions = countRowDeletions(cfs);
         int startTableCount = cfs.getLiveSSTables().size();
-        long startSize = AbstractBigTableReader.getTotalBytes(cfs.getLiveSSTables());
+        long startSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
         System.out.println("\nCompession: " + cfs.getCompressionParameters().toString());
         System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(0).toString());
         if (cacheEnabled)
@@ -266,7 +265,7 @@ public class CachingBench extends CQLTester
         int endTombCount = countTombstoneMarkers(cfs);
         int endRowDeletions = countRowDeletions(cfs);
         int endTableCount = cfs.getLiveSSTables().size();
-        long endSize = AbstractBigTableReader.getTotalBytes(cfs.getLiveSSTables());
+        long endSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
 
         System.out.println(String.format("Major compaction completed in %.3fs",
                 (endTime - startTime) * 1e-3));

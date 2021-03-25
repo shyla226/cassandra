@@ -29,7 +29,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
 
@@ -139,13 +138,13 @@ public class View
             case CANONICAL:
                 Set<SSTableReader> canonicalSSTables = new HashSet<>();
                 for (SSTableReader sstable : compacting)
-                    if (sstable.openReason != AbstractBigTableReader.OpenReason.EARLY)
+                    if (sstable.openReason != SSTableReader.OpenReason.EARLY)
                         canonicalSSTables.add(sstable);
                 // reason for checking if compacting contains the sstable is that if compacting has an EARLY version
                 // of a NORMAL sstable, we still have the canonical version of that sstable in sstables.
                 // note that the EARLY version is equal, but not == since it is a different instance of the same sstable.
                 for (SSTableReader sstable : sstables)
-                    if (!compacting.contains(sstable) && sstable.openReason != AbstractBigTableReader.OpenReason.EARLY)
+                    if (!compacting.contains(sstable) && sstable.openReason != SSTableReader.OpenReason.EARLY)
                         canonicalSSTables.add(sstable);
 
                 return canonicalSSTables;

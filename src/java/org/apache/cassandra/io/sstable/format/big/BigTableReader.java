@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.Supplier;
 
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 
@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
  * Do not re-call open() on existing SSTable files; use the references kept by ColumnFamilyStore post-start instead.
  */
-public class BigTableReader extends AbstractBigTableReader
+public class BigTableReader extends SSTableReader
 {
     private static final Logger logger = LoggerFactory.getLogger(BigTableReader.class);
 
@@ -73,7 +73,7 @@ public class BigTableReader extends AbstractBigTableReader
                                           boolean reversed,
                                           SSTableReadsListener listener)
     {
-        BigTableRowIndexEntry rie = getPosition(key, AbstractBigTableReader.Operator.EQ, true, false, listener);
+        BigTableRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, true, false, listener);
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
@@ -133,7 +133,7 @@ public class BigTableReader extends AbstractBigTableReader
     @Override
     public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
     {
-        BigTableRowIndexEntry position = getPosition(key, AbstractBigTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
+        BigTableRowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
         if (position == null)
             return null;
         return SSTableIdentityIterator.create(this, dfile.get(), position, key, tombstoneOnly);
@@ -292,7 +292,7 @@ public class BigTableReader extends AbstractBigTableReader
             throw new CorruptSSTableException(e, path);
         }
 
-        if (op == AbstractBigTableReader.Operator.EQ && updateCacheAndStats)
+        if (op == SSTableReader.Operator.EQ && updateCacheAndStats)
             bloomFilterTracker.addFalsePositive();
         listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
         Tracing.trace("Partition index lookup complete (bloom filter false positive) for sstable {}", descriptor.generation);

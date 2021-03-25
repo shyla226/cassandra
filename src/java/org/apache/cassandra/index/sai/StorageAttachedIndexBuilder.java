@@ -56,10 +56,9 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -177,7 +176,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                     indexWriter.startPartition(key, keyPosition);
 
-                    RowIndexEntry<?> indexEntry = sstable.getPosition(key, AbstractBigTableReader.Operator.EQ);
+                    RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
                     dataFile.seek(indexEntry.position);
                     ByteBufferUtil.skipShortLength(dataFile); // key
 
