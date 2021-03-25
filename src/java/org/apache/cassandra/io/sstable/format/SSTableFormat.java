@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format;
 import com.google.common.base.CharMatcher;
 
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 
 /**
  * Provides the accessors to data on disk.
@@ -39,7 +40,10 @@ public interface SSTableFormat
     public enum Type
     {
         //The original sstable format
-        BIG("big", BigFormat.instance);
+        BIG("big", BigFormat.instance),
+
+        //Sstable format with trie indices
+        TRIE_INDEX("bti", TrieIndexFormat.instance);
 
         public final SSTableFormat info;
         public final String name;

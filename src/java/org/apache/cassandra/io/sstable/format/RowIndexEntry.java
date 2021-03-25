@@ -49,6 +49,11 @@ public class RowIndexEntry<T> implements IMeasurableMemory
         throw new UnsupportedOperationException();
     }
 
+    public int rowIndexCount()
+    {
+        return 0;
+    }
+
     public int columnsIndexCount()
     {
         return 0;

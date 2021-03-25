@@ -21,22 +21,27 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
@@ -103,12 +108,19 @@ public class TrieIndexFormat implements SSTableFormat
     {
         @Override
         public SSTableWriter open(Descriptor descriptor,
-                                  SSTableWriterCreationHelper helper,
+                                  long keyCount,
+                                  long repairedAt,
+                                  UUID pendingRepair,
+                                  boolean isTransient,
+                                  TableMetadataRef metadata,
+                                  MetadataCollector metadataCollector,
+                                  SerializationHeader header,
                                   Collection<SSTableFlushObserver> observers,
-                                  Set<Component> indexComponents,
-                                  SSTableTracker sstableTracker)
+                                  LifecycleNewTracker lifecycleNewTracker,
+                                  Set<Component> indexComponents)
         {
-            return new TrieIndexSSTableWriter(descriptor, helper, observers, indexComponents, sstableTracker);
+            SSTable.validateRepairedMetadata(repairedAt, pendingRepair, isTransient);
+            return new TrieIndexSSTableWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers, lifecycleNewTracker, indexComponents);
         }
     }
 

@@ -227,7 +227,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      *
      * @throws FSWriteError if a write to the dataFile fails
      */
-    public abstract BigTableRowIndexEntry append(UnfilteredRowIterator iterator);
+    public abstract RowIndexEntry<?> append(UnfilteredRowIterator iterator);
 
     public abstract long getFilePointer();
 
