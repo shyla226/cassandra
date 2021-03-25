@@ -43,6 +43,8 @@ import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
 public class MetadataCollector implements PartitionStatisticsCollector
 {
     public static final double NO_COMPRESSION_RATIO = -1.0;
+    private static final ByteBuffer[] EMPTY_CLUSTERING = new ByteBuffer[0];
+    private long currentPartitionCells = 0;
 
     static EstimatedHistogram defaultCellPerPartitionCountHistogram()
     {
@@ -159,6 +161,12 @@ public class MetadataCollector implements PartitionStatisticsCollector
         return this;
     }
 
+    public MetadataCollector addKeyHash(long hashed)
+    {
+        cardinality.offerHashed(hashed);
+        return this;
+    }
+
     public MetadataCollector addPartitionSizeInBytes(long partitionSize)
     {
         estimatedPartitionSize.add(partitionSize);
@@ -168,6 +176,13 @@ public class MetadataCollector implements PartitionStatisticsCollector
     public MetadataCollector addCellPerPartitionCount(long cellCount)
     {
         estimatedCellPerPartitionCount.add(cellCount);
+        return this;
+    }
+
+    public MetadataCollector addCellPerPartitionCount()
+    {
+        estimatedCellPerPartitionCount.add(currentPartitionCells);
+        currentPartitionCells = 0;
         return this;
     }
 
@@ -193,6 +208,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
 
     public void update(Cell<?> cell)
     {
+        ++currentPartitionCells;
         updateTimestamp(cell.timestamp());
         updateTTL(cell.ttl());
         updateLocalDeletionTime(cell.localDeletionTime());

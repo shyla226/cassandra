@@ -274,7 +274,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         long endPosition = dataFile.position();
         long partitionSize = endPosition - currentStartPosition;
-        maybeLogLargePartitionWarning(currentKey, partitionSize);
         metadataCollector.addPartitionSizeInBytes(partitionSize);
         metadataCollector.addKeyHash(currentKey.hash2_64());
         last = currentKey;
@@ -285,31 +284,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             logger.trace("wrote {} at {}", currentKey, entry.position);
         iwriter.append(currentKey, entry);
         return entry;
-    }
-
-    private void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
-    {
-        if (SchemaConstants.isInternalKeyspace(metadata().keyspace))
-            return;
-
-        if (Guardrails.partitionSize.triggersOn(rowSize, null))
-        {
-            String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
-            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true, null);
-
-            for (SSTableWriteWarning listener : warningListeners)
-            {
-                try
-                {
-                    listener.largePartitionWarning(metadata.keyspace, metadata.name, key, rowSize);
-                }
-                catch (Throwable t)
-                {
-                    JVMStabilityInspector.inspectThrowable(t);
-                    logger.warn("Problem notifying listeners about wide row threshold", t);
-                }
-            }
-        }
     }
 
     @SuppressWarnings("resource")
@@ -378,11 +352,11 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         StatsMetadata stats = statsMetadata();
         // finalize in-memory state for the reader
         PartitionIndex partitionIndex = iwriter.completedPartitionIndex();
-        iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
-        FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
-        dataFile.updateFileHandle(dbuilder);
+        FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
+        if (compression)
+            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
+        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                             components,
@@ -425,7 +399,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         protected Throwable doCommit(Throwable accumulate)
         {
-            accumulate = writerTidier.commit(accumulate);
             accumulate = dataFile.commit(accumulate);
             accumulate = iwriter.commit(accumulate);
             return accumulate;
@@ -441,7 +414,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         protected Throwable doAbort(Throwable accumulate)
         {
-            accumulate = writerTidier.abort(accumulate);
             accumulate = iwriter.abort(accumulate);
             accumulate = dataFile.abort(accumulate);
             return accumulate;
@@ -450,10 +422,10 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
     private void writeMetadata(Descriptor desc, Map<MetadataType, MetadataComponent> components)
     {
-        File file = desc.filenameFor(Component.STATS);
+        File file = desc.fileFor(Component.STATS);
         try (SequentialWriter out = new SequentialWriter(file, WRITER_OPTION))
         {
-            desc.getMetadataSerializer().serialize(components, out, desc);
+            desc.getMetadataSerializer().serialize(components, out, desc.version);
             out.finish();
         }
         catch (IOException e)
@@ -534,20 +506,19 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         IndexWriter(TableMetadata table)
         {
-            CompressionParams params = table.params.compression;
             rowIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.ROW_INDEX)), WRITER_OPTION);
-            rowIndexFHBuilder = defaultIndexHandleBuilder(descriptor, table, Component.ROW_INDEX, false);
+            rowIndexFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
             partitionIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.PARTITION_INDEX)), WRITER_OPTION);
-            partitionIndexFHBuilder = defaultIndexHandleBuilder(descriptor, table, Component.PARTITION_INDEX, false);
+            partitionIndexFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
             bf = FilterFactory.getFilter(keyCount, table.params.bloomFilterFpChance);
             // register listeners to be alerted when the data files are flushed
-            partitionIndexFile.setFileSyncListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
-            rowIndexFile.setFileSyncListener(() -> partitionIndex.markRowIndexSynced(rowIndexFile.getLastFlushOffset()));
-            dataFile.setFileSyncListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
+            partitionIndexFile.setPostFlushListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
+            rowIndexFile.setPostFlushListener(() -> partitionIndex.markRowIndexSynced(rowIndexFile.getLastFlushOffset()));
+            dataFile.setPostFlushListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
         }
 
-        public long append(DecoratedKey key, RowIndexEntry<IndexInfo> indexEntry) throws IOException
+        public long append(DecoratedKey key, RowIndexEntry<RowIndexReader.IndexInfo> indexEntry) throws IOException
         {
             bf.add(key);
             long position;
@@ -557,7 +528,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                 try
                 {
                     ByteBufferUtil.writeWithShortLength(key.getKey(), rowIndexFile);
-                    indexEntry.serialize(rowIndexFile, rowIndexFile.position());
+                    ((TrieIndexEntry) indexEntry).serialize(rowIndexFile, rowIndexFile.position());
                 }
                 catch (IOException e)
                 {
@@ -589,12 +560,12 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         {
             if (components.contains(Component.FILTER))
             {
-                File path = new File(descriptor.filenameFor(Component.FILTER));
+                File path = descriptor.fileFor(Component.FILTER);
                 try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                      DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
                 {
                     // bloom filter
-                    BloomFilterSerializer.serialize((BloomFilter) bf, stream, descriptor.version.hasOldBfFormat());
+                    BloomFilterSerializer.serialize((BloomFilter) bf, stream);
                     stream.flush();
                     SyncUtil.sync((FileChannel) fos);
                 }
@@ -673,7 +644,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         @Override
         protected Throwable doPostCleanup(Throwable accumulate)
         {
-            return Throwables.close(accumulate, ImmutableList.of(bf, partitionIndex, rowIndexFile, rowIndexFHBuilder, partitionIndexFile, partitionIndexFHBuilder));
+            return Throwables.close(accumulate, bf, partitionIndex, rowIndexFile, rowIndexFHBuilder, partitionIndexFile, partitionIndexFHBuilder);
         }
     }
 }

@@ -267,6 +267,12 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         return current();
     }
 
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    {
+        // Set actual length to avoid having to read it off the file system.
+        fhBuilder.withLength(lastFlushOffset);
+    }
+
     // Page management using on-disk pages
 
     @Override
