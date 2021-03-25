@@ -29,6 +29,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
 
@@ -138,13 +139,13 @@ public class View
             case CANONICAL:
                 Set<SSTableReader> canonicalSSTables = new HashSet<>();
                 for (SSTableReader sstable : compacting)
-                    if (sstable.openReason != SSTableReader.OpenReason.EARLY)
+                    if (sstable.openReason != AbstractBigTableReader.OpenReason.EARLY)
                         canonicalSSTables.add(sstable);
                 // reason for checking if compacting contains the sstable is that if compacting has an EARLY version
                 // of a NORMAL sstable, we still have the canonical version of that sstable in sstables.
                 // note that the EARLY version is equal, but not == since it is a different instance of the same sstable.
                 for (SSTableReader sstable : sstables)
-                    if (!compacting.contains(sstable) && sstable.openReason != SSTableReader.OpenReason.EARLY)
+                    if (!compacting.contains(sstable) && sstable.openReason != AbstractBigTableReader.OpenReason.EARLY)
                         canonicalSSTables.add(sstable);
 
                 return canonicalSSTables;
@@ -153,15 +154,9 @@ public class View
         }
     }
 
-    public Iterable<SSTableReader> getUncompacting(Iterable<SSTableReader> candidates)
+    public Iterable<? extends SSTableReader> getUncompacting(Iterable<? extends SSTableReader> candidates)
     {
-        return filter(candidates, new Predicate<SSTableReader>()
-        {
-            public boolean apply(SSTableReader sstable)
-            {
-                return !compacting.contains(sstable);
-            }
-        });
+        return filter(candidates, (Predicate<SSTableReader>) sstable -> !compacting.contains(sstable));
     }
 
     public boolean isEmpty()
@@ -241,7 +236,7 @@ public class View
     // METHODS TO CONSTRUCT FUNCTIONS FOR MODIFYING A VIEW:
 
     // return a function to un/mark the provided readers compacting in a view
-    static Function<View, View> updateCompacting(final Set<SSTableReader> unmark, final Iterable<SSTableReader> mark)
+    static Function<View, View> updateCompacting(final Set<? extends SSTableReader> unmark, final Iterable<? extends SSTableReader> mark)
     {
         if (unmark.isEmpty() && Iterables.isEmpty(mark))
             return Functions.identity();
@@ -259,7 +254,7 @@ public class View
 
     // construct a predicate to reject views that do not permit us to mark these readers compacting;
     // i.e. one of them is either already compacting, has been compacted, or has been replaced
-    static Predicate<View> permitCompacting(final Iterable<SSTableReader> readers)
+    static Predicate<View> permitCompacting(final Iterable<? extends SSTableReader> readers)
     {
         return new Predicate<View>()
         {

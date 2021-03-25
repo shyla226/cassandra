@@ -25,6 +25,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -73,15 +74,14 @@ import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
-import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 import org.apache.cassandra.utils.BloomFilterSerializer;
+import org.apache.cassandra.utils.concurrent.RefCounted;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 
@@ -144,9 +144,9 @@ import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR
  *
  * TODO: fill in details about Tracker and lifecycle interactions for tools, and for compaction strategies
  */
-public abstract class SSTableReader extends SSTable implements SelfRefCounted<SSTableReader>
+public abstract class AbstractBigTableReader extends SSTableReader
 {
-    private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
+    private static final Logger logger = LoggerFactory.getLogger(AbstractBigTableReader.class);
 
     private static final ScheduledThreadPoolExecutor syncExecutor = initSyncExecutor();
     private static ScheduledThreadPoolExecutor initSyncExecutor()
@@ -168,20 +168,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     // it's just an object, which we use regular Object equality on; we introduce a special class just for easy recognition
     public static final class UniqueIdentifier {}
-
     public static final Comparator<SSTableReader> sstableComparator = (o1, o2) -> o1.first.compareTo(o2.first);
 
     public static final Comparator<SSTableReader> generationReverseComparator = (o1, o2) -> -Integer.compare(o1.descriptor.generation, o2.descriptor.generation);
 
     public static final Ordering<SSTableReader> sstableOrdering = Ordering.from(sstableComparator);
 
-    public static final Comparator<SSTableReader> sizeComparator = new Comparator<SSTableReader>()
-    {
-        public int compare(SSTableReader o1, SSTableReader o2)
-        {
-            return Longs.compare(o1.onDiskLength(), o2.onDiskLength());
-        }
-    };
+    public static final Comparator<? super SSTableReader> sizeComparator = (o1, o2) -> Longs.compare(o1.onDiskLength(), o2.onDiskLength());
 
     /**
      * maxDataAge is a timestamp in local server time (e.g. System.currentTimeMilli) which represents an upper bound
@@ -205,7 +198,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         MOVED_START
     }
 
-    public final OpenReason openReason;
     public final UniqueIdentifier instanceId = new UniqueIdentifier();
 
     // indexfile and datafile: might be null before a call to load()
@@ -225,17 +217,25 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     // not final since we need to be able to change level on a file.
     protected volatile StatsMetadata sstableMetadata;
 
-    public final SerializationHeader header;
-
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
     protected final AtomicLong keyCacheRequest = new AtomicLong(0);
 
     private final InstanceTidier tidy;
-    private final Ref<SSTableReader> selfRef;
+    private final Ref<AbstractBigTableReader> selfRef;
 
     private RestorableMeter readMeter;
 
     private volatile double crcCheckChance;
+
+    public static Iterable<AbstractBigTableReader> selectOnlyBigTableReaders(Iterable<? extends SSTableReader> readers)
+    {
+        return Iterables.transform(Iterables.filter(readers, tr -> tr.descriptor.formatType == SSTableFormat.Type.BIG), AbstractBigTableReader.class::cast);
+    }
+
+    public static <T> T selectOnlyBigTableReaders(Collection<? extends SSTableReader> readers, Collector<? super AbstractBigTableReader, ?, T> collector)
+    {
+        return readers.stream().filter(tr -> tr.descriptor.formatType == SSTableFormat.Type.BIG).map(AbstractBigTableReader.class::cast).collect(collector);
+    }
 
     /**
      * Calculate approximate key count.
@@ -246,7 +246,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param sstables SSTables to calculate key count
      * @return estimated key count
      */
-    public static long getApproximateKeyCount(Iterable<SSTableReader> sstables)
+    public static long getApproximateKeyCount(Iterable<? extends SSTableReader> sstables)
     {
         long count = -1;
 
@@ -306,10 +306,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * Estimates how much of the keys we would keep if the sstables were compacted together
      */
-    public static double estimateCompactionGain(Set<SSTableReader> overlapping)
+    public static double estimateCompactionGain(Set<AbstractBigTableReader> overlapping)
     {
         Set<ICardinality> cardinalities = new HashSet<>(overlapping.size());
-        for (SSTableReader sstable : overlapping)
+        for (AbstractBigTableReader sstable : overlapping)
         {
             try
             {
@@ -351,7 +351,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return base;
     }
 
-    public static SSTableReader open(Descriptor descriptor)
+    public static AbstractBigTableReader open(Descriptor descriptor)
     {
         TableMetadataRef metadata;
         if (descriptor.cfname.contains(SECONDARY_INDEX_NAME_SEPARATOR))
@@ -369,24 +369,24 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return open(descriptor, metadata);
     }
 
-    public static SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+    private static AbstractBigTableReader open(Descriptor desc, TableMetadataRef metadata)
     {
         return open(desc, componentsFor(desc), metadata);
     }
 
-    public static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static AbstractBigTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         return open(descriptor, components, metadata, true, false);
     }
 
     // use only for offline or "Standalone" operations
-    public static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
+    private static AbstractBigTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
     {
         return open(descriptor, components, cfs.metadata, false, true);
     }
 
     // use only for offline or "Standalone" operations
-    public static SSTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
+    private static AbstractBigTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
     {
         return open(descriptor, componentsFor(descriptor), metadata, false, true);
     }
@@ -397,10 +397,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param descriptor
      * @param components
      * @param metadata
-     * @return opened SSTableReader
+     * @return opened BigSSTableReader
      * @throws IOException
      */
-    public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static AbstractBigTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
@@ -411,7 +411,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         Map<MetadataType, MetadataComponent> sstableMetadata;
         try
         {
-             sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
         }
         catch (IOException e)
         {
@@ -451,10 +451,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param validate Check SSTable for corruption (limited)
      * @param isOffline Whether we are opening this SSTable "offline", for example from an external tool or not for inclusion in queries (validations)
      *                  This stops regenerating BF + Summaries and also disables tracking of hotness for the SSTable.
-     * @return {@link SSTableReader}
+     * @return {@link AbstractBigTableReader}
      * @throws IOException
      */
-    public static SSTableReader open(Descriptor descriptor,
+    private static AbstractBigTableReader open(Descriptor descriptor,
                                      Set<Component> components,
                                      TableMetadataRef metadata,
                                      boolean validate,
@@ -496,7 +496,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             System.exit(1);
         }
 
-        SSTableReader sstable;
+        AbstractBigTableReader sstable;
         try
         {
             sstable = new SSTableReaderBuilder.ForRead(descriptor,
@@ -544,7 +544,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     SSTableReader sstable;
                     try
                     {
-                        sstable = open(entry.getKey(), entry.getValue(), metadata);
+                        sstable = entry.getKey().getFormat().getReaderFactory().open(entry.getKey(), entry.getValue(), metadata);
                     }
                     catch (CorruptSSTableException ex)
                     {
@@ -581,7 +581,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * Open a RowIndexedReader which already has its state initialized (by SSTableWriter).
      */
-    public static SSTableReader internalOpen(Descriptor desc,
+    public static AbstractBigTableReader internalOpen(Descriptor desc,
                                              Set<Component> components,
                                              TableMetadataRef metadata,
                                              FileHandle ifile,
@@ -596,7 +596,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         assert desc != null && ifile != null && dfile != null && summary != null && bf != null && sstableMetadata != null;
 
         return new SSTableReaderBuilder.ForWriter(desc, metadata, maxDataAge, components, sstableMetadata, openReason, header)
-                .bf(bf).ifile(ifile).dfile(dfile).summary(summary).build();
+               .bf(bf).ifile(ifile).dfile(dfile).summary(summary).build();
     }
 
     /**
@@ -630,7 +630,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
-    protected SSTableReader(SSTableReaderBuilder builder)
+    protected AbstractBigTableReader(SSTableReaderBuilder builder)
     {
         this(builder.descriptor,
              builder.components,
@@ -645,7 +645,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
              builder.bf);
     }
 
-    protected SSTableReader(final Descriptor desc,
+    protected AbstractBigTableReader(final Descriptor desc,
                             Set<Component> components,
                             TableMetadataRef metadata,
                             long maxDataAge,
@@ -657,15 +657,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                             FileHandle ifile,
                             IFilter bf)
     {
-        super(desc, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        super(desc, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy(), openReason, header);
         this.sstableMetadata = sstableMetadata;
-        this.header = header;
         this.indexSummary = summary;
         this.dfile = dfile;
         this.ifile = ifile;
         this.bf = bf;
         this.maxDataAge = maxDataAge;
-        this.openReason = openReason;
         tidy = new InstanceTidier(descriptor, metadata.id);
         selfRef = new Ref<>(this, tidy);
     }
@@ -691,7 +689,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public boolean equals(Object that)
     {
-        return that instanceof SSTableReader && ((SSTableReader) that).descriptor.equals(this.descriptor);
+        return that instanceof AbstractBigTableReader && ((AbstractBigTableReader) that).descriptor.equals(this.descriptor);
     }
 
     public int hashCode()
@@ -836,7 +834,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
-    private SSTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason)
+    private AbstractBigTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason)
     {
         return cloneAndReplace(newFirst, reason, indexSummary.sharedCopy());
     }
@@ -851,9 +849,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
-    private SSTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason, IndexSummary newSummary)
+    private AbstractBigTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason, IndexSummary newSummary)
     {
-        SSTableReader replacement = internalOpen(descriptor,
+        AbstractBigTableReader replacement = internalOpen(descriptor,
                                                  components,
                                                  metadata,
                                                  ifile != null ? ifile.sharedCopy() : null,
@@ -879,9 +877,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
     @VisibleForTesting
-    public SSTableReader cloneAndReplace(IFilter newBloomFilter)
+    public AbstractBigTableReader cloneAndReplace(IFilter newBloomFilter)
     {
-        SSTableReader replacement = internalOpen(descriptor,
+        AbstractBigTableReader replacement = internalOpen(descriptor,
                                                  components,
                                                  metadata,
                                                  ifile.sharedCopy(),
@@ -899,7 +897,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return replacement;
     }
 
-    public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
+    public AbstractBigTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
     {
         synchronized (tidy.global)
         {
@@ -908,7 +906,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     // runOnClose must NOT be an anonymous or non-static inner class, nor must it retain a reference chain to this reader
-    public SSTableReader cloneWithNewStart(DecoratedKey newStart, final Runnable runOnClose)
+    public AbstractBigTableReader cloneWithNewStart(DecoratedKey newStart, final Runnable runOnClose)
     {
         synchronized (tidy.global)
         {
@@ -962,7 +960,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @throws IOException
      */
     @SuppressWarnings("resource")
-    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
+    public AbstractBigTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
     {
         assert openReason != OpenReason.EARLY;
 
@@ -1007,7 +1005,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
              IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata().params.minIndexInterval, newSamplingLevel))
         {
             while (iterator.hasNext())
-                summaryBuilder.maybeAddEntry(iterator.next(), iterator.getKeyPosition());
+                summaryBuilder.maybeAddEntry(iterator.next(), iterator.getIndexPosition());
 
             return summaryBuilder.build(getPartitioner());
         }
@@ -1472,7 +1470,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * Mark the sstable as obsolete, i.e., compacted into newer sstables.
      *
-     * When calling this function, the caller must ensure that the SSTableReader is not referenced anywhere
+     * When calling this function, the caller must ensure that the BigSSTableReader is not referenced anywhere
      * except for threads holding a reference.
      *
      * multiple times is usually buggy (see exceptions in Tracker.unmarkCompacting and removeOldSSTablesSize).
@@ -1615,6 +1613,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param position the start position of the partion-level deletion time in the data file
      * @return the partion-level deletion time at the specified position
      */
+    @Override
     public DeletionTime partitionLevelDeletionAt(long position) throws IOException
     {
         try (FileDataInput in = dfile.createReader(position))
@@ -1634,6 +1633,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param columnFilter the columns to fetch, {@code null} to select all the columns
      * @return the static row at the specified position
      */
+    @Override
     public Row staticRowAt(long position, ColumnFilter columnFilter) throws IOException
     {
         if (!header.hasStatic())
@@ -1661,6 +1661,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param position the start position of the unfiltered in the data file
      * @return the clustering prefix of the unfiltered at the specified position
      */
+    @Override
     public ClusteringPrefix clusteringAt(long position) throws IOException
     {
         try (FileDataInput in = dfile.createReader(position))
@@ -1686,6 +1687,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param columnFilter the columns to fetch, {@code null} to select all the columns
      * @return the unfiltered at the specified position
      */
+    @Override
     public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter) throws IOException
     {
         try (FileDataInput in = dfile.createReader(position))
@@ -1993,17 +1995,17 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata.encodingStats;
     }
 
-    public Ref<SSTableReader> tryRef()
+    public Ref<AbstractBigTableReader> tryRef()
     {
         return selfRef.tryRef();
     }
 
-    public Ref<SSTableReader> selfRef()
+    public Ref<AbstractBigTableReader> selfRef()
     {
         return selfRef;
     }
 
-    public Ref<SSTableReader> ref()
+    public Ref<AbstractBigTableReader> ref()
     {
         return selfRef.ref();
     }
@@ -2032,7 +2034,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
-     * One instance per SSTableReader we create.
+     * One instance per BigSSTableReader we create.
      *
      * We can create many InstanceTidiers (one for every time we reopen an sstable with MOVED_START for example),
      * but there can only be one GlobalTidy for one single logical sstable.
@@ -2040,7 +2042,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * When the InstanceTidier cleansup, it releases its reference to its GlobalTidy; when all InstanceTidiers
      * for that type have run, the GlobalTidy cleans up.
      */
-    private static final class InstanceTidier implements Tidy
+    private static final class InstanceTidier implements RefCounted.Tidy
     {
         private final Descriptor descriptor;
         private final TableId tableId;
@@ -2059,7 +2061,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         private volatile boolean setup;
 
-        void setup(SSTableReader reader, boolean trackHotness)
+        void setup(AbstractBigTableReader reader, boolean trackHotness)
         {
             this.setup = true;
             this.bf = reader.bf;
@@ -2084,7 +2086,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             if (logger.isTraceEnabled())
                 logger.trace("Running instance tidier for {} with setup {}", descriptor, setup);
 
-            // don't try to cleanup if the sstablereader was never fully constructed
+            // don't try to cleanup if the BigSSTableReader was never fully constructed
             if (!setup)
                 return;
 
@@ -2150,7 +2152,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * and stash a reference to it to be released when they are. Once all such references are
      * released, this shared tidy will be performed.
      */
-    static final class GlobalTidy implements Tidy
+    static final class GlobalTidy implements RefCounted.Tidy
     {
         static final WeakReference<ScheduledFuture<?>> NULL = new WeakReference<>(null);
         // keyed by descriptor, mapping to the shared GlobalTidy for that descriptor
@@ -2166,7 +2168,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         // shared state managing if the logical sstable has been compacted; this is used in cleanup
         private volatile Runnable obsoletion;
 
-        GlobalTidy(final SSTableReader reader)
+        GlobalTidy(final AbstractBigTableReader reader)
         {
             this.desc = reader.descriptor;
         }
@@ -2230,7 +2232,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         // get a new reference to the shared GlobalTidy for this sstable
         @SuppressWarnings("resource")
-        public static Ref<GlobalTidy> get(SSTableReader sstable)
+        public static Ref<GlobalTidy> get(AbstractBigTableReader sstable)
         {
             Descriptor descriptor = sstable.descriptor;
             Ref<GlobalTidy> refc = lookup.get(descriptor);
@@ -2254,12 +2256,45 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         GlobalTidy.lookup.clear();
     }
 
-    public interface Factory
-    {
-        SSTableReader open(SSTableReaderBuilder builder);
 
-        PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata);
+    public abstract static class AbstractBigTableReaderFactory implements SSTableReader.Factory {
+
+        public SSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return AbstractBigTableReader.openForBatch(desc, components, metadata);
+        }
+
+        public SSTableReader open(Descriptor desc)
+        {
+            return AbstractBigTableReader.open(desc);
+        }
+
+        public SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+        {
+            return AbstractBigTableReader.open(desc, metadata);
+        }
+
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return AbstractBigTableReader.open(desc, components, metadata);
+        }
+
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
+        {
+            return AbstractBigTableReader.open(desc, components, metadata, validate, isOffline);
+        }
+
+        public SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
+        {
+            return AbstractBigTableReader.openNoValidation(desc, tableMetadataRef);
+        }
+
+        public SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
+        {
+            return AbstractBigTableReader.openNoValidation(desc, components, cfs);
+        }
     }
+
 
     public static class PartitionPositionBounds
     {
@@ -2276,15 +2311,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         public final int hashCode()
         {
             int hashCode = (int) lowerPosition ^ (int) (lowerPosition >>> 32);
-            return 31 * (hashCode ^ (int) ((int) upperPosition ^  (upperPosition >>> 32)));
+            return 31 * (hashCode ^ (int) ((int) upperPosition ^ (upperPosition >>> 32)));
         }
 
         @Override
         public final boolean equals(Object o)
         {
-            if(!(o instanceof PartitionPositionBounds))
+            if (!(o instanceof PartitionPositionBounds))
                 return false;
-            PartitionPositionBounds that = (PartitionPositionBounds)o;
+            PartitionPositionBounds that = (PartitionPositionBounds) o;
             return lowerPosition == that.lowerPosition && upperPosition == that.upperPosition;
         }
     }
@@ -2321,7 +2356,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * All components given will be moved/renamed
      */
-    public static SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+    public static AbstractBigTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
     {
         if (!oldDescriptor.isCompatible())
             throw new RuntimeException(String.format("Can't open incompatible SSTable! Current version %s, found file: %s",
@@ -2362,10 +2397,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             SSTableWriter.rename(oldDescriptor, newDescriptor, components);
         }
 
-        SSTableReader reader;
+        AbstractBigTableReader reader;
         try
         {
-            reader = SSTableReader.open(newDescriptor, components, cfs.metadata);
+            reader = AbstractBigTableReader.open(newDescriptor, components, cfs.metadata);
         }
         catch (Throwable t)
         {

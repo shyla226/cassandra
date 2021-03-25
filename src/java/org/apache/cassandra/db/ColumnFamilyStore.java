@@ -399,7 +399,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (data.loadsstables)
         {
             Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+            sstables = AbstractBigTableReader.openAll(sstableFiles.list().entrySet(), metadata);
             data.addInitialSSTablesWithoutUpdatingSize(sstables);
         }
 
@@ -1479,7 +1479,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         if (operation != OperationType.CLEANUP || isIndex())
         {
-            return SSTableReader.getTotalBytes(sstables);
+            return AbstractBigTableReader.getTotalBytes(sstables);
         }
 
         // cleanup size estimation only counts bytes for keys local to this node
@@ -1487,8 +1487,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Collection<Range<Token>> ranges = StorageService.instance.getLocalReplicas(keyspace.getName()).ranges();
         for (SSTableReader sstable : sstables)
         {
-            List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
-            for (SSTableReader.PartitionPositionBounds position : positions)
+            List<AbstractBigTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
+            for (AbstractBigTableReader.PartitionPositionBounds position : positions)
                 expectedFileSize += position.upperPosition - position.lowerPosition;
         }
 
@@ -1762,7 +1762,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
                 // check if the key actually exists in this sstable, without updating cache and stats
-                if (sstr.checkEntryExists(dk, SSTableReader.Operator.EQ, false))
+                if (sstr.checkEntryExists(dk, AbstractBigTableReader.Operator.EQ, false))
                     files.add(sstr.getFilename());
             }
             return files;
@@ -1972,7 +1972,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     if (logger.isTraceEnabled())
                         logger.trace("using snapshot sstable {}", entries.getKey());
                     // open offline so we don't modify components or track hotness.
-                    sstable = SSTableReader.open(entries.getKey(), entries.getValue(), metadata, true, true);
+                    sstable = entries.getKey().getFormat().getReaderFactory().open(entries.getKey(), entries.getValue(), metadata, true, true);
                     refs.tryRef(sstable);
                     // release the self ref as we never add the snapshot sstable to DataTracker where it is otherwise released
                     sstable.selfRef().release();
@@ -2285,7 +2285,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // make sure none of our sstables are somehow in the future (clock drift, perhaps)
         for (ColumnFamilyStore cfs : concatWithIndexes())
             for (SSTableReader sstable : cfs.getLiveSSTables())
-                now = Math.max(now, sstable.maxDataAge);
+                now = Math.max(now, sstable.getMaxDataAge());
         truncatedAt = now;
 
         Runnable truncateRunnable = new Runnable()
@@ -2745,7 +2745,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             else
             {
                 keptSSTables++;
-                logger.info("Truncation is keeping {} maxDataAge={} truncatedAt={}", sstable, sstable.maxDataAge, truncatedAt);
+                logger.info("Truncation is keeping {} maxDataAge={} truncatedAt={}", sstable, sstable.getMaxDataAge(), truncatedAt);
             }
         }
 

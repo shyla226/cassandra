@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.compaction.writers;
 
-import java.io.File;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -37,6 +36,7 @@ import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -77,7 +77,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         this.nonExpiredSSTables = nonExpiredSSTables;
         this.txn = txn;
 
-        estimatedTotalKeys = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
+        estimatedTotalKeys = AbstractBigTableReader.getApproximateKeyCount(nonExpiredSSTables);
         maxAge = CompactionTask.getMaxDataAge(nonExpiredSSTables);
         sstableWriter = SSTableRewriter.construct(cfs, txn, keepOriginals, maxAge);
         minRepairedAt = CompactionTask.getMinRepairedAt(nonExpiredSSTables);

@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -37,9 +36,10 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -207,7 +207,7 @@ public class BigTableWriter extends SSTableWriter
             return null;
 
         long startPosition = beforeAppend(key);
-        observers.forEach((o) -> o.startPartition(key, iwriter.indexFile.position()));
+        observers.forEach((o) -> o.startPartition(key, startPosition));
 
         //Reuse the writer for each row
         columnIndexWriter.reset();
@@ -332,14 +332,14 @@ public class BigTableWriter extends SSTableWriter
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(boundary.dataLength);
         invalidateCacheAtBoundary(dfile);
-        SSTableReader sstable = SSTableReader.internalOpen(descriptor,
+        SSTableReader sstable = AbstractBigTableReader.internalOpen(descriptor,
                                                            components, metadata,
                                                            ifile, dfile,
                                                            indexSummary,
                                                            iwriter.bf.sharedCopy(),
                                                            maxDataAge,
                                                            stats,
-                                                           SSTableReader.OpenReason.EARLY,
+                                                           AbstractBigTableReader.OpenReason.EARLY,
                                                            header);
 
         // now it's open, find the ACTUAL last readable key (i.e. for which the data file has also been flushed)
@@ -361,11 +361,11 @@ public class BigTableWriter extends SSTableWriter
         dataFile.sync();
         iwriter.indexFile.sync();
 
-        return openFinal(SSTableReader.OpenReason.EARLY);
+        return openFinal(AbstractBigTableReader.OpenReason.EARLY);
     }
 
     @SuppressWarnings("resource")
-    private SSTableReader openFinal(SSTableReader.OpenReason openReason)
+    private SSTableReader openFinal(AbstractBigTableReader.OpenReason openReason)
     {
         if (maxDataAge < 0)
             maxDataAge = System.currentTimeMillis();
@@ -381,7 +381,7 @@ public class BigTableWriter extends SSTableWriter
             dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtBoundary(dfile);
-        SSTableReader sstable = SSTableReader.internalOpen(descriptor,
+        SSTableReader sstable = AbstractBigTableReader.internalOpen(descriptor,
                                                            components,
                                                            metadata,
                                                            ifile,
@@ -417,7 +417,7 @@ public class BigTableWriter extends SSTableWriter
             SSTable.appendTOC(descriptor, components);
 
             if (openResult)
-                finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+                finalReader = openFinal(AbstractBigTableReader.OpenReason.NORMAL);
         }
 
         protected Throwable doCommit(Throwable accumulate)
@@ -569,7 +569,7 @@ public class BigTableWriter extends SSTableWriter
             summary.prepareToCommit();
             try (IndexSummary indexSummary = summary.build(getPartitioner()))
             {
-                SSTableReader.saveSummary(descriptor, first, last, indexSummary);
+                AbstractBigTableReader.saveSummary(descriptor, first, last, indexSummary);
             }
         }
 

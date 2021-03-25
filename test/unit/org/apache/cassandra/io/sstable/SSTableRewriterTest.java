@@ -50,6 +50,7 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.FileUtils;
@@ -166,12 +167,12 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                     checked = true;
                     for (SSTableReader sstable : cfs.getLiveSSTables())
                     {
-                        if (sstable.openReason == SSTableReader.OpenReason.EARLY)
+                        if (sstable.openReason == AbstractBigTableReader.OpenReason.EARLY)
                         {
                             SSTableReader c = txn.current(sstables.iterator().next());
                             Collection<Range<Token>> r = Arrays.asList(new Range<>(cfs.getPartitioner().getMinimumToken(), cfs.getPartitioner().getMinimumToken()));
-                            List<SSTableReader.PartitionPositionBounds> tmplinkPositions = sstable.getPositionsForRanges(r);
-                            List<SSTableReader.PartitionPositionBounds> compactingPositions = c.getPositionsForRanges(r);
+                            List<AbstractBigTableReader.PartitionPositionBounds> tmplinkPositions = sstable.getPositionsForRanges(r);
+                            List<AbstractBigTableReader.PartitionPositionBounds> compactingPositions = c.getPositionsForRanges(r);
                             assertEquals(1, tmplinkPositions.size());
                             assertEquals(1, compactingPositions.size());
                             assertEquals(0, tmplinkPositions.get(0).lowerPosition);
@@ -764,7 +765,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                     assertEquals(1, viewFragment.sstables.size());
                     SSTableReader sstable = viewFragment.sstables.get(0);
                     assertEquals(s.descriptor, sstable.descriptor);
-                    assertTrue("Found early opened SSTable in canonical view: " + sstable.getFilename(), sstable.openReason != SSTableReader.OpenReason.EARLY);
+                    assertTrue("Found early opened SSTable in canonical view: " + sstable.getFilename(), sstable.openReason != AbstractBigTableReader.OpenReason.EARLY);
                 }
             }
         }

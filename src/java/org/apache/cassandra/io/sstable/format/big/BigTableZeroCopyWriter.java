@@ -145,7 +145,7 @@ public class BigTableZeroCopyWriter extends SSTable implements SSTableMultiWrite
     public Collection<SSTableReader> finished()
     {
         if (finalReader == null)
-            finalReader = SSTableReader.open(descriptor, components, metadata);
+            finalReader = descriptor.getFormat().getReaderFactory().open(descriptor, components, metadata);
 
         return ImmutableList.of(finalReader);
     }

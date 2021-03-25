@@ -28,6 +28,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.UnknownColumnException;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataComponentSerializer;
@@ -105,7 +106,7 @@ public class SerializationHeader
             return sstables;
 
         List<SSTableReader> readers = new ArrayList<>(sstables);
-        readers.sort(SSTableReader.generationReverseComparator);
+        readers.sort(AbstractBigTableReader.generationReverseComparator);
         return readers;
     }
 

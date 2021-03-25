@@ -29,6 +29,7 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.net.AsyncStreamingOutputPlus;
@@ -43,16 +44,16 @@ import org.apache.cassandra.utils.concurrent.Ref;
  */
 public class CassandraOutgoingFile implements OutgoingStream
 {
-    private final Ref<SSTableReader> ref;
+    private final Ref<? extends SSTableReader> ref;
     private final long estimatedKeys;
-    private final List<SSTableReader.PartitionPositionBounds> sections;
+    private final List<AbstractBigTableReader.PartitionPositionBounds> sections;
     private final String filename;
     private final boolean shouldStreamEntireSSTable;
     private final StreamOperation operation;
     private final CassandraStreamHeader header;
 
-    public CassandraOutgoingFile(StreamOperation operation, Ref<SSTableReader> ref,
-                                 List<SSTableReader.PartitionPositionBounds> sections, List<Range<Token>> normalizedRanges,
+    public CassandraOutgoingFile(StreamOperation operation, Ref<? extends SSTableReader> ref,
+                                 List<AbstractBigTableReader.PartitionPositionBounds> sections, List<Range<Token>> normalizedRanges,
                                  long estimatedKeys)
     {
         Preconditions.checkNotNull(ref.get());
@@ -72,7 +73,7 @@ public class CassandraOutgoingFile implements OutgoingStream
 
     private static CassandraStreamHeader makeHeader(SSTableReader sstable,
                                                     StreamOperation operation,
-                                                    List<SSTableReader.PartitionPositionBounds> sections,
+                                                    List<AbstractBigTableReader.PartitionPositionBounds> sections,
                                                     long estimatedKeys,
                                                     boolean shouldStreamEntireSSTable,
                                                     ComponentManifest manifest)
@@ -106,7 +107,7 @@ public class CassandraOutgoingFile implements OutgoingStream
     }
 
     @VisibleForTesting
-    public Ref<SSTableReader> getRef()
+    public Ref<? extends SSTableReader> getRef()
     {
         return ref;
     }
@@ -196,7 +197,7 @@ public class CassandraOutgoingFile implements OutgoingStream
     }
 
     @VisibleForTesting
-    public boolean contained(List<SSTableReader.PartitionPositionBounds> sections, SSTableReader sstable)
+    public boolean contained(List<AbstractBigTableReader.PartitionPositionBounds> sections, SSTableReader sstable)
     {
         if (sections == null || sections.isEmpty())
             return false;

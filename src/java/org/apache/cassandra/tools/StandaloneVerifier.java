@@ -89,7 +89,7 @@ public class StandaloneVerifier
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    SSTableReader sstable = entry.getKey().getFormat().getReaderFactory().openNoValidation(entry.getKey(), components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)

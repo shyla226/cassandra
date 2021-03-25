@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -38,6 +39,7 @@ import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.schema.TableId;
@@ -78,17 +80,17 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         this.compactionId = UUID.randomUUID();
     }
 
-    public List<SSTableReader> redistributeSummaries() throws IOException
+    public List<AbstractBigTableReader> redistributeSummaries() throws IOException
     {
         logger.info("Redistributing index summaries");
-        List<SSTableReader> redistribute = new ArrayList<>();
+        List<AbstractBigTableReader> redistribute = new ArrayList<>();
         for (LifecycleTransaction txn : transactions.values())
         {
-            redistribute.addAll(txn.originals());
+            redistribute.addAll(AbstractBigTableReader.selectOnlyBigTableReaders(txn.originals(), Collectors.toList()));
         }
 
         long total = nonRedistributingOffHeapSize;
-        for (SSTableReader sstable : redistribute)
+        for (AbstractBigTableReader sstable : redistribute)
             total += sstable.getIndexSummaryOffHeapSize();
 
         logger.trace("Beginning redistribution of index summaries for {} sstables with memory pool size {} MB; current spaced used is {} MB",
@@ -111,15 +113,15 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         logger.trace("Total reads/sec across all sstables in index summary resize process: {}", totalReadsPerSec);
 
         // copy and sort by read rates (ascending)
-        List<SSTableReader> sstablesByHotness = new ArrayList<>(redistribute);
+        List<AbstractBigTableReader> sstablesByHotness = new ArrayList<>(redistribute);
         Collections.sort(sstablesByHotness, new ReadRateComparator(readRates));
 
         long remainingBytes = memoryPoolBytes - nonRedistributingOffHeapSize;
 
         logger.trace("Index summaries for compacting SSTables are using {} MB of space",
                      (memoryPoolBytes - remainingBytes) / 1024.0 / 1024.0);
-        List<SSTableReader> newSSTables;
-        try (Refs<SSTableReader> refs = Refs.ref(sstablesByHotness))
+        List<AbstractBigTableReader> newSSTables;
+        try (Refs<? extends SSTableReader> refs = Refs.ref(sstablesByHotness))
         {
             newSSTables = adjustSamplingLevels(sstablesByHotness, transactions, totalReadsPerSec, remainingBytes);
 
@@ -127,7 +129,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
                 txn.finish();
         }
         total = nonRedistributingOffHeapSize;
-        for (SSTableReader sstable : newSSTables)
+        for (AbstractBigTableReader sstable : newSSTables)
             total += sstable.getIndexSummaryOffHeapSize();
         if (logger.isTraceEnabled())
             logger.trace("Completed resizing of index summaries; current approximate memory used: {}",
@@ -136,20 +138,20 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         return newSSTables;
     }
 
-    private List<SSTableReader> adjustSamplingLevels(List<SSTableReader> sstables,
-                                                     Map<TableId, LifecycleTransaction> transactions,
-                                                     double totalReadsPerSec, long memoryPoolCapacity) throws IOException
+    private List<AbstractBigTableReader> adjustSamplingLevels(List<AbstractBigTableReader> sstables,
+                                                              Map<TableId, LifecycleTransaction> transactions,
+                                                              double totalReadsPerSec, long memoryPoolCapacity) throws IOException
     {
         List<ResampleEntry> toDownsample = new ArrayList<>(sstables.size() / 4);
         List<ResampleEntry> toUpsample = new ArrayList<>(sstables.size() / 4);
         List<ResampleEntry> forceResample = new ArrayList<>();
         List<ResampleEntry> forceUpsample = new ArrayList<>();
-        List<SSTableReader> newSSTables = new ArrayList<>(sstables.size());
+        List<AbstractBigTableReader> newSSTables = new ArrayList<>(sstables.size());
 
         // Going from the coldest to the hottest sstables, try to give each sstable an amount of space proportional
         // to the number of total reads/sec it handles.
         remainingSpace = memoryPoolCapacity;
-        for (SSTableReader sstable : sstables)
+        for (AbstractBigTableReader sstable : sstables)
         {
             if (isStopRequested())
                 throw new CompactionInterruptedException(getCompactionInfo());
@@ -235,7 +237,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
 
         if (remainingSpace > 0)
         {
-            Pair<List<SSTableReader>, List<ResampleEntry>> result = distributeRemainingSpace(toDownsample, remainingSpace);
+            Pair<List<AbstractBigTableReader>, List<ResampleEntry>> result = distributeRemainingSpace(toDownsample, remainingSpace);
             toDownsample = result.right;
             newSSTables.addAll(result.left);
             for (SSTableReader sstable : result.left)
@@ -251,13 +253,13 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
             if (isStopRequested())
                 throw new CompactionInterruptedException(getCompactionInfo());
 
-            SSTableReader sstable = entry.sstable;
+            AbstractBigTableReader sstable = entry.sstable;
             logger.trace("Re-sampling index summary for {} from {}/{} to {}/{} of the original number of entries",
                          sstable, sstable.getIndexSummarySamplingLevel(), Downsampling.BASE_SAMPLING_LEVEL,
                          entry.newSamplingLevel, Downsampling.BASE_SAMPLING_LEVEL);
             ColumnFamilyStore cfs = Keyspace.open(sstable.metadata().keyspace).getColumnFamilyStore(sstable.metadata().id);
             long oldSize = sstable.bytesOnDisk();
-            SSTableReader replacement = sstable.cloneWithNewSummarySamplingLevel(cfs, entry.newSamplingLevel);
+            AbstractBigTableReader replacement = sstable.cloneWithNewSummarySamplingLevel(cfs, entry.newSamplingLevel);
             long newSize = replacement.bytesOnDisk();
             newSSTables.add(replacement);
             transactions.get(sstable.metadata().id).update(replacement, true);
@@ -290,7 +292,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
     }
 
     @VisibleForTesting
-    static Pair<List<SSTableReader>, List<ResampleEntry>> distributeRemainingSpace(List<ResampleEntry> toDownsample, long remainingSpace)
+    static Pair<List<AbstractBigTableReader>, List<ResampleEntry>> distributeRemainingSpace(List<ResampleEntry> toDownsample, long remainingSpace)
     {
         // sort by the amount of space regained by doing the downsample operation; we want to try to avoid operations
         // that will make little difference.
@@ -304,7 +306,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         });
 
         int noDownsampleCutoff = 0;
-        List<SSTableReader> willNotDownsample = new ArrayList<>();
+        List<AbstractBigTableReader> willNotDownsample = new ArrayList<>();
         while (remainingSpace > 0 && noDownsampleCutoff < toDownsample.size())
         {
             ResampleEntry entry = toDownsample.get(noDownsampleCutoff);
@@ -366,11 +368,11 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
 
     private static class ResampleEntry
     {
-        public final SSTableReader sstable;
+        public final AbstractBigTableReader sstable;
         public final long newSpaceUsed;
         public final int newSamplingLevel;
 
-        ResampleEntry(SSTableReader sstable, long newSpaceUsed, int newSamplingLevel)
+        ResampleEntry(AbstractBigTableReader sstable, long newSpaceUsed, int newSamplingLevel)
         {
             this.sstable = sstable;
             this.newSpaceUsed = newSpaceUsed;

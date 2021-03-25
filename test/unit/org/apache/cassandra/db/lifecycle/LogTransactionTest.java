@@ -39,6 +39,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.*;
 import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -71,7 +72,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     protected AbstractTransactionalTest.TestableTransaction newTest() throws Exception
     {
         LogTransaction.waitForDeletions();
-        SSTableReader.resetTidying();
+        AbstractBigTableReader.resetTidying();
         return new TxnTest();
     }
 
@@ -1238,17 +1239,17 @@ public class LogTransactionTest extends AbstractTransactionalTest
         StatsMetadata metadata = (StatsMetadata) new MetadataCollector(cfs.metadata().comparator)
                                                  .finalizeMetadata(cfs.metadata().partitioner.getClass().getCanonicalName(), 0.01f, -1, null, false, header)
                                                  .get(MetadataType.STATS);
-        SSTableReader reader = SSTableReader.internalOpen(descriptor,
-                                                          components,
-                                                          cfs.metadata,
-                                                          iFile,
-                                                          dFile,
-                                                          MockSchema.indexSummary.sharedCopy(),
-                                                          new AlwaysPresentFilter(),
-                                                          1L,
-                                                          metadata,
-                                                          SSTableReader.OpenReason.NORMAL,
-                                                          header);
+        SSTableReader reader = AbstractBigTableReader.internalOpen(descriptor,
+                                                                   components,
+                                                                   cfs.metadata,
+                                                                   iFile,
+                                                                   dFile,
+                                                                   MockSchema.indexSummary.sharedCopy(),
+                                                                   new AlwaysPresentFilter(),
+                                                                   1L,
+                                                                   metadata,
+                                                                   AbstractBigTableReader.OpenReason.NORMAL,
+                                                                   header);
         reader.first = reader.last = MockSchema.readerBounds(generation);
         return reader;
     }

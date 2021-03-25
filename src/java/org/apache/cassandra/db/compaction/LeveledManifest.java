@@ -29,6 +29,7 @@ import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -151,7 +152,7 @@ public class LeveledManifest
         if (logger.isTraceEnabled())
             logger.trace("Adding [{}]", toString(added));
         generations.addAll(added);
-        lastCompactedSSTables[minLevel] = SSTableReader.sstableOrdering.max(added);
+        lastCompactedSSTables[minLevel] = AbstractBigTableReader.sstableOrdering.max(added);
     }
 
     private String toString(Collection<SSTableReader> sstables)
@@ -242,7 +243,7 @@ public class LeveledManifest
             // we want to calculate score excluding compacting ones
             Set<SSTableReader> sstablesInLevel = Sets.newHashSet(sstables);
             Set<SSTableReader> remaining = Sets.difference(sstablesInLevel, cfs.getTracker().getCompacting());
-            double score = (double) SSTableReader.getTotalBytes(remaining) / (double)maxBytesForLevel(i, maxSSTableSizeInBytes);
+            double score = (double) AbstractBigTableReader.getTotalBytes(remaining) / (double)maxBytesForLevel(i, maxSSTableSizeInBytes);
             logger.trace("Compaction score for level {} is {}", i, score);
 
             if (score > 1.001)
@@ -299,7 +300,7 @@ public class LeveledManifest
 
     private List<SSTableReader> getSSTablesForSTCS(Collection<SSTableReader> sstables)
     {
-        Iterable<SSTableReader> candidates = cfs.getTracker().getUncompacting(sstables);
+        Iterable<? extends SSTableReader> candidates = cfs.getTracker().getUncompacting(sstables);
         List<Pair<SSTableReader,Long>> pairs = SizeTieredCompactionStrategy.createSSTableAndLengthPairs(AbstractCompactionStrategy.filterSuspectSSTables(candidates));
         List<List<SSTableReader>> buckets = SizeTieredCompactionStrategy.getBuckets(pairs,
                                                                                     options.bucketHigh,
@@ -530,7 +531,7 @@ public class LeveledManifest
             }
 
             // leave everything in L0 if we didn't end up with a full sstable's worth of data
-            if (SSTableReader.getTotalBytes(candidates) > maxSSTableSizeInBytes)
+            if (AbstractBigTableReader.getTotalBytes(candidates) > maxSSTableSizeInBytes)
             {
                 // add sstables from L1 that overlap candidates
                 // if the overlapping ones are already busy in a compaction, leave it out.
@@ -582,7 +583,7 @@ public class LeveledManifest
     @VisibleForTesting
     List<SSTableReader> ageSortedSSTables(Collection<SSTableReader> candidates)
     {
-        return ImmutableList.sortedCopyOf(SSTableReader.maxTimestampAscending, candidates);
+        return ImmutableList.sortedCopyOf(AbstractBigTableReader.maxTimestampAscending, candidates);
     }
 
     public synchronized Set<SSTableReader>[] getSStablesPerLevelSnapshot()
@@ -615,7 +616,7 @@ public class LeveledManifest
         {
             Set<SSTableReader> sstables = generations.get(i);
             // If there is 1 byte over TBL - (MBL * 1.001), there is still a task left, so we need to round up.
-            estimated[i] = (long)Math.ceil((double)Math.max(0L, SSTableReader.getTotalBytes(sstables) - (long)(maxBytesForLevel(i, maxSSTableSizeInBytes) * 1.001)) / (double)maxSSTableSizeInBytes);
+            estimated[i] = (long)Math.ceil((double)Math.max(0L, AbstractBigTableReader.getTotalBytes(sstables) - (long)(maxBytesForLevel(i, maxSSTableSizeInBytes) * 1.001)) / (double)maxSSTableSizeInBytes);
             tasks += estimated[i];
         }
 
@@ -642,7 +643,7 @@ public class LeveledManifest
         }
 
         int newLevel;
-        if (minimumLevel == 0 && minimumLevel == maximumLevel && SSTableReader.getTotalBytes(sstables) < maxSSTableSizeInBytes)
+        if (minimumLevel == 0 && minimumLevel == maximumLevel && AbstractBigTableReader.getTotalBytes(sstables) < maxSSTableSizeInBytes)
         {
             newLevel = 0;
         }

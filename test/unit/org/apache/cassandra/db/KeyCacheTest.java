@@ -38,6 +38,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -120,7 +121,7 @@ public class KeyCacheTest
             {
                 BigTableRowIndexEntry rie = CacheService.instance.keyCache.get(k);
                 savedMap.put(k, rie);
-                SSTableReader sstr = readerForKey(k);
+                AbstractBigTableReader sstr = readerForKey(k);
                 savedInfoMap.put(k, rie.openWithIndex(sstr.getIndexFile()));
             }
         }
@@ -143,7 +144,7 @@ public class KeyCacheTest
             assertEquals(expected.columnsIndexCount(), actual.columnsIndexCount());
             for (int i = 0; i < expected.columnsIndexCount(); i++)
             {
-                SSTableReader actualSstr = readerForKey(entry.getKey());
+                AbstractBigTableReader actualSstr = readerForKey(entry.getKey());
                 try (BigTableRowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile()))
                 {
                     BigTableRowIndexEntry.IndexInfoRetriever expectedIir = savedInfoMap.get(entry.getKey());
@@ -169,12 +170,12 @@ public class KeyCacheTest
         });
     }
 
-    private static SSTableReader readerForKey(KeyCacheKey k)
+    private static AbstractBigTableReader readerForKey(KeyCacheKey k)
     {
-        return ColumnFamilyStore.getIfExists(k.desc.ksname, k.desc.cfname).getLiveSSTables()
-                                .stream()
-                                .filter(sstreader -> sstreader.descriptor.generation == k.desc.generation)
-                                .findFirst().get();
+        return (AbstractBigTableReader) ColumnFamilyStore.getIfExists(k.desc.ksname, k.desc.cfname).getLiveSSTables()
+                                                         .stream()
+                                                         .filter(sstreader -> sstreader.descriptor.generation == k.desc.generation)
+                                                         .findFirst().get();
     }
 
     @Test

@@ -43,7 +43,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -146,9 +146,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public Map<String, Integer> getIndexIntervals()
     {
-        List<SSTableReader> sstables = getAllSSTables();
+        List<AbstractBigTableReader> sstables = getAllSSTables();
         Map<String, Integer> intervals = new HashMap<>(sstables.size());
-        for (SSTableReader sstable : sstables)
+        for (AbstractBigTableReader sstable : sstables)
             intervals.put(sstable.getFilename(), (int) Math.round(sstable.getEffectiveIndexInterval()));
 
         return intervals;
@@ -156,9 +156,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public double getAverageIndexInterval()
     {
-        List<SSTableReader> sstables = getAllSSTables();
+        List<AbstractBigTableReader> sstables = getAllSSTables();
         double total = 0.0;
-        for (SSTableReader sstable : sstables)
+        for (AbstractBigTableReader sstable : sstables)
             total += sstable.getEffectiveIndexInterval();
         return total / sstables.size();
     }
@@ -175,18 +175,19 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     public double getMemoryPoolSizeInMB()
     {
         long total = 0;
-        for (SSTableReader sstable : getAllSSTables())
+        for (AbstractBigTableReader sstable : getAllSSTables())
             total += sstable.getIndexSummaryOffHeapSize();
         return total / 1024.0 / 1024.0;
     }
 
-    private List<SSTableReader> getAllSSTables()
+    private List<AbstractBigTableReader> getAllSSTables()
     {
-        List<SSTableReader> result = new ArrayList<>();
+        ArrayList<AbstractBigTableReader> result = new ArrayList<>();
         for (Keyspace ks : Keyspace.all())
         {
             for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
-                result.addAll(cfStore.getLiveSSTables());
+                for (AbstractBigTableReader tr : AbstractBigTableReader.selectOnlyBigTableReaders(cfStore.getLiveSSTables()))
+                    result.add(tr);
         }
 
         return result;
@@ -202,19 +203,19 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     @SuppressWarnings("resource")
     private Pair<Long, Map<TableId, LifecycleTransaction>> getRestributionTransactions()
     {
-        List<SSTableReader> allCompacting = new ArrayList<>();
+        List<AbstractBigTableReader> allCompacting = new ArrayList<>();
         Map<TableId, LifecycleTransaction> allNonCompacting = new HashMap<>();
         for (Keyspace ks : Keyspace.all())
         {
             for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
             {
-                Set<SSTableReader> nonCompacting, allSSTables;
+                Set<AbstractBigTableReader> nonCompacting, allSSTables;
                 LifecycleTransaction txn;
                 do
                 {
                     View view = cfStore.getTracker().getView();
-                    allSSTables = ImmutableSet.copyOf(view.select(SSTableSet.CANONICAL));
-                    nonCompacting = ImmutableSet.copyOf(view.getUncompacting(allSSTables));
+                    allSSTables = ImmutableSet.copyOf(AbstractBigTableReader.selectOnlyBigTableReaders(view.select(SSTableSet.CANONICAL)));
+                    nonCompacting = ImmutableSet.copyOf(AbstractBigTableReader.selectOnlyBigTableReaders(view.getUncompacting(allSSTables)));
                 }
                 while (null == (txn = cfStore.getTracker().tryModify(nonCompacting, OperationType.INDEX_SUMMARY)));
 
@@ -222,7 +223,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 allCompacting.addAll(Sets.difference(allSSTables, nonCompacting));
             }
         }
-        long nonRedistributingOffHeapSize = allCompacting.stream().mapToLong(SSTableReader::getIndexSummaryOffHeapSize).sum();
+        long nonRedistributingOffHeapSize = allCompacting.stream().mapToLong(AbstractBigTableReader::getIndexSummaryOffHeapSize).sum();
         return Pair.create(nonRedistributingOffHeapSize, allNonCompacting);
     }
 
@@ -267,7 +268,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
      * @return a list of new SSTableReader instances
      */
     @VisibleForTesting
-    public static List<SSTableReader> redistributeSummaries(IndexSummaryRedistribution redistribution) throws IOException
+    public static List<AbstractBigTableReader> redistributeSummaries(IndexSummaryRedistribution redistribution) throws IOException
     {
         return CompactionManager.instance.runIndexSummaryRedistribution(redistribution);
     }

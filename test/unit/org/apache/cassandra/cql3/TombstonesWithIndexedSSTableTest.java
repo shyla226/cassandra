@@ -24,10 +24,11 @@ import org.junit.Test;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.io.sstable.format.AbstractBigTableReader.selectOnlyBigTableReaders;
 
 public class TombstonesWithIndexedSSTableTest extends CQLTester
 {
@@ -73,16 +74,15 @@ public class TombstonesWithIndexedSSTableTest extends CQLTester
             compact();
 
             int indexedRow = -1;
-            for (SSTableReader sstable : getCurrentColumnFamilyStore().getLiveSSTables())
+            for (AbstractBigTableReader sstable : selectOnlyBigTableReaders(getCurrentColumnFamilyStore().getLiveSSTables()))
             {
                 // The line below failed with key caching off (CASSANDRA-11158)
                 @SuppressWarnings("unchecked")
-                BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
+                BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, AbstractBigTableReader.Operator.EQ);
                 if (indexEntry != null && indexEntry.isIndexed())
                 {
-                    try (FileDataInput reader = sstable.openIndexReader())
+                    try (BigTableRowIndexEntry.IndexInfoRetriever infoRetriever = indexEntry.openWithIndex(sstable.getIndexFile()))
                     {
-                        BigTableRowIndexEntry.IndexInfoRetriever infoRetriever = indexEntry.openWithIndex(sstable.getIndexFile());
                         ClusteringPrefix<?> firstName = infoRetriever.columnsIndex(1).firstName;
                         if (firstName.kind().isBoundary())
                             break deletionLoop;
