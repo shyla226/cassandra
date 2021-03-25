@@ -1596,13 +1596,13 @@ public abstract class AbstractBigTableReader extends SSTableReader
         return sstableMetadata.repairedAt != ActiveRepairService.UNREPAIRED_SSTABLE;
     }
 
-    public DecoratedKey keyAt(RandomAccessReader indexFileReader, long indexPosition) throws IOException
+    public DecoratedKey keyAt(RandomAccessReader reader, long position) throws IOException
     {
-        indexFileReader.seek(indexPosition);
-        return keyAt(indexFileReader);
+        reader.seek(position);
+        return keyAt(reader);
     }
 
-    public abstract DecoratedKey keyAt(long indexPosition) throws IOException;
+    public abstract DecoratedKey keyAt(long dataPosition) throws IOException;
 
     public abstract DecoratedKey keyAt(FileDataInput reader) throws IOException;
 

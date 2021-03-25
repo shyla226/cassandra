@@ -301,9 +301,9 @@ public class BigTableReader extends AbstractBigTableReader
 
 
     @Override
-    public DecoratedKey keyAt(long indexPosition) throws IOException
+    public DecoratedKey keyAt(long dataPosition) throws IOException
     {
-        try (FileDataInput in = ifile.createReader(indexPosition))
+        try (FileDataInput in = dfile.createReader(dataPosition))
         {
             return keyAt(in);
         }
@@ -314,15 +314,7 @@ public class BigTableReader extends AbstractBigTableReader
     {
         if (reader.isEOF()) return null;
 
-        DecoratedKey key = decorateKey(ByteBufferUtil.readWithShortLength(reader));
-
-        // hint read path about key location if caching is enabled
-        // this saves index summary lookup and index file iteration which whould be pretty costly
-        // especially in presence of promoted column indexes
-        if (isKeyCacheEnabled())
-            cacheKey(key, rowIndexEntrySerializer.deserialize(reader));
-
-        return key;
+        return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 
     @Override
