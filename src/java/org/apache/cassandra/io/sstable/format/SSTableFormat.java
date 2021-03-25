@@ -50,7 +50,7 @@ public interface SSTableFormat
 
         public static Type current()
         {
-            return BIG;
+            return Type.valueOf(System.getProperty("cassandra.sstable.format.default", BIG.name()));
         }
 
         Type(String name, SSTableFormat info)

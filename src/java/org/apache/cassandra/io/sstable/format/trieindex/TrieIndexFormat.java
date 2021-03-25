@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
@@ -46,10 +47,14 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
  * Bigtable format with trie indices
@@ -86,11 +91,6 @@ public class TrieIndexFormat implements SSTableFormat
         return new TrieIndexVersion(version);
     }
 
-    @Override
-    public boolean validateVersion(String ver)
-    {
-        return ver != null && VALIDATION.matcher(ver).matches();
-    }
 
     @Override
     public SSTableWriter.Factory getWriterFactory()
@@ -145,10 +145,10 @@ public class TrieIndexFormat implements SSTableFormat
             {
                 StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
 
-                try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.PARTITION_INDEX, compressedData);
-                     FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.ROW_INDEX, compressedData);
-                     FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, stats.zeroCopyMetadata, compressedData);
-                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, stats.zeroCopyMetadata, false);
+                try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
+                     FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
+                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc).compressed(compressedData);
+                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
                 {
@@ -168,18 +168,11 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
-            File indexFile = descriptor.filenameFor(Component.PARTITION_INDEX);
+            File indexFile = new File(descriptor.filenameFor(Component.PARTITION_INDEX));
             if (!indexFile.exists())
                 return null;
-            boolean compressedData = descriptor.filenameFor(Component.COMPRESSION_INFO).exists();
-
-            StatsMetadata stats = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-
-
-            try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor,
-                                                                                     TableMetadata.minimal(descriptor.ksname, descriptor.cfname),
-                                                                                     Component.PARTITION_INDEX, compressedData);
-                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, stats.zeroCopyMetadata,false))
+            try (FileHandle.Builder fhBuilder = SSTable.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
             {
                 return Pair.create(pIndex.firstKey(), pIndex.lastKey());
             }
@@ -200,7 +193,6 @@ public class TrieIndexFormat implements SSTableFormat
     {
         public static final String current_version = "bb";
         public static final String earliest_supported_version = "aa";
-        public static final EncodingVersion latestVersion = EncodingVersion.last();
 
         // aa (DSE 6.0): trie index format
         // ab (DSE pre-6.8): ILLEGAL - handled as 'b' (predates 'ba'). Pre-GA "LABS" releases of DSE 6.8 used this
@@ -222,8 +214,9 @@ public class TrieIndexFormat implements SSTableFormat
          * as BIG_ENDIAN longs, which avoids some redundant bit twiddling).
          */
         private final boolean hasOldBfFormat;
-        private final boolean hasAccurateLegacyMinMax;
-        private final boolean hasOriginatingHostId;
+        private final boolean hasAccurateMinMax;
+
+        private final int correspondingMessagingVersion;
 
         TrieIndexVersion(String version)
         {
@@ -231,8 +224,8 @@ public class TrieIndexFormat implements SSTableFormat
 
             isLatestVersion = version.compareTo(current_version) == 0;
             hasOldBfFormat = version.compareTo("b") < 0;
-            hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
-            hasOriginatingHostId = (version.compareTo("ad") >= 0 && version.compareTo("ba") < 0) || (version.compareTo("bb") >= 0);
+            hasAccurateMinMax = version.compareTo("ac") >= 0;
+            correspondingMessagingVersion = MessagingService.current_version;
         }
 
         private static String mapAb(String version)
@@ -258,49 +251,28 @@ public class TrieIndexFormat implements SSTableFormat
             return true;
         }
 
+        @Override
         public boolean hasMaxCompressedLength()
         {
             return true;
         }
 
+        @Override
         public boolean hasPendingRepair()
         {
             return true;
         }
 
+        @Override
         public boolean hasMetadataChecksum()
         {
             return true;
         }
 
         @Override
-        public boolean indicesAreEncrypted()
+        public boolean hasAccurateMinMax()
         {
-            return version.compareTo("b") >= 0;
-        }
-
-        @Override
-        public boolean metadataAreEncrypted()
-        {
-            return version.compareTo("ba") >= 0;
-        }
-
-        @Override
-        public boolean supportsZeroCopy()
-        {
-            return version.compareTo("b") >= 0;
-        }
-
-        @Override
-        public boolean hasIncrementalNodeSyncMetadata()
-        {
-            return version.compareTo("b") >= 0;
-        }
-
-        @Override
-        public boolean hasAccurateLegacyMinMax()
-        {
-            return hasAccurateLegacyMinMax;
+            return hasAccurateMinMax;
         }
 
         @Override
@@ -312,26 +284,14 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public boolean hasImprovedMinMax()
         {
-            // Note that this was not in early 6.8 "LABS" releases
             return version.compareTo("ba") >= 0;
         }
 
-        @Override
-        public boolean hasMaxColumnValueLengths()
-        {
-            return version.compareTo("ba") >= 0;
-        }
 
         @Override
-        public boolean hasOriginatingHostId()
+        public int correspondingMessagingVersion()
         {
-            return hasOriginatingHostId;
-        }
-
-        @Override
-        public EncodingVersion encodingVersion()
-        {
-            return latestVersion;
+            return correspondingMessagingVersion;
         }
 
         @Override
@@ -344,6 +304,17 @@ public class TrieIndexFormat implements SSTableFormat
         public boolean hasOldBfFormat()
         {
             return hasOldBfFormat;
+        }
+        @Override
+        public boolean hasIsTransient()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean isCompatibleForStreaming()
+        {
+            return isCompatible() && version.charAt(0) == current_version.charAt(0);
         }
     }
 }

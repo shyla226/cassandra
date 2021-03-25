@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.io.sstable.format;
+package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 
@@ -30,7 +30,7 @@ import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexSSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.schema.TableMetadata;
 

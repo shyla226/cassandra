@@ -21,6 +21,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.IOException;
 
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -34,7 +35,7 @@ class ForwardReader extends AbstractReader
                   Slices slices,
                   FileDataInput file,
                   boolean shouldCloseFile,
-                  SerializationHelper helper)
+                  DeserializationHelper helper)
     {
         super(sstable, slices, file, shouldCloseFile, helper, false);
     }

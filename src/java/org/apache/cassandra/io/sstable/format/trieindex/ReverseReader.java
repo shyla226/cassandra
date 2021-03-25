@@ -25,6 +25,7 @@ import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -53,7 +54,7 @@ class ReverseReader extends AbstractReader
                   Slices slices,
                   FileDataInput file,
                   boolean shouldCloseFile,
-                  SerializationHelper helper)
+                  DeserializationHelper helper)
     {
         super(sstable, slices, file, shouldCloseFile, helper, true);
     }
@@ -63,7 +64,7 @@ class ReverseReader extends AbstractReader
     {
         // read full row and filter
         if (startPos == -1)
-            startPos = file.getSeekPosition();
+            startPos = file.getFilePointer();
         else
             seekToPosition(startPos);
 
@@ -112,7 +113,7 @@ class ReverseReader extends AbstractReader
 
     boolean preStep(ClusteringBound start) throws IOException
     {
-        assert filePos == file.getSeekPosition();
+        assert filePos == file.getFilePointer();
         if (skipSmallerRow(start))
         {
             sliceOpenMarker = openMarker;
