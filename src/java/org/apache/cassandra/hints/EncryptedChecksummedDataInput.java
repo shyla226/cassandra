@@ -91,7 +91,7 @@ public class EncryptedChecksummedDataInput extends ChecksummedDataInput
         }
     }
 
-    public InputPosition getSeekPosition()
+    public InputPosition getFilePointer()
     {
         return new Position(sourcePosition, bufferOffset, buffer.position());
     }

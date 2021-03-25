@@ -154,7 +154,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
             if (input.isEOF())
                 return endOfData();
 
-            return new Page(input.getSeekPosition());
+            return new Page(input.getFilePointer());
         }
     }
 
@@ -178,7 +178,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
 
             do
             {
-                InputPosition position = input.getSeekPosition();
+                InputPosition position = input.getFilePointer();
 
                 if (input.isEOF())
                     return endOfData(); // reached EOF
@@ -276,7 +276,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
 
             do
             {
-                InputPosition position = input.getSeekPosition();
+                InputPosition position = input.getFilePointer();
 
                 if (input.isEOF())
                     return endOfData(); // reached EOF

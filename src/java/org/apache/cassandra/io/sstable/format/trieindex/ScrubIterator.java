@@ -68,7 +68,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
                 try (FileDataInput in = rowIndexFile.createReader(pos))
                 {
                     key = ByteBufferUtil.readWithShortLength(in);
-                    dataPosition = TrieIndexEntry.deserialize(in, in.getSeekPosition()).position;
+                    dataPosition = TrieIndexEntry.deserialize(in, in.getFilePointer()).position;
                 }
             }
             else

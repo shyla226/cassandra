@@ -164,7 +164,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
             {
                 FileDataInput in = indexInput(pos);
                 nextKey = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
-                nextEntry = TrieIndexEntry.deserialize(in, in.getSeekPosition());
+                nextEntry = TrieIndexEntry.deserialize(in, in.getFilePointer());
             }
             else
             {

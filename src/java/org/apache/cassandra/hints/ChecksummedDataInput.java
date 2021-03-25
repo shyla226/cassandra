@@ -112,7 +112,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
      * Return a seekable representation of the current position. For compressed files this is chunk position
      * in file and offset within chunk.
      */
-    public InputPosition getSeekPosition()
+    public InputPosition getFilePointer()
     {
         return new Position(getPosition());
     }

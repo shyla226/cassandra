@@ -81,7 +81,7 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
         }
     }
 
-    public InputPosition getSeekPosition()
+    public InputPosition getFilePointer()
     {
         return new Position(sourcePosition, bufferOffset, buffer.position());
     }

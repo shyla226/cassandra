@@ -196,9 +196,9 @@ public class SSTableScanner implements ISSTableScanner
         return dfile.getProgress();
     }
 
-    public long getSeekPosition()
+    public long getFilePointer()
     {
-        return dfile.getSeekPosition();
+        return dfile.getFilePointer();
     }
 
     public long getBytesScanned()
@@ -269,7 +269,7 @@ public class SSTableScanner implements ISSTableScanner
                 while (true)
                 {
                     if (startScan != -1)
-                        bytesScanned += getSeekPosition() - startScan;
+                        bytesScanned += getFilePointer() - startScan;
 
                     if (iterator != null)
                     {
@@ -302,7 +302,7 @@ public class SSTableScanner implements ISSTableScanner
                         try
                         {
                             if (startScan != -1)
-                                bytesScanned += getSeekPosition() - startScan;
+                                bytesScanned += getFilePointer() - startScan;
 
                             startScan = currentEntry.position;
                             if (dataRange == null)
@@ -368,7 +368,7 @@ public class SSTableScanner implements ISSTableScanner
             return FileProgressIndicator.NONE;
         }
 
-        public long getSeekPosition()
+        public long getFilePointer()
         {
             return 0;
         }
