@@ -24,6 +24,8 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -154,12 +156,14 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
     private static Set<Component> components(TableMetadata metadata, Set<Component> indexComponents)
     {
-        Set<Component> components = SetsFactory.setFromArray(Component.DATA,
-                                                             Component.PARTITION_INDEX,
-                                                             Component.ROW_INDEX,
-                                                             Component.STATS,
-                                                             Component.TOC,
-                                                             Component.DIGEST);
+        Set<Component> components = new HashSet<>();
+        Collections.addAll(components,
+                           Component.DATA,
+                           Component.PARTITION_INDEX,
+                           Component.ROW_INDEX,
+                           Component.STATS,
+                           Component.TOC,
+                           Component.DIGEST);
 
         if (metadata.params.bloomFilterFpChance < 1.0)
             components.add(Component.FILTER);
@@ -202,6 +206,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             throw new RuntimeException("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getFile());
     }
 
+    @Override
     public boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
     {
         if (key.getKeyLength() > FBUtilities.MAX_UNSIGNED_SHORT)
@@ -226,20 +231,19 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         return true;
     }
 
+    @Override
     public void addUnfiltered(Unfiltered unfiltered) throws IOException
     {
-        SSTableWriter.guardCollectionSize(metadata(), currentKey, unfiltered);
-
         if (unfiltered.isRow())
         {
             Row row = (Row) unfiltered;
-            metadataCollector.updateMinMaxClustering(row.clustering());
+            metadataCollector.updateClusteringValues(row.clustering());
             Rows.collectStats(row, metadataCollector);
         }
         else
         {
             RangeTombstoneMarker marker = (RangeTombstoneMarker) unfiltered;
-            metadataCollector.updateMinMaxClustering(marker.clustering());
+            metadataCollector.updateClusteringValuesByBoundOrBoundary(marker.clustering());
             if (marker.isBoundary())
             {
                 RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker) marker;
@@ -255,6 +259,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         partitionWriter.addUnfiltered(unfiltered);
     }
 
+    @Override
     public RowIndexEntry endPartition() throws IOException
     {
         metadataCollector.addCellPerPartitionCount();

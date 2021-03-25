@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import java.io.IOException;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -25,9 +26,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
@@ -228,6 +232,22 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      * @throws FSWriteError if a write to the dataFile fails
      */
     public abstract RowIndexEntry<?> append(UnfilteredRowIterator iterator);
+
+    /**
+     * Start a partition. Will be followed by a sequence of addUnfiltered(), and finished with endPartition().
+     * The static row may be given in the first addUnfiltered() (by cursors), or via addStaticRow() called before any
+     * other addUnfiltered() (by append(UnfilteredRowIterator) above).
+     *
+     * @param key
+     * @param partitionLevelDeletion
+     * @return true if the partition was successfully started, false if there is a problem (e.g. key not in order).
+     * @throws IOException
+     */
+    public abstract boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException;
+
+    public abstract void addUnfiltered(Unfiltered unfiltered) throws IOException;
+
+    public abstract RowIndexEntry<?> endPartition() throws IOException;
 
     public abstract long getFilePointer();
 

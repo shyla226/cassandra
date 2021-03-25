@@ -36,6 +36,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
@@ -243,6 +244,24 @@ public class BigTableWriter extends SSTableWriter
         {
             throw new FSWriteError(e, dataFile.getPath());
         }
+    }
+
+    @Override
+    public boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void addUnfiltered(Unfiltered unfiltered) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RowIndexEntry endPartition() throws IOException
+    {
+        throw new UnsupportedOperationException();
     }
 
     private void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)

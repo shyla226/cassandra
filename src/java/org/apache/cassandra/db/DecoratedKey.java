@@ -186,4 +186,9 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         // Decode the key bytes from the second component.
         return ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
     }
+
+    public int getKeyLength()
+    {
+        return getKey().remaining();
+    }
 }
