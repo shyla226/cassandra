@@ -27,10 +27,13 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.format.IndexFileEntry;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 
@@ -38,9 +41,9 @@ import org.apache.cassandra.utils.Throwables;
  * A flow of {@link IndexFileEntry} for the
  * trie index table format.
  */
-public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
+public class TrieIndexFileIterator extends AbstractIterator<IndexFileEntry>
 {
-    private static final Logger logger = LoggerFactory.getLogger(TrieIndexFileFlow.class);
+    private static final Logger logger = LoggerFactory.getLogger(TrieIndexFileIterator.class);
 
     private final RandomAccessReader dataFileReader;
     private final TrieIndexSSTableReader sstable;
@@ -51,19 +54,18 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
     private final PartitionPosition right;
     private final int exclusiveRight;
     private final FileHandle rowIndexFile;
-    private final TPCScheduler onReadyExecutor;
 
     private FileDataInput rowIndexFileReader;
     private PartitionIndex.IndexPosIterator posIterator;
     private long pos = PartitionIndex.NOT_FOUND;
     private IndexFileEntry next;
 
-    public TrieIndexFileFlow(RandomAccessReader dataFileReader,
-                             TrieIndexSSTableReader sstable,
-                             PartitionPosition left,
-                             int inclusiveLeft,
-                             PartitionPosition right,
-                             int exclusiveRight)
+    public TrieIndexFileIterator(RandomAccessReader dataFileReader,
+                                 TrieIndexSSTableReader sstable,
+                                 PartitionPosition left,
+                                 int inclusiveLeft,
+                                 PartitionPosition right,
+                                 int exclusiveRight)
     {
         this.dataFileReader = dataFileReader;
         this.sstable = sstable;
@@ -74,57 +76,24 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
         this.right = right;
         this.exclusiveRight = exclusiveRight;
         this.rowIndexFile = sstable.rowIndexFile;
-        this.onReadyExecutor = TPC.bestTPCScheduler();
     }
 
-    public void requestNext()
-    {
-        readWithRetry(0);
-    }
-
-    private void readWithRetry(int retryNum)
+    @Override
+    public IndexFileEntry computeNext()
     {
         try
         {
-           if (TPC.READ_ASYNC_MAX_CACHE_MISSES > 0 && retryNum >= TPC.READ_ASYNC_MAX_CACHE_MISSES)
-                throw new IllegalStateException(String.format("Too many NotInCacheExceptions (%d) in trie index flow", retryNum));
 
             IndexFileEntry current = next == null ? readFirst() : readNext();
             if (current != IndexFileEntry.EMPTY)
-                subscriber.onNext(current);
+                return current;
             else
-                subscriber.onComplete();
-        }
-        catch (Rebufferer.NotInCacheException e)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("{} - NotInCacheException at retry number {}: {}", hashCode(), retryNum, e.getMessage());
-
-            // Retry the request once data is in the cache
-            e.accept(this.getClass(),
-                     () -> readWithRetry(retryNum + 1),
-                     (t) ->
-                     {
-                         logger.error("Failed to retry due to exception", t);
-
-                         // Calling completeExceptionally() wraps the original exception into a CompletionException even
-                         // though the documentation says otherwise
-                         if (t instanceof CompletionException && t.getCause() != null)
-                             t = t.getCause();
-
-                         subscriber.onError(t);
                          return null;
-                     },
-                     onReadyExecutor);
         }
         catch (CorruptSSTableException | IOException e)
         {
             sstable.markSuspect();
-            subscriber.onError(new CorruptSSTableException(e, sstable.getFilename()));
-        }
-        catch (Throwable t)
-        {
-            subscriber.onError(t);
+            throw new CorruptSSTableException(e, sstable.getFilename());
         }
     }
 
@@ -186,20 +155,20 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
         {
             if (pos >= 0)
             {
-                if (pos != rowIndexFileReader.getSeekPosition())
+                if (pos != rowIndexFileReader.getFilePointer())
                     rowIndexFileReader.seek(pos);
 
                 ret = new IndexFileEntry(partitioner.decorateKey(ByteBufferUtil.readWithShortLength(rowIndexFileReader)),
-                        TrieIndexEntry.deserialize(rowIndexFileReader, rowIndexFileReader.getSeekPosition()));
+                                         TrieIndexEntry.deserialize(rowIndexFileReader, rowIndexFileReader.getFilePointer()));
             }
             else
             {
                 long dataPos = ~pos;
-                if (dataPos != dataFileReader.getSeekPosition())
+                if (dataPos != dataFileReader.getFilePointer())
                     dataFileReader.seek(dataPos);
 
                 ret = new IndexFileEntry(partitioner.decorateKey(ByteBufferUtil.readWithShortLength(dataFileReader)),
-                        new RowIndexEntry(dataPos));
+                                         new RowIndexEntry<>(dataPos));
             }
 
             pos = PartitionIndex.NOT_FOUND; // make sure next time we get the next pos
@@ -214,9 +183,9 @@ public class TrieIndexFileFlow extends FlowSource<IndexFileEntry>
     }
 
 
-    public void close() throws Exception
+    public void close()
     {
-        Throwable err = Throwables.closeNonNull(null, posIterator, rowIndexFileReader);
+        Throwable err = Throwables.close(null, posIterator, rowIndexFileReader);
         Throwables.maybeFail(err);
     }
 }

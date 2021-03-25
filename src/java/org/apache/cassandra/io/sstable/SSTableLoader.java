@@ -160,8 +160,7 @@ public class SSTableLoader implements StreamEventHandler
                                               }
 
                                               // to conserve heap space when bulk loading
-                                              if (sstable.descriptor.formatType == SSTableFormat.Type.BIG)
-                                                  ((SSTableReader) sstable).releaseSummary();
+                                              sstable.releaseSummary();
                                           }
                                           catch (FSError e)
                                           {

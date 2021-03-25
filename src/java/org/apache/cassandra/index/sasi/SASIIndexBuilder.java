@@ -73,7 +73,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             SSTableReader sstable = e.getKey();
             Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
-            try (RandomAccessReader dataFile = sstable.openDataReader())
+            try (RandomAccessReader dfile = sstable.openDataReader())
             {
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
 
@@ -91,10 +91,10 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                         indexWriter.startPartition(key, keyPosition);
 
                         RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
-                        dataFile.seek(indexEntry.position);
-                        ByteBufferUtil.readWithShortLength(dataFile); // key
+                        dfile.seek(indexEntry.position);
+                        ByteBufferUtil.readWithShortLength(dfile); // key
 
-                        try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
+                        try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dfile, key))
                         {
                             // if the row has statics attached, it has to be indexed separately
                             if (cfs.metadata().hasStaticColumns())

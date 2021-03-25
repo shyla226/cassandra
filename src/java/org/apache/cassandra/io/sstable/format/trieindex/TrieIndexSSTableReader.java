@@ -22,19 +22,28 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.InstrumentingCache;
+import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
@@ -43,19 +52,24 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.Downsampling;
+import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.IndexSummary;
+import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -63,6 +77,12 @@ import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
+
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.LT;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -75,9 +95,9 @@ class TrieIndexSSTableReader extends SSTableReader
     protected FileHandle rowIndexFile;
     protected PartitionIndex partitionIndex;
 
-    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
+    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, IFilter bf)
     {
-        super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
+        super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, null, dfile, null, bf);
     }
 
     protected void loadIndex(boolean preload) throws IOException
@@ -85,13 +105,13 @@ class TrieIndexSSTableReader extends SSTableReader
         if (components.contains(Component.PARTITION_INDEX))
         {
             try (
-                    FileHandle.Builder rowIndexBuilder = indexFileHandleBuilder(Component.ROW_INDEX);
-                    FileHandle.Builder partitionIndexBuilder = indexFileHandleBuilder(Component.PARTITION_INDEX);
+                    FileHandle.Builder rowIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
+                    FileHandle.Builder partitionIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
             )
             {
                 rowIndexFile = rowIndexBuilder.complete();
                 // only preload if memmapped
-                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, sstableMetadata.zeroCopyMetadata, preload);
+                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, preload);
                 first = partitionIndex.firstKey();
                 last = partitionIndex.lastKey();
             }
@@ -126,7 +146,7 @@ class TrieIndexSSTableReader extends SSTableReader
                                                           components,
                                                           metadata,
                                                           rowIndexFile.sharedCopy(),
-                                                          dataFile.sharedCopy(),
+                                                          dfile.sharedCopy(),
                                                           partitionIndex.sharedCopy(),
                                                           bf.sharedCopy(),
                                                           maxDataAge,
@@ -158,11 +178,9 @@ class TrieIndexSSTableReader extends SSTableReader
 
         // Make sure the SSTableReader internalOpen part does the same.
         assert desc.getFormat() == TrieIndexFormat.instance;
-        TrieIndexSSTableReader reader = TrieIndexFormat.readerFactory.open(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
+        TrieIndexSSTableReader reader = TrieIndexFormat.readerFactory.open(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, bf);
 
-        reader.bf = bf;
         reader.rowIndexFile = ifile;
-        reader.dataFile = dfile;
         reader.partitionIndex = partitionIndex;
         reader.setup(true);
 
@@ -170,11 +188,9 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    protected void setup(boolean trackHotness)
-    {
+    protected void setup(boolean trackHotness) {
         super.setup(trackHotness);
-        tidy.addCloseable(partitionIndex);
-        tidy.addCloseable(rowIndexFile);
+        tidy.setup(this, trackHotness, Arrays.asList(bf, dfile, partitionIndex, rowIndexFile));
     }
 
     @Override
@@ -207,7 +223,7 @@ class TrieIndexSSTableReader extends SSTableReader
 
     private void verifyBloomFilter() throws IOException
     {
-        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(descriptor.filenameFor(Component.FILTER).toPath())));
+        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER)))));
              IFilter bf = BloomFilterSerializer.deserialize(stream, descriptor.version.hasOldBfFormat()))
         {}
     }
@@ -218,7 +234,7 @@ class TrieIndexSSTableReader extends SSTableReader
         {
             while (true) {
                 keyIter.advance();
-                DecoratedKey key = keyIter.key();
+                DecoratedKey key = metadata().partitioner.decorateKey(keyIter.key());
                 if (key == null)
                     break;
             }
@@ -228,13 +244,23 @@ class TrieIndexSSTableReader extends SSTableReader
     private void verifyPartitionIndex() throws IOException
     {
         StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-        try (FileHandle.Builder builder = forVerify(indexFileHandleBuilder(Component.PARTITION_INDEX));
-             PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, statsMetadata.zeroCopyMetadata, false);
+        try (FileHandle.Builder builder = forVerify(defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
+             PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
              IndexPosIterator iter = index.allKeysIterator())
         {
             while (iter.nextIndexPos() != PartitionIndex.NOT_FOUND)
             {}
         }
+    }
+
+    private boolean filterFirst()
+    {
+        return openReason == OpenReason.MOVED_START;
+    }
+
+    private boolean filterLast()
+    {
+        return false;
     }
 
     public long estimatedKeys()
@@ -244,7 +270,7 @@ class TrieIndexSSTableReader extends SSTableReader
 
     public PartitionReader reader(FileDataInput file,
                                   boolean shouldCloseFile,
-                                  RowIndexEntry indexEntry,
+                                  RowIndexEntry<?> indexEntry,
                                   SerializationHelper helper,
                                   Slices slices,
                                   boolean reversed)
@@ -260,58 +286,58 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener)
+    protected RowIndexEntry<?> getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
+        // todo update bloom filter if updateCacheAndStats
+        // todo handle permitMatchPastLast
 
         PartitionPosition searchKey;
         Operator searchOp;
 
-        switch (op)
+        if (op == EQ)
+            return getExactPosition((DecoratedKey) key, listener);
+
+        if (op == GT || op == GE)
         {
-            case EQ:
-                return getExactPosition((DecoratedKey) key, listener);
-            case GT:
-            case GE:
-                if (filterLast() && last.compareTo(key) < 0)
-                    return null;
-                boolean filteredLeft = (filterFirst() && first.compareTo(key) > 0);
-                searchKey = filteredLeft ? first : key;
-                searchOp = filteredLeft ? Operator.GE : op;
+            if (filterLast() && last.compareTo(key) < 0)
+                return null;
+            boolean filteredLeft = (filterFirst() && first.compareTo(key) > 0);
+            searchKey = filteredLeft ? first : key;
+            searchOp = filteredLeft ? GE : op;
 
-                try (PartitionIndex.Reader reader = partitionIndex.openReader())
-                {
-                    return reader.ceiling(searchKey,
-                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch, rc));
-                }
-                catch (IOException e)
-                {
-                    markSuspect();
-                    throw new CorruptSSTableException(e, rowIndexFile.path());
-                }
-
-            case LT:
-                if (filterFirst() && first.compareTo(key) >= 0)
-                    return null;
-                boolean filteredRight = filterLast() && last.compareTo(key) < 0;
-                searchKey = filteredRight ? last : key;
-                searchOp = Operator.LT;
-
-                try (PartitionIndex.Reader reader = partitionIndex.openReader(rc))
-                {
-                    return reader.floor(searchKey,
-                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch, rc));
-                }
-                catch (IOException e)
-                {
-                    markSuspect();
-                    throw new CorruptSSTableException(e, rowIndexFile.path());
-                }
-
-            default:
-                throw new UnsupportedOperationException("Unsupported op: " + op);
+            try (PartitionIndex.Reader reader = partitionIndex.openReader())
+            {
+                return reader.ceiling(searchKey,
+                                      (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
+            }
+            catch (IOException e)
+            {
+                markSuspect();
+                throw new CorruptSSTableException(e, rowIndexFile.path());
+            }
         }
 
+        if (op == LT)
+        {
+            if (filterFirst() && first.compareTo(key) >= 0)
+                return null;
+            boolean filteredRight = filterLast() && last.compareTo(key) < 0;
+            searchKey = filteredRight ? last : key;
+            searchOp = LT;
 
+            try (PartitionIndex.Reader reader = partitionIndex.openReader())
+            {
+                return reader.floor(searchKey,
+                                    (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
+            }
+            catch (IOException e)
+            {
+                markSuspect();
+                throw new CorruptSSTableException(e, rowIndexFile.path());
+            }
+        }
+
+        throw new UnsupportedOperationException("Unsupported op: " + op);
     }
 
     /**
@@ -321,7 +347,7 @@ class TrieIndexSSTableReader extends SSTableReader
      * (with assumeNoMatch: true).
      * Returns the index entry at this position, or null if the search op rejects it.
      */
-    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
+    private RowIndexEntry<?> retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
     {
         if (pos >= 0)
         {
@@ -336,7 +362,7 @@ class TrieIndexSSTableReader extends SSTableReader
                     if (searchOp.apply(decorated.compareTo(searchKey)) != 0)
                         return null;
                 }
-                return TrieIndexEntry.deserialize(in, in.getSeekPosition());
+                return TrieIndexEntry.deserialize(in, in.getFilePointer());
             }
         }
         else
@@ -344,7 +370,7 @@ class TrieIndexSSTableReader extends SSTableReader
             pos = ~pos;
             if (!assumeNoMatch)
             {
-                try (FileDataInput in = dataFile.createReader(pos))
+                try (FileDataInput in = dfile.createReader(pos))
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
                     DecoratedKey decorated = decorateKey(indexKey);
@@ -354,6 +380,11 @@ class TrieIndexSSTableReader extends SSTableReader
             }
             return new RowIndexEntry(pos);
         }
+    }
+
+    protected boolean inBloomFilter(DecoratedKey dk)
+    {
+        return first.compareTo(dk) <= 0 && last.compareTo(dk) >= 0 && bf.isPresent(dk);
     }
 
     public boolean contains(DecoratedKey dk)
@@ -373,7 +404,7 @@ class TrieIndexSSTableReader extends SSTableReader
 
             try (FileDataInput in = createIndexOrDataReader(indexPos))
             {
-                return ByteBufferUtil.equalsWithShortLength(in, dk.getTempKey());
+                return ByteBufferUtil.equalsWithShortLength(in, dk.getKey());
             }
         }
         catch (IOException e)
@@ -383,12 +414,12 @@ class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
-    FileDataInput createIndexOrDataReader(long indexPosc)
+    FileDataInput createIndexOrDataReader(long indexPos)
     {
         if (indexPos >= 0)
             return rowIndexFile.createReader(indexPos);
         else
-            return dataFile.createReader(~indexPos);
+            return dfile.createReader(~indexPos);
     }
 
     @Override
@@ -402,7 +433,7 @@ class TrieIndexSSTableReader extends SSTableReader
     @Override
     public DecoratedKey keyAt(long dataPosition) throws IOException
     {
-        try (FileDataInput in = dataFile.createReader(dataPosition))
+        try (FileDataInput in = dfile.createReader(dataPosition))
         {
             if (in.isEOF()) return null;
             return decorateKey(ByteBufferUtil.readWithShortLength(in));
@@ -410,7 +441,12 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RowIndexEntry getExactPosition(DecoratedKey dk,
+    public DecoratedKey keyAt(FileDataInput reader) throws IOException
+    {
+        return null;
+    }
+
+    public RowIndexEntry<?> getExactPosition(DecoratedKey dk,
                                           SSTableReadsListener listener,
                                           FileDataInput rowIndexInput,
                                           FileDataInput dataInput)
@@ -419,13 +455,12 @@ class TrieIndexSSTableReader extends SSTableReader
         {
             listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
             Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.generation);
-            getBloomFilterTracker().addTrueNegative();
             return null;
         }
 
         if ((filterFirst() && first.compareTo(dk) > 0) || (filterLast() && last.compareTo(dk) < 0))
         {
-            getBloomFilterTracker().addFalsePositive();
+            bloomFilterTracker.addFalsePositive();
             listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             return null;
         }
@@ -435,7 +470,7 @@ class TrieIndexSSTableReader extends SSTableReader
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
             {
-                getBloomFilterTracker().addFalsePositive();
+                bloomFilterTracker.addFalsePositive();
                 listener.onSSTableSkipped(this, SkippingReason.PARTITION_INDEX_LOOKUP);
                 return null;
             }
@@ -460,23 +495,23 @@ class TrieIndexSSTableReader extends SSTableReader
                     in = dataInput;
                     if (in == null)
                     {
-                        in = dataFile.createReader(~indexPos);
+                        in = dfile.createReader(~indexPos);
                         toClose = in;
                     }
                     else
                         in.seek(~indexPos);
                 }
 
-                if (!ByteBufferUtil.equalsWithShortLength(in, dk.getTempKey()))
+                if (!ByteBufferUtil.equalsWithShortLength(in, dk.getKey()))
                 {
-                    getBloomFilterTracker().addFalsePositive();
+                    bloomFilterTracker.addFalsePositive();
                     listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
                     return null;
                 }
 
-                getBloomFilterTracker().addTruePositive();
-                RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getSeekPosition())
-                                                    : new RowIndexEntry(~indexPos);
+                bloomFilterTracker.addTruePositive();
+                RowIndexEntry<?> entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
+                                                    : new RowIndexEntry<>(~indexPos);
 
                 listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
                 return entry;
@@ -494,15 +529,14 @@ class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
-    @Override
-    public RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener)
+    public RowIndexEntry<?> getExactPosition(DecoratedKey dk, SSTableReadsListener listener)
     {
         return getExactPosition(dk, listener, null, null);
     }
 
     protected FileHandle[] getFilesToBeLocked()
     {
-        return new FileHandle[] { partitionIndex.getFileHandle(), rowIndexFile, dataFile };
+        return new FileHandle[] { partitionIndex.getFileHandle(), rowIndexFile, dfile };
     }
 
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
@@ -516,7 +550,7 @@ class TrieIndexSSTableReader extends SSTableReader
             inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
             return new PartitionIterator(partitionIndex,
                                          metadata().partitioner,
-                                         rowIndexFile, dataFile,
+                                         rowIndexFile, dfile,
                                          isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
                                          isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
         }
@@ -526,18 +560,17 @@ class TrieIndexSSTableReader extends SSTableReader
 
     public PartitionIterator allKeysIterator() throws IOException
     {
-        return new PartitionIterator(partitionIndex, metadata().partitioner, rowIndexFile, dataFile);
+        return new PartitionIterator(partitionIndex, metadata().partitioner, rowIndexFile, dfile);
     }
 
-    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    public ScrubIterator scrubPartitionsIterator() throws IOException
     {
         if (partitionIndex == null)
             return null;
         return new ScrubIterator(partitionIndex, rowIndexFile);
     }
 
-    @Override
-    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dataFileReader,
+    public Iterator<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfileReader,
                                                 PartitionPosition left,
                                                 boolean inclusiveLeft,
                                                 PartitionPosition right,
@@ -549,13 +582,15 @@ class TrieIndexSSTableReader extends SSTableReader
         {
             inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
             inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
-            return new TrieIndexFileFlow(dataFileReader,
-                                         this,
+            return new TrieIndexFileIterator(dfileReader,
+                                             this,
                                          isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
                                          isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
         }
         else
-            return Flow.empty();
+        {
+            return Collections.emptyIterator();
+        }
     }
 
     @Override
@@ -568,7 +603,7 @@ class TrieIndexSSTableReader extends SSTableReader
                                                                          .iterator();
 
         if (!partitionKeyIterators.hasNext())
-            return UnmodifiableArrayList.emptyList();
+            return Collections.emptyList();
 
         return new Iterable<DecoratedKey>()
         {
@@ -626,7 +661,7 @@ class TrieIndexSSTableReader extends SSTableReader
                         {
                             closeCurrentIt();
                             markSuspect();
-                            throw new CorruptSSTableException(e, dataFile.path());
+                            throw new CorruptSSTableException(e, dfile.path());
                         }
                     }
                 };
@@ -644,7 +679,7 @@ class TrieIndexSSTableReader extends SSTableReader
                 return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             }
         else
-            try (FileDataInput in = dataFile.createReader(~pos))
+            try (FileDataInput in = dfile.createReader(~pos))
             {
                 return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             }
@@ -683,10 +718,225 @@ class TrieIndexSSTableReader extends SSTableReader
             if (right == null && filterLast())
                 right = last;
 
-            long startPos = left != null ? getPosition(left, Operator.GE).position : 0;
-            long endPos = right != null ? getPosition(right, Operator.GE).position : uncompressedLength();
+            long startPos = left != null ? getPosition(left, GE).position : 0;
+            long endPos = right != null ? getPosition(right, GE).position : uncompressedLength();
             selectedDataSize += endPos - startPos;
         }
         return (long) (selectedDataSize / sstableMetadata.estimatedPartitionSize.rawMean());
     }
+
+    // todo must be overridden
+    @Override
+    public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    {
+        return null;
+    }
+
+    // todo must be overridden
+    @Override
+    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
+    {
+        return null;
+    }
+
+    // todo must be overridden
+    @Override
+    public ISSTableScanner getScanner()
+    {
+        return null;
+    }
+
+    // todo must be overridden
+    @Override
+    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
+    {
+        return null;
+    }
+
+    // todo must be overridden
+    @Override
+    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
+    {
+        return null;
+    }
+
+    // todo must be overridden
+    @Override
+    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+    {
+        return null;
+    }
+
+    // todo must be overridden
+    protected TrieIndexSSTableReader(SSTableReaderBuilder builder)
+    {
+        super(builder);
+    }
+
+    // todo must be overridden
+    protected TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, IndexSummary summary, FileHandle dfile, FileHandle ifile, IFilter bf)
+    {
+        super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, summary, dfile, ifile, bf);
+    }
+
+    // -------------
+
+    // todo must be overridden
+    @Override
+    public void setupOnline()
+    {
+        super.setupOnline();
+    }
+
+    // todo must be overridden
+    @Override
+    public SSTableReader cloneAndReplace(IFilter newBloomFilter)
+    {
+        return super.cloneAndReplace(newBloomFilter);
+    }
+
+    // todo must be overridden
+    @Override
+    public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
+    {
+        return super.cloneWithRestoredStart(restoredStart);
+    }
+
+    // todo must be overridden
+    @Override
+    public SSTableReader cloneWithNewStart(DecoratedKey newStart, Runnable runOnClose)
+    {
+        return super.cloneWithNewStart(newStart, runOnClose);
+    }
+
+    // todo must be overridden
+    @Override
+    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
+    {
+        return super.cloneWithNewSummarySamplingLevel(parent, samplingLevel);
+    }
+
+    @Override
+    public int getIndexSummarySamplingLevel()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public long getIndexSummaryOffHeapSize()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public int getMinIndexInterval()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public double getEffectiveIndexInterval()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public void releaseSummary()
+    {
+        // no-op - tries do not have index summaries
+    }
+
+    @Override
+    public long getIndexScanPosition(PartitionPosition key)
+    {
+        // TODO check this
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int getIndexSummarySize()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public int getMaxIndexSummarySize()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public byte[] getIndexSummaryKey(int index)
+    {
+        // TODO check this
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void cacheKey(DecoratedKey key, BigTableRowIndexEntry info)
+    {
+        // no-op - tries do not have index summaries
+    }
+
+    @Override
+    public BigTableRowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
+    {
+        return null; // tries do not have index summaries
+    }
+
+    @Override
+    protected BigTableRowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    {
+        return null; // tries do not have index summaries
+    }
+
+    @Override
+    public boolean isKeyCacheEnabled()
+    {
+        return false; // tries do not have index summaries
+    }
+
+    // todo must be overridden
+    @Override
+    public DecoratedKey firstKeyBeyond(PartitionPosition token)
+    {
+        return super.firstKeyBeyond(token);
+    }
+
+    @Override
+    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
+    {
+        return null; // tries do not have key cache
+    }
+
+    @Override
+    public long getKeyCacheHit()
+    {
+        return 0L; // tries do not have key cache
+    }
+
+    @Override
+    public long getKeyCacheRequest()
+    {
+        return 0L;  // tries do not have key cache
+    }
+
+    @Override
+    public ChannelProxy getIndexChannel()
+    {
+        throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
+    @Override
+    public RandomAccessReader openIndexReader()
+    {
+        throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
+    @Override
+    public FileHandle getIndexFile()
+    {
+        throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
 }

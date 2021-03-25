@@ -30,14 +30,14 @@ public class IndexFileEntry
     public final static IndexFileEntry EMPTY = new IndexFileEntry();
 
     public final DecoratedKey key;
-    public final RowIndexEntry entry;
+    public final RowIndexEntry<?> entry;
 
     public IndexFileEntry()
     {
         this(null, null);
     }
 
-    public IndexFileEntry(DecoratedKey key, RowIndexEntry entry)
+    public IndexFileEntry(DecoratedKey key, RowIndexEntry<?> entry)
     {
         this.key = key;
         this.entry = entry;
@@ -47,8 +47,8 @@ public class IndexFileEntry
     public String toString()
     {
         return String.format("[key: %s, indexed: %s, rows: %d]",
-                             key == null ? "null" : new String(ByteBufferUtil.getArrayUnsafe(key.getTempKey())),
+                             key == null ? "null" : new String(ByteBufferUtil.getArray(key.getKey())),
                              entry == null ? false : entry.isIndexed(),
-                             entry == null ? 0 : entry.rowIndexCount());
+                             entry == null ? 0 : entry.columnsIndexCount());
     }
 }

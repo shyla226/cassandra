@@ -216,13 +216,16 @@ public final class Throwables
         
         for (AutoCloseable closeable : closeables)
         {
-            try
+            if (closeable != null)
             {
-                closeable.close();
-            }
-            catch (Throwable t)
-            {
-                accumulate = merge(accumulate, t);
+                try
+                {
+                    closeable.close();
+                }
+                catch (Throwable t)
+                {
+                    accumulate = merge(accumulate, t);
+                }
             }
         }
         return accumulate;

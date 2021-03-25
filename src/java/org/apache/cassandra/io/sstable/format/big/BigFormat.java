@@ -107,7 +107,7 @@ public class BigFormat implements SSTableFormat
         @Override
         public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
         {
-            try (FileHandle iFile = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor).complete()) {
+            try (FileHandle iFile = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX).complete()) {
                 SerializationHeader.Component headerComponent = (SerializationHeader.Component)
                                                                 descriptor.getMetadataSerializer()
                                                                           .deserialize(descriptor, MetadataType.HEADER);

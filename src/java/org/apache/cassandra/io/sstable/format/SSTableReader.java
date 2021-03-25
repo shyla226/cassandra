@@ -225,7 +225,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
     protected final AtomicLong keyCacheRequest = new AtomicLong(0);
 
-    private final InstanceTidier tidy;
+    protected final InstanceTidier tidy;
     private final Ref<SSTableReader> selfRef;
 
     private RestorableMeter readMeter;
@@ -1045,7 +1045,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public void releaseSummary()
     {
-        tidy.releaseSummary();
+        indexSummary.close();
+        assert indexSummary.isCleanedUp();
     }
 
     private void validate()
@@ -1741,6 +1742,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         public static final Operator EQ = new Equals();
         public static final Operator GE = new GreaterThanOrEqualTo();
         public static final Operator GT = new GreaterThan();
+        public static final Operator LT = new LowerThan();
 
         /**
          * @param comparison The result of a call to compare/compareTo, with the desired field on the rhs.
@@ -1761,6 +1763,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         final static class GreaterThan extends Operator
         {
             public int apply(int comparison) { return comparison > 0 ? 0 : 1; }
+        }
+
+        final static class LowerThan extends Operator
+        {
+            public int apply(int comparison) { return comparison < 0 ? 0 : 1; }
         }
     }
 
@@ -2015,7 +2022,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected void setup(boolean trackHotness)
     {
-        tidy.setup(this, trackHotness);
         this.readMeter = tidy.global.readMeter;
     }
 
@@ -2045,15 +2051,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * When the InstanceTidier cleansup, it releases its reference to its GlobalTidy; when all InstanceTidiers
      * for that type have run, the GlobalTidy cleans up.
      */
-    private static final class InstanceTidier implements RefCounted.Tidy
+    protected static final class InstanceTidier implements RefCounted.Tidy
     {
         private final Descriptor descriptor;
         private final TableId tableId;
-        private IFilter bf;
-        private IndexSummary summary;
 
-        private FileHandle dfile;
-        private FileHandle ifile;
+        private List<AutoCloseable> closables;
         private Runnable runOnClose;
         private boolean isReplaced = false;
 
@@ -2064,18 +2067,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         private volatile boolean setup;
 
-        void setup(SSTableReader reader, boolean trackHotness)
+        public void setup(SSTableReader reader, boolean trackHotness, List<AutoCloseable> closables)
         {
             this.setup = true;
-            this.bf = reader.bf;
-            this.summary = reader.indexSummary;
-            this.dfile = reader.dfile;
-            this.ifile = reader.ifile;
             // get a new reference to the shared descriptor-type tidy
             this.globalRef = GlobalTidy.get(reader);
             this.global = globalRef.get();
             if (trackHotness)
                 global.ensureReadMeter();
+            this.closables = closables;
         }
 
         InstanceTidier(Descriptor descriptor, TableId tableId)
@@ -2103,47 +2103,31 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             else
                 barrier = null;
 
-            ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
-            {
-                public void run()
-                {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, before barrier", descriptor);
+            ScheduledExecutors.nonPeriodicTasks.execute(() -> {
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, before barrier", descriptor);
 
-                    if (barrier != null)
-                        barrier.await();
+                if (barrier != null)
+                    barrier.await();
 
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, after barrier", descriptor);
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, after barrier", descriptor);
 
-                    if (bf != null)
-                        bf.close();
-                    if (summary != null)
-                        summary.close();
-                    if (runOnClose != null)
-                        runOnClose.run();
-                    if (dfile != null)
-                        dfile.close();
-                    if (ifile != null)
-                        ifile.close();
-                    globalRef.release();
+                if (runOnClose != null)
+                    runOnClose.run();
+                Throwable ex = Throwables.close(null, closables);
+                if (ex != null)
+                    throw Throwables.cleaned(ex);
+                globalRef.release();
 
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, completed", descriptor);
-                }
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, completed", descriptor);
             });
         }
 
         public String name()
         {
             return descriptor.toString();
-        }
-
-        void releaseSummary()
-        {
-            summary.close();
-            assert summary.isCleanedUp();
-            summary = null;
         }
     }
 
@@ -2262,7 +2246,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * Main entry point for opening (creating a new instance of) a Reader. The desired usage is obtaining the
      * factory instance from SSTable descriptor and invoking one of the open methods. This usage makes
-     * static open* methods obsolete (all of them should be private now).
+     * static @{link SSTableReader} open* methods obsolete (all of them are private now).
      * @{link SSTableReader} subclasses are exepected to provide an implementation of this interface.
      */
     public interface Factory
@@ -2291,8 +2275,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
-     * Opens BigTable format reader. Proxies open calls to (private) static methods of @{link SSTableReader}.
-     *
+     * Opens BigTable format readers. Proxies open calls to (private) static methods of @{link SSTableReader}.
+     * This class servers as a proxy to legacy private static methods that should be refactored out of
+     * SSTableReader (as they are specific to BigTable format) but are left in the Reader for painless
+     * upstream merges.
+     * Implementations of this abstract class is provided by BigTable format reader.
      */
     public abstract static class AbstractBigTableReaderFactory implements SSTableReader.Factory {
 
