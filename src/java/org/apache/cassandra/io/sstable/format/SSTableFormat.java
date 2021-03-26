@@ -56,7 +56,7 @@ public interface SSTableFormat
 
         public static Type current()
         {
-            return Type.valueOf(System.getProperty("cassandra.sstable.format.default", BIG.name()));
+            return Type.valueOf(System.getProperty("cassandra.sstable.format.default", TRIE_INDEX.name()));
         }
 
         Type(String name, SSTableFormat info)
