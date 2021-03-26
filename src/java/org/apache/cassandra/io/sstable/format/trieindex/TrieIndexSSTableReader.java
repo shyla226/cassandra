@@ -240,7 +240,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     private void verifyRowIndex() throws IOException
     {
-        try (PartitionIndexIterator keyIter = TrieIndexFormat.readerFactory.keyIterator(descriptor, metadata()))
+        try (PartitionIndexIterator keyIter = TrieIndexFormat.readerFactory.indexIterator(descriptor, metadata()))
         {
             while (true)
             {

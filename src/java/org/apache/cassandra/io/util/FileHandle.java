@@ -253,6 +253,7 @@ public class FileHandle extends SharedCloseableImpl
 
         private boolean mmapped = false;
         private boolean compressed = false;
+        private long length = -1;
 
         public Builder(String path)
         {
@@ -332,6 +333,11 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        public void withLength(long length)
+        {
+            this.length = length;
+        }
+
         /**
          * Complete building {@link FileHandle} without overriding file length.
          *
@@ -339,7 +345,7 @@ public class FileHandle extends SharedCloseableImpl
          */
         public FileHandle complete()
         {
-            return complete(-1L);
+            return complete(length);
         }
 
         /**

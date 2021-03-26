@@ -301,13 +301,11 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             //partitionIndex.dumpTrie(descriptor.filenameFor(Component.PARTITION_INDEX) + ".txt");
 
             StatsMetadata stats = statsMetadata();
-            iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
-            FileHandle ifile = iwriter.rowIndexFHBuilder.complete();
+            FileHandle ifile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
             // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
             // get updated length / compression metadata.
-            dataFile.updateFileHandle(dbuilder);
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
+            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
             invalidateCacheAtBoundary(dfile);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                components, metadata,
@@ -597,7 +595,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
             // truncate index file
             rowIndexFile.prepareToCommit();
-            rowIndexFile.updateFileHandle(rowIndexFHBuilder);
+            rowIndexFHBuilder.withLength(rowIndexFile.getLastFlushOffset());
 
             complete();
         }

@@ -26,10 +26,10 @@ import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -130,17 +130,16 @@ public class TrieIndexFormat implements SSTableFormat
 
     static class ReaderFactory implements SSTableReader.Factory
     {
-        @Override
         public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header, FileHandle dfile, IFilter bf)
         {
             return new TrieIndexSSTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, bf);
         }
 
         @Override
-        public PartitionIndexIterator keyIterator(Descriptor desc, TableMetadata metadata)
+        public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata)
         {
             IPartitioner partitioner = metadata.partitioner;
-            boolean compressedData = desc.filenameFor(Component.COMPRESSION_INFO).exists();
+            boolean compressedData = new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists();
             try
             {
                 StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
@@ -155,8 +154,7 @@ public class TrieIndexFormat implements SSTableFormat
                     return new PartitionIterator(index.sharedCopy(),
                                                  partitioner,
                                                  riFile.sharedCopy(),
-                                                 dFile.sharedCopy())
-                            .closeHandles();
+                                                 dFile.sharedCopy()).closeHandles();
                 }
             }
             catch (IOException e)
@@ -165,7 +163,6 @@ public class TrieIndexFormat implements SSTableFormat
             }
         }
 
-        @Override
         public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
             File indexFile = new File(descriptor.filenameFor(Component.PARTITION_INDEX));
@@ -182,6 +179,62 @@ public class TrieIndexFormat implements SSTableFormat
         public Set<Component> requiredComponents()
         {
             return REQUIRED_COMPONENTS;
+        }
+
+        @Override
+        public SSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
+        {
+            // TODO
+            return null;
+        }
+
+        @Override
+        public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+        {
+            // TODO
+            return null;
         }
     }
 

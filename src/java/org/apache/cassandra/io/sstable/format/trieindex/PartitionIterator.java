@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -43,9 +44,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     private FileDataInput indexInput;
 
     private DecoratedKey currentKey;
-    private RowIndexEntry currentEntry;
+    private RowIndexEntry<?> currentEntry;
     private DecoratedKey nextKey;
-    private RowIndexEntry nextEntry;
+    private RowIndexEntry<?> nextEntry;
     private boolean closeHandles = false;
 
     /**
@@ -123,11 +124,17 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         Throwables.maybeFail(accum);
     }
 
-    public DecoratedKey key()
+    public DecoratedKey decoratedKey()
     {
         return currentKey;
     }
 
+    public ByteBuffer key()
+    {
+        return currentKey.getKey();
+    }
+
+    @Override
     public long dataPosition()
     {
         return currentEntry != null ? currentEntry.position : -1;
@@ -138,7 +145,8 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         return currentEntry;
     }
 
-    public void advance() throws IOException
+    @Override
+    public boolean advance() throws IOException
     {
         currentKey = nextKey;
         currentEntry = nextEntry;
@@ -151,8 +159,11 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
             {   // exclude last partition outside range
                 currentKey = null;
                 currentEntry = null;
+                return false;
             }
+            return true;
         }
+        return false;
     }
 
     private void readNext() throws IOException
@@ -199,5 +210,35 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         else
             in.seek(pos);
         return in;
+    }
+
+    @Override
+    public boolean isExhausted()
+    {
+        return nextKey != null;
+    }
+
+    @Override
+    public long indexPosition()
+    {
+        return 0;
+    }
+
+    @Override
+    public void indexPosition(long position) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long indexLength()
+    {
+        return 0;
+    }
+
+    @Override
+    public void reset() throws IOException
+    {
+        go(root);
     }
 }

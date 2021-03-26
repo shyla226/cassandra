@@ -22,6 +22,8 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
+import com.google.common.collect.ImmutableSet;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -35,6 +37,8 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.net.MessagingService;
+
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
  * Legacy bigtable format
@@ -103,11 +107,12 @@ public class BigFormat implements SSTableFormat
 
     static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
+        private final static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.STATS);
 
         @Override
         public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
         {
-            try (FileHandle iFile = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX).complete()) {
+            try (FileHandle iFile = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX).complete()) {
                 SerializationHeader.Component headerComponent = (SerializationHeader.Component)
                                                                 descriptor.getMetadataSerializer()
                                                                           .deserialize(descriptor, MetadataType.HEADER);
@@ -125,6 +130,12 @@ public class BigFormat implements SSTableFormat
         public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
         {
             return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
+        }
+
+        @Override
+        public Set<Component> requiredComponents()
+        {
+            return REQUIRED_COMPONENTS;
         }
     }
 
