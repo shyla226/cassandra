@@ -295,6 +295,7 @@ public class BigTableWriter extends SSTableWriter
         public Row applyToRow(Row row)
         {
             collector.updateClusteringValues(row.clustering());
+            Rows.collectStats(row, collector);
             return row;
         }
 
