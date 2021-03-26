@@ -80,6 +80,8 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -105,9 +107,11 @@ public class TrieIndexSSTableReader extends SSTableReader
     protected FileHandle rowIndexFile;
     protected PartitionIndex partitionIndex;
 
-    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, IFilter bf)
+    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, FileHandle rowIndexFile, PartitionIndex partitionIndex, IFilter bf)
     {
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, null, dfile, null, bf);
+        this.rowIndexFile = rowIndexFile;
+        this.partitionIndex = partitionIndex;
     }
 
     protected void loadIndex(boolean preload) throws IOException
@@ -942,7 +946,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
-    // todo must be overridden
     @Override
     public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
     {
@@ -985,52 +988,84 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     // todo must be overridden
-    protected TrieIndexSSTableReader(SSTableReaderBuilder builder)
-    {
-        super(builder);
-    }
-
-    // todo must be overridden
-    protected TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, IndexSummary summary, FileHandle dfile, FileHandle ifile, IFilter bf)
+    protected TrieIndexSSTableReader(Descriptor desc,
+                                     Set<Component> components,
+                                     TableMetadataRef metadata,
+                                     long maxDataAge,
+                                     StatsMetadata sstableMetadata,
+                                     OpenReason openReason,
+                                     SerializationHeader header,
+                                     IndexSummary summary,
+                                     FileHandle dfile,
+                                     FileHandle ifile,
+                                     IFilter bf)
     {
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, summary, dfile, ifile, bf);
     }
 
     // -------------
 
-    // todo must be overridden
     @Override
     public void setupOnline()
     {
-        super.setupOnline();
+        final ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata().id);
+        if (cfs != null)
+            setCrcCheckChance(cfs.getCrcCheckChance());
     }
 
-    // todo must be overridden
+    private TrieIndexSSTableReader cloneInternal(DecoratedKey first, OpenReason openReason, IFilter bf) {
+        TrieIndexSSTableReader clone = new TrieIndexSSTableReader(descriptor,
+                                                                  components,
+                                                                  metadata,
+                                                                  maxDataAge,
+                                                                  sstableMetadata,
+                                                                  openReason,
+                                                                  header,
+                                                                  dfile.sharedCopy(),
+                                                                  rowIndexFile.sharedCopy(),
+                                                                  partitionIndex.sharedCopy(),
+                                                                  bf);
+        clone.first = first;
+        clone.last = last;
+        clone.isSuspect.set(isSuspect.get());
+
+        return clone;
+    }
+
     @Override
     public SSTableReader cloneAndReplace(IFilter newBloomFilter)
     {
-        return super.cloneAndReplace(newBloomFilter);
+        return cloneInternal(first, openReason, newBloomFilter);
     }
 
-    // todo must be overridden
     @Override
     public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
     {
-        return super.cloneWithRestoredStart(restoredStart);
+        return runWithLock(d -> cloneInternal(restoredStart, OpenReason.NORMAL, bf.sharedCopy()));
     }
 
-    // todo must be overridden
     @Override
     public SSTableReader cloneWithNewStart(DecoratedKey newStart, Runnable runOnClose)
     {
-        return super.cloneWithNewStart(newStart, runOnClose);
+        return runWithLock(d -> {
+            assert openReason != OpenReason.EARLY;
+            // TODO: merge with caller's firstKeyBeyond() work,to save time
+            if (newStart.compareTo(first) > 0)
+            {
+                final long dataStart = getPosition(newStart, Operator.EQ).position;
+                final long indexStart = getIndexScanPosition(newStart);
+                runOnClose(new DropPageCache(dfile, dataStart, ifile, indexStart, runOnClose));
+            }
+
+            return cloneInternal(newStart, OpenReason.MOVED_START, bf.sharedCopy());
+        });
     }
 
-    // todo must be overridden
     @Override
     public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
     {
-        return super.cloneWithNewSummarySamplingLevel(parent, samplingLevel);
+        // nothing to do here, the method updates something in index summary which is missing in trie index impl
+        return cloneInternal(first, openReason, bf.sharedCopy());
     }
 
     @Override
@@ -1113,11 +1148,26 @@ public class TrieIndexSSTableReader extends SSTableReader
         return false; // tries do not have index summaries
     }
 
-    // todo must be overridden
     @Override
     public DecoratedKey firstKeyBeyond(PartitionPosition token)
     {
-        return super.firstKeyBeyond(token);
+        try
+        {
+            RowIndexEntry<?> pos = getPosition(token, Operator.GT);
+            if (pos == null)
+                return null;
+
+            try (FileDataInput in = dfile.createReader(pos.position))
+            {
+                ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
+                return decorateKey(indexKey);
+            }
+        }
+        catch (IOException e)
+        {
+            markSuspect();
+            throw new CorruptSSTableException(e, dfile.path());
+        }
     }
 
     @Override

@@ -774,7 +774,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * @param task to be guarded by sstable lock
      */
-    public <R> R runWithLock(CheckedFunction<Descriptor, R, IOException> task) throws IOException
+    public <R, E extends Exception> R runWithLock(CheckedFunction<Descriptor, R, E> task) throws E
     {
         synchronized (tidy.global)
         {
@@ -932,7 +932,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
-    private static class DropPageCache implements Runnable
+    protected static class DropPageCache implements Runnable
     {
         final FileHandle dfile;
         final long dfilePosition;
@@ -940,7 +940,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         final long ifilePosition;
         final Runnable andThen;
 
-        private DropPageCache(FileHandle dfile, long dfilePosition, FileHandle ifile, long ifilePosition, Runnable andThen)
+        public DropPageCache(FileHandle dfile, long dfilePosition, FileHandle ifile, long ifilePosition, Runnable andThen)
         {
             this.dfile = dfile;
             this.dfilePosition = dfilePosition;
