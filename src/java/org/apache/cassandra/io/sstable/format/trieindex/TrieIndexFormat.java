@@ -47,10 +47,13 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
 
+import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
+import static org.apache.cassandra.io.sstable.SSTable.componentsFor;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
@@ -179,56 +182,62 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
         {
-            return TrieIndexSSTableReader.openForBatch(descriptor, components, metadata);
+            return TrieIndexSSTableReader.open(descriptor, components, metadata, true, true, false);
         }
 
         @Override
-        public SSTableReader open(Descriptor desc)
+        public SSTableReader open(Descriptor descriptor)
         {
-            // TODO
-            return null;
+            TableMetadataRef metadata;
+            if (descriptor.cfname.contains(SECONDARY_INDEX_NAME_SEPARATOR))
+            {
+                int i = descriptor.cfname.indexOf(SECONDARY_INDEX_NAME_SEPARATOR);
+                String indexName = descriptor.cfname.substring(i + 1);
+                metadata = Schema.instance.getIndexTableMetadataRef(descriptor.ksname, indexName);
+                if (metadata == null)
+                    throw new AssertionError("Could not find index metadata for index cf " + i);
+            }
+            else
+            {
+                metadata = Schema.instance.getTableMetadataRef(descriptor.ksname, descriptor.cfname);
+            }
+            return open(descriptor, metadata);
         }
 
         @Override
         public SSTableReader open(Descriptor desc, TableMetadataRef metadata)
         {
-            // TODO
-            return null;
+            return open(desc, componentsFor(desc), metadata);
         }
 
         @Override
         public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
         {
-            // TODO
-            return null;
+            return open(desc, components, metadata, true, false);
         }
 
         @Override
         public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
         {
-            // TODO
-            return null;
+            return TrieIndexSSTableReader.open(desc, components, metadata, validate, isOffline, true);
         }
 
         @Override
         public SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
         {
-            // TODO
-            return null;
+            return TrieIndexSSTableReader.open(desc, componentsFor(desc), tableMetadataRef, false, true, true);
         }
 
         @Override
         public SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
         {
-            // TODO
-            return null;
+            return TrieIndexSSTableReader.open(desc, components, cfs.metadata, false, true, true);
         }
 
         @Override
         public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
         {
-            // TODO
-            return null;
+            return TrieIndexSSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
         }
     }
 

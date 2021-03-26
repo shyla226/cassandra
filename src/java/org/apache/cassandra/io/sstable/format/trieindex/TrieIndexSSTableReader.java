@@ -23,8 +23,11 @@ import java.io.DataInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -32,14 +35,18 @@ import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Columns;
@@ -62,6 +69,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -77,6 +85,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
@@ -84,22 +93,29 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.CheckedFunction;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -120,6 +136,9 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     protected FileHandle rowIndexFile;
     protected PartitionIndex partitionIndex;
+
+    @VisibleForTesting
+    public static final double fpChanceTolerance = Double.parseDouble(System.getProperty(Config.PROPERTY_PREFIX + "bloom_filter_fp_chance_tolerance", "0.000001"));
 
     TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, FileHandle rowIndexFile, PartitionIndex partitionIndex, IFilter bf)
     {
@@ -1186,8 +1205,131 @@ public class TrieIndexSSTableReader extends SSTableReader
         throw new UnsupportedOperationException("tries do not have primary index");
     }
 
+    private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
+    {
+        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER))))))
+        {
+            return BloomFilterSerializer.deserialize(stream, oldBfFormat);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to deserialize bloom filter: {}", t.getMessage());
+            return null;
+        }
+    }
 
-    public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static IFilter recreateBloomFilter(Descriptor descriptor, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
+    {
+        if (estimatedKeysCount <= 0)
+        {
+            logger.warn("Cannot recreate bloom filter, cannot estimate number of keys");
+            return null;
+        }
+
+        IFilter bf = null;
+        try
+        {
+            bf = FilterFactory.getFilter(estimatedKeysCount, fpChance);
+
+            Factory readerFactory = descriptor.getFormat().getReaderFactory();
+            try (PartitionIterator iter = (PartitionIterator) readerFactory.indexIterator(descriptor, metadata))
+            {
+                while (true)
+                {
+                    DecoratedKey key = iter.decoratedKey();
+                    if (key == null)
+                        break;
+                    bf.add(key);
+                    iter.advance();
+                }
+            }
+
+            File path = new File(descriptor.filenameFor(Component.FILTER));
+            try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                 DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
+            {
+                BloomFilterSerializer.serialize((BloomFilter) bf, stream);
+                stream.flush();
+                SyncUtil.sync((FileChannel) fos);
+            }
+
+            // Update the sstable metadata to contain the current FP chance
+            ValidationMetadata validation = new ValidationMetadata(metadata.partitioner.getClass().getCanonicalName(), fpChance);
+            sstableMetadata.put(MetadataType.VALIDATION, validation);
+            descriptor.getMetadataSerializer().rewriteSSTableMetadata(descriptor, sstableMetadata);
+            return bf;
+        }
+        catch (Throwable t)
+        {
+            if (bf != null)
+            {
+                bf.close();
+            }
+
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to recreate bloom filter: {}", t.getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Load the bloom filter from Filter.db file, if it exists and if the FP chance has not changed.
+     * Otherwise recreate the bloom filter using the current FP chance.
+     *
+     * @param sstableMetadata the sstable metadata, for extracting and changing the FP chance
+     * @param fpChance the current FP chance taken from the table metadata
+     */
+    private static IFilter loadBloomFilter(Descriptor descriptor, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
+    {
+        if (Math.abs(1 - fpChance) <= fpChanceTolerance)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Returning pass-through bloom filter, FP chance is equal to 1: {}", fpChance);
+
+            return FilterFactory.AlwaysPresent;
+        }
+
+        ValidationMetadata validation = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
+        boolean fpChanged = Math.abs(fpChance - validation.bloomFilterFPChance) > fpChanceTolerance;
+
+        if (new File(descriptor.filenameFor(Component.FILTER)).exists() && !fpChanged)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Deserializing bloom filter");
+
+            IFilter bf = deserializeBloomFilter(descriptor, descriptor.version.hasOldBfFormat());
+            if (bf != null)
+                return bf;
+        }
+
+        String reason = fpChanged
+                        ? String.format("false positive chance changed from %f to %f", validation.bloomFilterFPChance, fpChance)
+                        : (!new File(descriptor.filenameFor(Component.FILTER)).exists()
+                           ? "there is no bloom filter file"
+                           : "deserialization failed");
+
+        if (logger.isDebugEnabled())
+            logger.debug("Recreating bloom filter because {}", reason);
+
+        IFilter bf = recreateBloomFilter(descriptor, metadata, estimatedKeysCount, sstableMetadata, fpChance);
+        if (bf != null)
+            return bf;
+
+        logger.warn("Could not recreate or deserialize existing bloom filter, continuing with a pass-through " +
+                    "bloom filter but this will significantly impact reads performance");
+
+        return FilterFactory.AlwaysPresent;
+    }
+
+    public static boolean hasBloomFilter(double fpChance)
+    {
+        Preconditions.checkArgument(fpChance <= 1, "FP chance should be less or equal to 1: " + fpChance);
+        return Math.abs(1 - fpChance) > fpChanceTolerance;
+    }
+
+    public static TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline, boolean loadBloomFilter)
     {
         checkRequiredComponents(descriptor, components, true);
 
@@ -1223,42 +1365,112 @@ public class TrieIndexSSTableReader extends SSTableReader
         long fileLength = descriptor.filenameFor(Component.DATA).length();
         logger.debug("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));
 
+        double fpChance = metadata.get().params.bloomFilterFpChance;
+
         FileHandle dataFH = null;
         FileHandle rowIdxFH = null;
         PartitionIndex partitionIndex = null;
+        IFilter bloomFilter = null;
 
         try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor);
              FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
              FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
              FileHandle partitionIdxFH = partitionIdxFHBuilder.complete();
-             PartitionIndex partitionIdx = PartitionIndex.load(partitionIdxFH, metadata.get().partitioner, false))
+             PartitionIndex partitionIdx = PartitionIndex.load(partitionIdxFH, metadata.get().partitioner, loadBloomFilter && !hasBloomFilter(fpChance));
+             IFilter bf = loadBloomFilter
+                          ? loadBloomFilter(descriptor, metadata.get(), partitionIdx.size(), sstableMetadata, fpChance)
+                          : FilterFactory.AlwaysPresent
+             )
         {
             dataFH = dataFHBuilder.complete();
             partitionIndex = partitionIdx.sharedCopy();
             rowIdxFH = rowIdxFHBuilder.complete();
+            bloomFilter = bf.sharedCopy();
+
             TrieIndexSSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                                  components,
                                                                                  metadata,
                                                                                  rowIdxFH,
                                                                                  dataFH,
                                                                                  partitionIndex,
-                                                                                 FilterFactory.AlwaysPresent,
+                                                                                 bloomFilter,
                                                                                  System.currentTimeMillis(),
                                                                                  statsMetadata,
                                                                                  OpenReason.NORMAL,
                                                                                  header.toHeader(metadata.get()));
 
-            sstable.setup(false);
-            sstable.validate();
+            sstable.setup(!isOffline);
+            if (validate)
+                sstable.validate();
             return sstable;
         }
         catch (RuntimeException e)
         {
-            throw Throwables.cleaned(Throwables.close(e, rowIdxFH, partitionIndex, dataFH));
+            throw Throwables.cleaned(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH));
         }
         catch (IOException e)
         {
-            throw new CorruptSSTableException(Throwables.close(e, rowIdxFH, partitionIndex, dataFH), descriptor.filenameFor(Component.DATA));
+            throw new CorruptSSTableException(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH), descriptor.filenameFor(Component.DATA));
         }
     }
+
+    /**
+     * Moves the sstable in oldDescriptor to a new place (with generation etc) in newDescriptor.
+     *
+     * All components given will be moved/renamed
+     */
+    public static SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+    {
+        if (!oldDescriptor.isCompatible())
+            throw new RuntimeException(String.format("Can't open incompatible SSTable! Current version %s, found file: %s",
+                                                     oldDescriptor.getFormat().getLatestVersion(),
+                                                     oldDescriptor));
+
+        boolean isLive = cfs.getLiveSSTables().stream().anyMatch(r -> r.descriptor.equals(newDescriptor)
+                                                                      || r.descriptor.equals(oldDescriptor));
+        if (isLive)
+        {
+            String message = String.format("Can't move and open a file that is already in use in the table %s -> %s", oldDescriptor, newDescriptor);
+            logger.error(message);
+            throw new RuntimeException(message);
+        }
+        if (new File(newDescriptor.filenameFor(Component.DATA)).exists())
+        {
+            String msg = String.format("File %s already exists, can't move the file there", newDescriptor.filenameFor(Component.DATA));
+            logger.error(msg);
+            throw new RuntimeException(msg);
+        }
+
+        if (copyData)
+        {
+            try
+            {
+                logger.info("Hardlinking new SSTable {} to {}", oldDescriptor, newDescriptor);
+                SSTableWriter.hardlink(oldDescriptor, newDescriptor, components);
+            }
+            catch (FSWriteError ex)
+            {
+                logger.warn("Unable to hardlink new SSTable {} to {}, falling back to copying", oldDescriptor, newDescriptor, ex);
+                SSTableWriter.copy(oldDescriptor, newDescriptor, components);
+            }
+        }
+        else
+        {
+            logger.info("Moving new SSTable {} to {}", oldDescriptor, newDescriptor);
+            SSTableWriter.rename(oldDescriptor, newDescriptor, components);
+        }
+
+        SSTableReader reader;
+        try
+        {
+            reader = TrieIndexSSTableReader.open(newDescriptor, components, cfs.metadata, true, false, true);
+        }
+        catch (Throwable t)
+        {
+            logger.error("Aborting import of sstables. {} was corrupt", newDescriptor);
+            throw new RuntimeException(newDescriptor + " is corrupt, can't import", t);
+        }
+        return reader;
+    }
+
 }
