@@ -202,8 +202,8 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public void setup(boolean trackHotness)
     {
-        super.setup(trackHotness);
         tidy.setup(this, trackHotness, Arrays.asList(bf, dfile, partitionIndex, rowIndexFile));
+        super.setup(trackHotness);
     }
 
     @Override

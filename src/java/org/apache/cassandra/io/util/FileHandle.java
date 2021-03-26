@@ -374,7 +374,11 @@ public class FileHandle extends SharedCloseableImpl
                 long length = overrideLength > 0 ? overrideLength : compressed ? compressionMetadata.compressedFileLength : channelCopy.size();
 
                 RebuffererFactory rebuffererFactory;
-                if (mmapped)
+                if (length == 0)
+                {
+                    rebuffererFactory = new EmptyRebufferer(channelCopy);
+                }
+                else if (mmapped)
                 {
                     if (compressed)
                     {
