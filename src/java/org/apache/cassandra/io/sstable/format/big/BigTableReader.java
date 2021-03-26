@@ -63,8 +63,8 @@ public class BigTableReader extends SSTableReader
 
     @Override
     public void setup(boolean trackHotness) {
-        super.setup(trackHotness);
         tidy.setup(this, trackHotness, Arrays.asList(bf, indexSummary, dfile, ifile));
+        super.setup(trackHotness);
     }
 
     @Override
