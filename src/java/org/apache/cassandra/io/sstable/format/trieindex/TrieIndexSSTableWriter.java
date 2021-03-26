@@ -130,7 +130,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                   LifecycleNewTracker lifecycleNewTracker,
                                   Set<Component> indexComponents)
     {
-        super(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers, components(metadata.get(), indexComponents));
+        super(descriptor, components(metadata.getLocal(), indexComponents),keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
 
         if (compression)
         {
