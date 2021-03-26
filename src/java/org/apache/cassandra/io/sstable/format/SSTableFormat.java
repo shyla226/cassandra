@@ -17,8 +17,14 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
-import com.google.common.base.CharMatcher;
+import java.util.Collection;
+import java.util.Set;
 
+import com.google.common.base.CharMatcher;
+import com.google.common.collect.Sets;
+
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 
@@ -74,4 +80,7 @@ public interface SSTableFormat
             throw new IllegalArgumentException("No Type constant " + name);
         }
     }
+
+    Set<Component> requiredComponents();
+
 }

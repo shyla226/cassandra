@@ -25,6 +25,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -38,19 +40,15 @@ import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
@@ -61,6 +59,12 @@ import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaul
  */
 public class TrieIndexFormat implements SSTableFormat
 {
+    private final static Logger logger = LoggerFactory.getLogger(TrieIndexFormat.class);
+
+    // Data, primary index and row index (which may be 0-length) are required.
+    // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
+    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.STATS);
+
     public static final TrieIndexFormat instance = new TrieIndexFormat();
     public static final Version latestVersion = new TrieIndexVersion(TrieIndexVersion.current_version);
     static final ReaderFactory readerFactory = new ReaderFactory();
@@ -104,6 +108,12 @@ public class TrieIndexFormat implements SSTableFormat
         return readerFactory;
     }
 
+    @Override
+    public Set<Component> requiredComponents()
+    {
+        return REQUIRED_COMPONENTS;
+    }
+
     static class WriterFactory extends SSTableWriter.Factory
     {
         @Override
@@ -124,18 +134,8 @@ public class TrieIndexFormat implements SSTableFormat
         }
     }
 
-    // Data, primary index and row index (which may be 0-length) are required.
-    // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
-    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.STATS);
-
     static class ReaderFactory implements SSTableReader.Factory
     {
-        public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header, FileHandle dfile, IFilter bf)
-        {
-//            return new TrieIndexSSTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, bf);
-            return null;
-        }
-
         @Override
         public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata)
         {
@@ -177,16 +177,9 @@ public class TrieIndexFormat implements SSTableFormat
         }
 
         @Override
-        public Set<Component> requiredComponents()
+        public SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
         {
-            return REQUIRED_COMPONENTS;
-        }
-
-        @Override
-        public SSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
-        {
-            // TODO
-            return null;
+            return TrieIndexSSTableReader.openForBatch(descriptor, components, metadata);
         }
 
         @Override

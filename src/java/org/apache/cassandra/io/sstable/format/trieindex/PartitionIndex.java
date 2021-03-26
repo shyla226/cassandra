@@ -165,8 +165,15 @@ public class PartitionIndex implements Closeable
                                       IPartitioner partitioner,
                                       boolean preload) throws IOException
     {
-        try (FileHandle fh = fhBuilder.complete();
-             FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
+        try (FileHandle fh = fhBuilder.complete())
+        {
+            return load(fh, partitioner, preload);
+        }
+    }
+
+    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload) throws IOException
+    {
+        try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {
             long firstPos = rdr.readLong();
             long keyCount = rdr.readLong();

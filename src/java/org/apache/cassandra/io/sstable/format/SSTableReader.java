@@ -30,6 +30,7 @@ import java.util.stream.Collector;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
@@ -1051,7 +1052,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         assert indexSummary.isCleanedUp();
     }
 
-    private void validate()
+    public void validate()
     {
         if (this.first.compareTo(this.last) > 0)
         {
@@ -2022,7 +2023,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return selfRef.ref();
     }
 
-    protected void setup(boolean trackHotness)
+    public void setup(boolean trackHotness)
     {
         this.readMeter = tidy.global.readMeter;
     }
@@ -2249,12 +2250,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * Main entry point for opening (creating a new instance of) a Reader. The desired usage is obtaining the
      * factory instance from SSTable descriptor and invoking one of the open methods. This usage makes
      * static @{link SSTableReader} open* methods obsolete (all of them are private now).
-     * @{link SSTableReader} subclasses are exepected to provide an implementation of this interface.
+     * {@link SSTableReader} subclasses are exepected to provide an implementation of this interface.
      */
     public interface Factory
     {
-        Set<Component> requiredComponents();
-
         PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata);
 
         // TODO in the implementation of those methods we will refer the current static methods which are implemented in AbstractdBigTableReader
@@ -2451,4 +2450,20 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
                .withChunkCache(ChunkCache.instance);
     }
+
+    public static void checkRequiredComponents(Descriptor descriptor, Set<Component> components, boolean validate)
+    {
+        if (validate)
+        {
+            Set<Component> requiredComponents = descriptor.formatType.info.requiredComponents();
+            // Minimum components without which we can't do anything
+            assert components.containsAll(requiredComponents) : String.format("Required components %s missing for sstable %s", Sets.difference(requiredComponents, components), descriptor);
+        }
+        else
+        {
+            // Scrub-only case, we just need data file.
+            assert components.contains(Component.DATA);
+        }
+    }
+
 }

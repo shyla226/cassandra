@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.BufferedInputStream;
 import java.io.Closeable;
 import java.io.DataInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -27,15 +28,19 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DataRange;
@@ -72,11 +77,16 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.CheckedFunction;
+import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -87,13 +97,17 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.LT;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
@@ -114,24 +128,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         this.partitionIndex = partitionIndex;
     }
 
-    protected void loadIndex(boolean preload) throws IOException
-    {
-        if (components.contains(Component.PARTITION_INDEX))
-        {
-            try (
-            FileHandle.Builder rowIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
-            FileHandle.Builder partitionIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-            )
-            {
-                rowIndexFile = rowIndexBuilder.complete();
-                // only preload if memmapped
-                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, preload);
-                first = partitionIndex.firstKey();
-                last = partitionIndex.lastKey();
-            }
-        }
-    }
-
     protected void releaseIndex()
     {
         if (rowIndexFile != null)
@@ -150,26 +146,12 @@ public class TrieIndexSSTableReader extends SSTableReader
     /**
      * Clone this reader with the new open reason and set the clone as replacement.
      *
-     * @param reason the {@code OpenReason} for the replacement.
+     * @param openReason the {@code OpenReason} for the replacement.
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
-    protected SSTableReader clone(OpenReason reason)
+    protected SSTableReader clone(OpenReason openReason)
     {
-        TrieIndexSSTableReader replacement = internalOpen(descriptor,
-                                                          components,
-                                                          metadata,
-                                                          rowIndexFile.sharedCopy(),
-                                                          dfile.sharedCopy(),
-                                                          partitionIndex.sharedCopy(),
-                                                          bf.sharedCopy(),
-                                                          maxDataAge,
-                                                          sstableMetadata,
-                                                          reason,
-                                                          header);
-        replacement.first = first;
-        replacement.last = last;
-        replacement.isSuspect.set(isSuspect.get());
-        return replacement;
+        return cloneInternal(first, openReason, bf.sharedCopy());
     }
 
     /**
@@ -178,7 +160,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     static TrieIndexSSTableReader internalOpen(Descriptor desc,
                                                Set<Component> components,
                                                TableMetadataRef metadata,
-                                               FileHandle ifile,
+                                               FileHandle rowIndexFile,
                                                FileHandle dfile,
                                                PartitionIndex partitionIndex,
                                                IFilter bf,
@@ -187,21 +169,19 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                OpenReason openReason,
                                                SerializationHeader header)
     {
-        assert desc != null && ifile != null && dfile != null && partitionIndex != null && bf != null && sstableMetadata != null;
+        assert desc != null && rowIndexFile != null && dfile != null && partitionIndex != null && bf != null && sstableMetadata != null;
 
         // Make sure the SSTableReader internalOpen part does the same.
         assert desc.getFormat() == TrieIndexFormat.instance;
-        TrieIndexSSTableReader reader = TrieIndexFormat.readerFactory.open(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, bf);
+        TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
 
-        reader.rowIndexFile = ifile;
-        reader.partitionIndex = partitionIndex;
         reader.setup(true);
 
         return reader;
     }
 
     @Override
-    protected void setup(boolean trackHotness)
+    public void setup(boolean trackHotness)
     {
         super.setup(trackHotness);
         tidy.setup(this, trackHotness, Arrays.asList(bf, dfile, partitionIndex, rowIndexFile));
@@ -1204,5 +1184,81 @@ public class TrieIndexSSTableReader extends SSTableReader
     public FileHandle getIndexFile()
     {
         throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
+
+    public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    {
+        checkRequiredComponents(descriptor, components, true);
+
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        Map<MetadataType, MetadataComponent> sstableMetadata;
+        try
+        {
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+        }
+        catch (IOException e)
+        {
+            throw new CorruptSSTableException(e, descriptor.filenameFor(Component.STATS));
+        }
+
+        ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
+        StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
+        SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
+
+        // Check if sstable is created using same partitioner.
+        // Partitioner can be null, which indicates older version of sstable or no stats available.
+        // In that case, we skip the check.
+        String partitionerName = metadata.get().partitioner.getClass().getCanonicalName();
+        if (validationMetadata != null && !partitionerName.equals(validationMetadata.partitioner))
+        {
+            String msg = String.format("Cannot open %s; partitioner %s does not match system partitioner %s. " +
+                                       "Note that the default partitioner starting with Cassandra 1.2 is Murmur3Partitioner, " +
+                                       "so you will need to edit that to match your old partitioner if upgrading.",
+                                       descriptor, validationMetadata.partitioner, partitionerName);
+            logger.error("{}", msg);
+            System.exit(1);
+        }
+
+        long fileLength = descriptor.filenameFor(Component.DATA).length();
+        logger.debug("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));
+
+        FileHandle dataFH = null;
+        FileHandle rowIdxFH = null;
+        PartitionIndex partitionIndex = null;
+
+        try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor);
+             FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+             FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
+             FileHandle partitionIdxFH = partitionIdxFHBuilder.complete();
+             PartitionIndex partitionIdx = PartitionIndex.load(partitionIdxFH, metadata.get().partitioner, false))
+        {
+            dataFH = dataFHBuilder.complete();
+            partitionIndex = partitionIdx.sharedCopy();
+            rowIdxFH = rowIdxFHBuilder.complete();
+            TrieIndexSSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
+                                                                                 components,
+                                                                                 metadata,
+                                                                                 rowIdxFH,
+                                                                                 dataFH,
+                                                                                 partitionIndex,
+                                                                                 FilterFactory.AlwaysPresent,
+                                                                                 System.currentTimeMillis(),
+                                                                                 statsMetadata,
+                                                                                 OpenReason.NORMAL,
+                                                                                 header.toHeader(metadata.get()));
+
+            sstable.setup(false);
+            sstable.validate();
+            return sstable;
+        }
+        catch (RuntimeException e)
+        {
+            throw Throwables.cleaned(Throwables.close(e, rowIdxFH, partitionIndex, dataFH));
+        }
+        catch (IOException e)
+        {
+            throw new CorruptSSTableException(Throwables.close(e, rowIdxFH, partitionIndex, dataFH), descriptor.filenameFor(Component.DATA));
+        }
     }
 }

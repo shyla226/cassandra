@@ -50,6 +50,8 @@ public class BigFormat implements SSTableFormat
     private static final SSTableReader.Factory readerFactory = new ReaderFactory();
     private static final SSTableWriter.Factory writerFactory = new WriterFactory();
 
+    private final static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.STATS);
+
     private BigFormat()
     {
 
@@ -85,6 +87,12 @@ public class BigFormat implements SSTableFormat
         return readerFactory;
     }
 
+    @Override
+    public Set<Component> requiredComponents()
+    {
+        return REQUIRED_COMPONENTS;
+    }
+
     static class WriterFactory extends SSTableWriter.Factory
     {
         @Override
@@ -107,8 +115,6 @@ public class BigFormat implements SSTableFormat
 
     static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
-        private final static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.STATS);
-
         @Override
         public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
         {
@@ -132,11 +138,6 @@ public class BigFormat implements SSTableFormat
             return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
         }
 
-        @Override
-        public Set<Component> requiredComponents()
-        {
-            return REQUIRED_COMPONENTS;
-        }
     }
 
     // versions are denoted as [major][minor].  Minor versions must be forward-compatible:
