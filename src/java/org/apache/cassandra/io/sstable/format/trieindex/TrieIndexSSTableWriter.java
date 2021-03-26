@@ -287,7 +287,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     }
 
     @SuppressWarnings("resource")
-    public SSTableReader openEarly()
+    public boolean openEarly(Consumer<SSTableReader> callWhenReady)
     {
         long dataLength = dataFile.position();
 
@@ -302,8 +302,8 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
             StatsMetadata stats = statsMetadata();
             FileHandle ifile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
-            // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
-            // get updated length / compression metadata.
+            if (compression)
+                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
             FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
             invalidateCacheAtBoundary(dfile);
@@ -314,7 +314,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
             sstable.first = getMinimalKey(partitionIndex.firstKey());
             sstable.last = getMinimalKey(partitionIndex.lastKey());
-            return sstable;
+            callWhenReady.accept(sstable);
         });
     }
 
