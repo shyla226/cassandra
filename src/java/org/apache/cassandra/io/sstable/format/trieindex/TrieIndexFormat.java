@@ -132,7 +132,8 @@ public class TrieIndexFormat implements SSTableFormat
     {
         public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header, FileHandle dfile, IFilter bf)
         {
-            return new TrieIndexSSTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, bf);
+//            return new TrieIndexSSTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, bf);
+            return null;
         }
 
         @Override
