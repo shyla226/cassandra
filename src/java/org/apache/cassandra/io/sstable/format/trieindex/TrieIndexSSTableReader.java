@@ -193,6 +193,8 @@ public class TrieIndexSSTableReader extends SSTableReader
         // Make sure the SSTableReader internalOpen part does the same.
         assert desc.getFormat() == TrieIndexFormat.instance;
         TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
+        reader.first = partitionIndex.firstKey();
+        reader.last = partitionIndex.lastKey();
 
         reader.setup(true);
 
@@ -1053,8 +1055,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             if (newStart.compareTo(first) > 0)
             {
                 final long dataStart = getPosition(newStart, Operator.EQ).position;
-                final long indexStart = getIndexScanPosition(newStart);
-                runOnClose(new DropPageCache(dfile, dataStart, ifile, indexStart, runOnClose));
+                runOnClose(new DropPageCache(dfile, dataStart, null, -1, runOnClose));
             }
 
             return cloneInternal(newStart, OpenReason.MOVED_START, bf.sharedCopy());

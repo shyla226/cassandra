@@ -55,7 +55,7 @@ public final class TrieIndexEntry extends RowIndexEntry<RowIndexReader.IndexInfo
     }
 
     @Override
-    public int rowIndexCount()
+    public int columnsIndexCount()
     {
         return rowIndexCount;
     }
@@ -94,7 +94,7 @@ public final class TrieIndexEntry extends RowIndexEntry<RowIndexReader.IndexInfo
         return new TrieIndexEntry(dataStartPosition, trieRoot, rowIndexCount, partitionLevelDeletion);
     }
 
-    public static RowIndexEntry deserialize(DataInputPlus in, long basePosition) throws IOException
+    public static RowIndexEntry<?> deserialize(DataInputPlus in, long basePosition) throws IOException
     {
         long dataFilePosition = in.readUnsignedVInt();
         long indexTrieRoot = in.readVInt() + basePosition;
