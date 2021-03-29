@@ -36,6 +36,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
@@ -56,11 +59,14 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public class RowIndexTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(RowIndexTest.class);
+
     static final ByteComparable.Version VERSION = Walker.BYTE_COMPARABLE_VERSION;
 
     static final Random RANDOM;
@@ -68,7 +74,7 @@ public class RowIndexTest
     static
     {
         long seed = System.currentTimeMillis();
-        System.out.println("seed = " + seed);
+        logger.info("seed = " + seed);
         RANDOM = new Random(seed);
 
         DatabaseDescriptor.daemonInitialization();
@@ -81,10 +87,8 @@ public class RowIndexTest
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
     {
-        return Arrays.asList(new Object[][]{
-        new Object[]{ Config.DiskAccessMode.standard },
-        new Object[]{ Config.DiskAccessMode.mmap },
-        });
+        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard },
+                             new Object[]{ Config.DiskAccessMode.mmap });
     }
 
     @Parameterized.Parameter(value = 0)
@@ -93,9 +97,9 @@ public class RowIndexTest
     @Test
     public void testSingletons() throws IOException
     {
-        Pair<List<ClusteringPrefix>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
+        Pair<List<ClusteringPrefix<?>>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
         RowIndexReader summary = random.right;
-        List<ClusteringPrefix> keys = random.left;
+        List<ClusteringPrefix<?>> keys = random.left;
         for (int i = 0; i < COUNT; i++)
         {
             assertEquals(i, summary.separatorFloor(comparator.asByteComparable(keys.get(i))).offset);
@@ -106,9 +110,9 @@ public class RowIndexTest
     @Test
     public void testSpans() throws IOException
     {
-        Pair<List<ClusteringPrefix>, RowIndexReader> random = generateRandomIndexQuads(COUNT);
+        Pair<List<ClusteringPrefix<?>>, RowIndexReader> random = generateRandomIndexQuads(COUNT);
         RowIndexReader summary = random.right;
-        List<ClusteringPrefix> keys = random.left;
+        List<ClusteringPrefix<?>> keys = random.left;
         int missCount = 0;
         IndexInfo ii;
         for (int i = 0; i < COUNT; i++)
@@ -144,7 +148,7 @@ public class RowIndexTest
 
         summary.close();
         if (missCount > COUNT / 5)
-            System.err.format("Unexpectedly high miss count: %d/%d\n", missCount, COUNT);
+            logger.error("Unexpectedly high miss count: {}/{}", missCount, COUNT);
     }
 
     File file;
@@ -212,7 +216,7 @@ public class RowIndexTest
     @Test
     public void testAddEmptyKey() throws Exception
     {
-        ClusteringPrefix key = Clustering.EMPTY;
+        ClusteringPrefix<?> key = Clustering.EMPTY;
         writer.add(key, key, new IndexInfo(42, DeletionTime.LIVE));
         try (RowIndexReader summary = completeAndRead())
         {
@@ -233,7 +237,7 @@ public class RowIndexTest
     @Test
     public void testAddDuplicateEmptyThrow() throws Exception
     {
-        ClusteringPrefix key = Clustering.EMPTY;
+        ClusteringPrefix<?> key = Clustering.EMPTY;
         Throwable t = null;
         writer.add(key, key, new IndexInfo(42, DeletionTime.LIVE));
         try
@@ -248,7 +252,7 @@ public class RowIndexTest
         {
             // correct path
             t = e;
-            System.out.println("Got " + e.getMessage());
+            logger.info("Got " + e.getMessage());
         }
         Assert.assertNotNull("Should throw an assertion error.", t);
     }
@@ -256,7 +260,7 @@ public class RowIndexTest
     @Test
     public void testAddDuplicateThrow() throws Exception
     {
-        ClusteringPrefix key = generateRandomKey();
+        ClusteringPrefix<?> key = generateRandomKey();
         Throwable t = null;
         writer.add(key, key, new IndexInfo(42, DeletionTime.LIVE));
         try
@@ -271,7 +275,7 @@ public class RowIndexTest
         {
             // correct path
             t = e;
-            System.out.println("Got " + e.getMessage());
+            logger.info("Got " + e.getMessage());
         }
         Assert.assertNotNull("Should throw an assertion error.", t);
     }
@@ -279,8 +283,8 @@ public class RowIndexTest
     @Test
     public void testAddOutOfOrderThrow() throws Exception
     {
-        ClusteringPrefix key1 = generateRandomKey();
-        ClusteringPrefix key2 = generateRandomKey();
+        ClusteringPrefix<?> key1 = generateRandomKey();
+        ClusteringPrefix<?> key2 = generateRandomKey();
         while (comparator.compare(key1, key2) <= 0) // make key2 smaller than 1
             key2 = generateRandomKey();
 
@@ -298,7 +302,7 @@ public class RowIndexTest
         {
             // correct path
             t = e;
-            System.out.println("Got " + e.getMessage());
+            logger.info("Got " + e.getMessage());
         }
         Assert.assertNotNull("Should throw an assertion error.", t);
     }
@@ -307,18 +311,18 @@ public class RowIndexTest
     public void testConstrainedIteration() throws IOException
     {
         // This is not too relevant: due to the way we construct separators we can't be good enough on the left side.
-        Pair<List<ClusteringPrefix>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
-        List<ClusteringPrefix> keys = random.left;
+        Pair<List<ClusteringPrefix<?>>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
+        List<ClusteringPrefix<?>> keys = random.left;
 
         for (int i = 0; i < 500; ++i)
         {
             boolean exactLeft = RANDOM.nextBoolean();
             boolean exactRight = RANDOM.nextBoolean();
-            ClusteringPrefix left = exactLeft ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
-            ClusteringPrefix right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
+            ClusteringPrefix<?> left = exactLeft ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
+            ClusteringPrefix<?> right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
             if (comparator.compare(right, left) < 0)
             {
-                ClusteringPrefix t = left;
+                ClusteringPrefix<?> t = left;
                 left = right;
                 right = t;
                 boolean b = exactLeft;
@@ -351,7 +355,7 @@ public class RowIndexTest
                 if (idx < keys.size() - 1)
                     assertTrue(comparator.compare(right, keys.get(idx + 1)) < 0);
                 if (exactRight)      // must be precise on exact, otherwise could be in any relation
-                    assertTrue(right == keys.get(idx));
+                    assertEquals(right, keys.get(idx));
                 while (true)
                 {
                     --idx;
@@ -369,23 +373,23 @@ public class RowIndexTest
             }
             catch (AssertionError e)
             {
-                e.printStackTrace(System.out);
-                ClusteringPrefix ll = left;
-                ClusteringPrefix rr = right;
-                System.out.println(keys.stream()
-                                       .filter(x -> comparator.compare(ll, x) <= 0 && comparator.compare(x, rr) <= 0)
-                                       .map(comparator::asByteComparable)
-                                       .map(bc -> bc.byteComparableAsString(VERSION))
-                                       .collect(Collectors.joining(", ")));
-                System.out.format("Left %s%s Right %s%s\n", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
+                logger.error(e.getMessage(), e);
+                ClusteringPrefix<?> ll = left;
+                ClusteringPrefix<?> rr = right;
+//                logger.info(keys.stream()
+//                                       .filter(x -> comparator.compare(ll, x) <= 0 && comparator.compare(x, rr) <= 0)
+//                                       .map(clustering -> comparator.asByteComparable(clustering))
+//                                       .map(bc -> bc.byteComparableAsString(VERSION))
+//                                       .collect(Collectors.joining(", ")));
+                logger.info("Left {}{} Right {}{}", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
                 try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right)))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null)
                     {
-                        System.out.println(comparator.asByteComparable(keys.get((int) ii.offset)));
+                        logger.info(comparator.asByteComparable(keys.get((int) ii.offset)).toString());
                     }
-                    System.out.format("Left %s%s Right %s%s\n", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
+                    logger.info("Left {}{} Right {}{}", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
                 }
                 throw e;
             }
@@ -395,13 +399,13 @@ public class RowIndexTest
     @Test
     public void testReverseIteration() throws IOException
     {
-        Pair<List<ClusteringPrefix>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
-        List<ClusteringPrefix> keys = random.left;
+        Pair<List<ClusteringPrefix<?>>, RowIndexReader> random = generateRandomIndexSingletons(COUNT);
+        List<ClusteringPrefix<?>> keys = random.left;
 
         for (int i = 0; i < 1000; ++i)
         {
             boolean exactRight = RANDOM.nextBoolean();
-            ClusteringPrefix right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
+            ClusteringPrefix<?> right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
 
             try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right)))
             {
@@ -425,7 +429,7 @@ public class RowIndexTest
                 if (idx < keys.size() - 1)
                     assertTrue(comparator.compare(right, keys.get(idx + 1)) < 0);
                 if (exactRight)      // must be precise on exact, otherwise could be in any relation
-                    assertTrue(right == keys.get(idx));
+                    assertEquals(right, keys.get(idx));
                 while (true)
                 {
                     --idx;
@@ -438,31 +442,31 @@ public class RowIndexTest
             }
             catch (AssertionError e)
             {
-                e.printStackTrace(System.out);
-                ClusteringPrefix rr = right;
-                System.out.println(keys.stream()
-                                       .filter(x -> comparator.compare(x, rr) <= 0)
-                                       .map(comparator::asByteComparable)
-                                       .map(bc -> bc.byteComparableAsString(VERSION))
-                                       .collect(Collectors.joining(", ")));
-                System.out.format("Right %s%s\n", comparator.asByteComparable(right), exactRight ? "#" : "");
+                logger.error(e.getMessage(), e);
+                ClusteringPrefix<?> rr = right;
+//                logger.info(keys.stream()
+//                                       .filter(x -> comparator.compare(x, rr) <= 0)
+//                                       .map(comparator::asByteComparable)
+//                                       .map(bc -> bc.byteComparableAsString(VERSION))
+//                                       .collect(Collectors.joining(", ")));
+                logger.info("Right {}{}", comparator.asByteComparable(right), exactRight ? "#" : "");
                 try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right)))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null)
                     {
-                        System.out.println(comparator.asByteComparable(keys.get((int) ii.offset)));
+                        logger.info(comparator.asByteComparable(keys.get((int) ii.offset)).toString());
                     }
                 }
-                System.out.format("Right %s%s\n", comparator.asByteComparable(right), exactRight ? "#" : "");
+                logger.info("Right {}{}", comparator.asByteComparable(right), exactRight ? "#" : "");
                 throw e;
             }
         }
     }
 
-    private Pair<List<ClusteringPrefix>, RowIndexReader> generateRandomIndexSingletons(int size) throws IOException
+    private Pair<List<ClusteringPrefix<?>>, RowIndexReader> generateRandomIndexSingletons(int size) throws IOException
     {
-        List<ClusteringPrefix> list = generateList(size);
+        List<ClusteringPrefix<?>> list = generateList(size);
         for (int i = 0; i < size; i++)
         {
             assert i == 0 || comparator.compare(list.get(i - 1), list.get(i)) < 0;
@@ -475,25 +479,25 @@ public class RowIndexTest
         return Pair.create(list, summary);
     }
 
-    List<ClusteringPrefix> generateList(int size)
+    List<ClusteringPrefix<?>> generateList(int size)
     {
-        List<ClusteringPrefix> list = Lists.newArrayList();
+        List<ClusteringPrefix<?>> list = Lists.newArrayList();
 
-        Set<ClusteringPrefix> set = Sets.newHashSet();
+        Set<ClusteringPrefix<?>> set = Sets.newHashSet();
         for (int i = 0; i < size; i++)
         {
-            ClusteringPrefix key = generateRandomKey(); // keys must be unique
+            ClusteringPrefix<?> key = generateRandomKey(); // keys must be unique
             while (!set.add(key))
                 key = generateRandomKey();
             list.add(key);
         }
-        Collections.sort(list, comparator);
+        list.sort(comparator);
         return list;
     }
 
-    private Pair<List<ClusteringPrefix>, RowIndexReader> generateRandomIndexQuads(int size) throws IOException
+    private Pair<List<ClusteringPrefix<?>>, RowIndexReader> generateRandomIndexQuads(int size) throws IOException
     {
-        List<ClusteringPrefix> list = generateList(4 * size + 1);
+        List<ClusteringPrefix<?>> list = generateList(4 * size + 1);
         for (int i = 0; i < size; i++)
             writer.add(list.get(i * 4 + 1), list.get(i * 4 + 3), new IndexInfo(i, new DeletionTime(i + 2, i - 3)));
 
@@ -501,10 +505,10 @@ public class RowIndexTest
         return Pair.create(list, summary);
     }
 
-    ClusteringPrefix generateRandomKey()
+    ClusteringPrefix<?> generateRandomKey()
     {
         UUID uuid = randomSeededUUID();
-        ClusteringPrefix key = comparator.make(uuid);
+        ClusteringPrefix<?> key = comparator.make(uuid);
         return key;
     }
 
