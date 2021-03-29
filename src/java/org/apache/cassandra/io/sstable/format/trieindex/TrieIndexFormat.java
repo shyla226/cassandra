@@ -68,6 +68,16 @@ public class TrieIndexFormat implements SSTableFormat
     // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
     static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.STATS);
 
+    private final static Set<Component> SUPPORTED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PARTITION_INDEX,
+                                                                               Component.ROW_INDEX,
+                                                                               Component.FILTER,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.STATS,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC,
+                                                                               Component.TOC);
+
     public static final TrieIndexFormat instance = new TrieIndexFormat();
     public static final Version latestVersion = new TrieIndexVersion(TrieIndexVersion.current_version);
     static final ReaderFactory readerFactory = new ReaderFactory();
@@ -115,6 +125,12 @@ public class TrieIndexFormat implements SSTableFormat
     public Set<Component> requiredComponents()
     {
         return REQUIRED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> supportedComponents()
+    {
+        return SUPPORTED_COMPONENTS;
     }
 
     static class WriterFactory extends SSTableWriter.Factory

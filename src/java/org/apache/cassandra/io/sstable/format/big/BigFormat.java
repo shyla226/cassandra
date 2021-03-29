@@ -50,7 +50,19 @@ public class BigFormat implements SSTableFormat
     private static final SSTableReader.Factory readerFactory = new ReaderFactory();
     private static final SSTableWriter.Factory writerFactory = new WriterFactory();
 
-    private final static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.STATS);
+    private final static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                              Component.PRIMARY_INDEX,
+                                                                              Component.STATS);
+
+    private final static Set<Component> SUPPORTED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PRIMARY_INDEX,
+                                                                               Component.FILTER,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.STATS,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC,
+                                                                               Component.SUMMARY,
+                                                                               Component.TOC);
 
     private BigFormat()
     {
@@ -91,6 +103,12 @@ public class BigFormat implements SSTableFormat
     public Set<Component> requiredComponents()
     {
         return REQUIRED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> supportedComponents()
+    {
+        return SUPPORTED_COMPONENTS;
     }
 
     static class WriterFactory extends SSTableWriter.Factory
