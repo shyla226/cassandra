@@ -305,16 +305,19 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         {
             int b = stream.next();
             int searchIndex = search(b);
-            payload = null;
 
             greaterBranch = greaterTransition(searchIndex, greaterBranch);
-            lesserBranch = lesserTransition(searchIndex, lesserBranch);
 
             if (searchIndex == -1 || searchIndex == 0)
             {
                 int payloadBits = payloadFlags();
                 if (payloadBits > 0)
                     payload = extractor.extract((VALUE) this, payloadPosition(), payloadBits);
+            }
+            else
+            {
+                lesserBranch = lesserTransition(searchIndex, lesserBranch);
+                payload = null;
             }
 
             if (searchIndex < 0)
