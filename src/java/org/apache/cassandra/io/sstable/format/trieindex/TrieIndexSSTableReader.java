@@ -1027,6 +1027,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         clone.first = first;
         clone.last = last;
         clone.isSuspect.set(isSuspect.get());
+        clone.setup(true);
 
         return clone;
     }
