@@ -119,11 +119,6 @@ public class WrappingRebufferer implements Rebufferer
             return offset;
         }
 
-        public void offset(long offset)
-        {
-            this.offset = offset;
-        }
-
         public int limit()
         {
             return buffer.limit();
