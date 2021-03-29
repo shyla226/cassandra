@@ -131,6 +131,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                   Set<Component> indexComponents)
     {
         super(descriptor, components(metadata.getLocal(), indexComponents),keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
+        lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         if (compression)
         {
