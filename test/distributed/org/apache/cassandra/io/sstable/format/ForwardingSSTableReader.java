@@ -716,12 +716,6 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public String getIndexFilename()
-    {
-        return delegate.getIndexFilename();
-    }
-
-    @Override
     public String getColumnFamilyName()
     {
         return delegate.getColumnFamilyName();
@@ -761,5 +755,17 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     public AbstractBounds<Token> getBounds()
     {
         return delegate.getBounds();
+    }
+
+    @Override
+    public boolean hasIndex()
+    {
+        return delegate.hasIndex();
+    }
+
+    @Override
+    public long getPrimaryIndexSize()
+    {
+        return delegate.getPrimaryIndexSize();
     }
 }

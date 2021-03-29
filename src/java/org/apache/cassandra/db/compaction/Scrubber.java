@@ -107,12 +107,12 @@ public class Scrubber implements Closeable
         this.destination = cfs.getDirectories().getLocationForDisk(cfs.getDiskBoundaries().getCorrectDiskForSSTable(sstable));
         this.isCommutative = cfs.metadata().isCounter();
 
-        boolean hasIndexFile = (new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX))).exists();
+        boolean hasIndexFile = sstable.hasIndex();
         this.isIndex = cfs.isIndex();
         if (!hasIndexFile)
         {
             // if there's any corruption in the -Data.db then rows can't be skipped over. but it's worth a shot.
-            outputHandler.warn("Missing component: " + sstable.descriptor.filenameFor(Component.PRIMARY_INDEX));
+            outputHandler.warn("Missing index component");
         }
         this.checkData = checkData && !this.isIndex; //LocalByPartitionerType does not support validation
         this.expectedBloomFilterSize = Math.max(

@@ -305,6 +305,18 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
             throw new RuntimeException();
         }
 
+        @Override
+        public boolean hasIndex()
+        {
+            return false;
+        }
+
+        @Override
+        public long getPrimaryIndexSize()
+        {
+            return 0;
+        }
+
         public String toString()
         {
             return "FailingSSTableReader[" + super.toString() + "]";

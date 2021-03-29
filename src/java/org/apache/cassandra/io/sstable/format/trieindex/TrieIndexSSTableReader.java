@@ -574,6 +574,14 @@ public class TrieIndexSSTableReader extends SSTableReader
         return new KeysRange(bounds).iterator();
     }
 
+    @Override
+    public long getPrimaryIndexSize()
+    {
+        File partitionIndex = descriptor.fileFor(Component.PARTITION_INDEX);
+        File rowIndex = descriptor.fileFor(Component.ROW_INDEX);
+        return (partitionIndex.exists() ? partitionIndex.length() : 0) + (rowIndex.exists() ? rowIndex.length() : 0);
+    }
+
     private final class KeysRange
     {
         PartitionPosition left;
@@ -986,6 +994,12 @@ public class TrieIndexSSTableReader extends SSTableReader
     public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
     {
         return TrieIndexScanner.getScanner(this, columns, dataRange, listener);
+    }
+
+    @Override
+    public boolean hasIndex()
+    {
+        return new File(descriptor.filenameFor(Component.PARTITION_INDEX)).exists();
     }
 
     // todo must be overridden

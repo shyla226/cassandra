@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -54,6 +55,12 @@ public class BigTableReader extends SSTableReader
     private static final Logger logger = LoggerFactory.getLogger(BigTableReader.class);
 
     protected final BigTableRowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer;
+
+    @Override
+    public boolean hasIndex()
+    {
+        return new File(descriptor.filenameFor(Component.PRIMARY_INDEX)).exists();
+    }
 
     public BigTableReader(SSTableReaderBuilder builder)
     {
@@ -323,4 +330,10 @@ public class BigTableReader extends SSTableReader
         return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 
+    @Override
+    public long getPrimaryIndexSize()
+    {
+        File primaryIndex = descriptor.fileFor(Component.PRIMARY_INDEX);
+        return primaryIndex.exists() ? primaryIndex.length() : 0;
+    }
 }
