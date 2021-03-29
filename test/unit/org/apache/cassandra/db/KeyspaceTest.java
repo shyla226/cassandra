@@ -21,10 +21,12 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
+
+import org.hamcrest.Matchers;
 import org.mockito.Mockito;
 
 import org.apache.cassandra.Util;
@@ -409,8 +411,8 @@ public class KeyspaceTest extends CQLTester
 
         // verify that we do indeed have multiple index entries
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-        BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(Util.dk("0"), SSTableReader.Operator.EQ);
-        assert indexEntry.columnsIndexCount() > 2;
+        RowIndexEntry<?> indexEntry = sstable.getPosition(Util.dk("0"), SSTableReader.Operator.EQ);
+        assertThat(indexEntry.columnsIndexCount(), Matchers.greaterThan(2));
 
         validateSliceLarge(cfs);
     }
