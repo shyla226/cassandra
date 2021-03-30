@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Sets;
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -49,6 +50,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.CachingParams;
@@ -56,6 +58,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.hamcrest.Matchers;
 
 import static com.google.common.collect.ImmutableMap.of;
 import static java.util.Arrays.asList;
@@ -87,6 +90,8 @@ public class IndexSummaryManagerTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        Assume.assumeThat(SSTableFormat.Type.current(), Matchers.is(SSTableFormat.Type.BIG));
+
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
