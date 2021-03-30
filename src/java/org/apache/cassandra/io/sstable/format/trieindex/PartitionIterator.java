@@ -215,7 +215,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     @Override
     public boolean isExhausted()
     {
-        return nextKey == null;
+        return currentKey == null;
     }
 
     @Override

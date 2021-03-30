@@ -89,7 +89,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Pa
     @Override
     public boolean isExhausted()
     {
-        return dataPosition != -1;
+        return dataPosition == -1;
     }
 
     @Override
