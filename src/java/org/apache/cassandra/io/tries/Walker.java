@@ -32,6 +32,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * Assumes data was written using page-aware builder and thus no node crosses a page and thus a buffer boundary.
  */
+// TODO STAR-247: unit test are insufficient - they did not catch a problem fixed in STAR-247
 public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
 {
     private final Rebufferer source;

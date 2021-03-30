@@ -31,6 +31,7 @@ import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 
+// TODO STAR-247: implement unit test
 class PartitionIterator extends PartitionIndex.IndexPosIterator implements PartitionIndexIterator
 {
     private final PartitionIndex partitionIndex;

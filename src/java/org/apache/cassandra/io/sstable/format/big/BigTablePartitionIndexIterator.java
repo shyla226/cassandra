@@ -29,6 +29,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 @NotThreadSafe
+// TODO STAR-247: implement unit test
 public class BigTablePartitionIndexIterator implements PartitionIndexIterator
 {
     private final FileHandle indexFile;

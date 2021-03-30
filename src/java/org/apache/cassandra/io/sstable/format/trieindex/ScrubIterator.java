@@ -25,6 +25,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+// TODO STAR-247: implement unit test
 public class ScrubIterator extends PartitionIndex.IndexPosIterator implements PartitionIndexIterator
 {
     ByteBuffer key;
