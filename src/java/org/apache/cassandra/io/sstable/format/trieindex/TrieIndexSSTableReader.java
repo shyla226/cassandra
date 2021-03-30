@@ -1387,8 +1387,9 @@ public class TrieIndexSSTableReader extends SSTableReader
         FileHandle rowIdxFH = null;
         PartitionIndex partitionIndex = null;
         IFilter bloomFilter = null;
+        boolean compressedData = descriptor.fileFor(Component.COMPRESSION_INFO).exists();
 
-        try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor);
+        try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor).compressed(compressedData);
              FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
              FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
              FileHandle partitionIdxFH = partitionIdxFHBuilder.complete();

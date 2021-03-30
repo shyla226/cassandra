@@ -182,7 +182,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
                 pos = ~pos;
                 FileDataInput in = dataInput(pos);
                 nextKey = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
-                nextEntry = new RowIndexEntry(pos);
+                nextEntry = new RowIndexEntry<>(pos);
             }
         }
         else
