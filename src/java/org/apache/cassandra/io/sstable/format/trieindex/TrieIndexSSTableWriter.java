@@ -94,6 +94,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.big.BigTableWriter.compressionFor;
 
 @VisibleForTesting
 public class TrieIndexSSTableWriter extends SSTableWriter
@@ -135,7 +136,8 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         if (compression)
         {
-            CompressionParams compressionParams = metadata.get().params.compression;
+            final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType(), metadata);
+
             dataFile = new CompressedSequentialWriter(getFile(),
                                                       descriptor.filenameFor(Component.COMPRESSION_INFO),
                                                       descriptor.fileFor(Component.DIGEST),
