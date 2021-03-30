@@ -139,7 +139,9 @@ public class SSTableZeroCopyWriterTest
         {
             writeDataTestCycle(buffer ->
             {
-                input.append(Unpooled.wrappedBuffer(buffer));
+                if (buffer.limit() > 0) { // skip empty files that would cause premature EOF
+                    input.append(Unpooled.wrappedBuffer(buffer));
+                }
                 return input;
             });
 
@@ -164,7 +166,6 @@ public class SSTableZeroCopyWriterTest
             if (desc.fileFor(component).exists())
             {
                 Pair<DataInputPlus, Long> pair = getSSTableComponentData(sstable, component, bufferMapper);
-
                 btzcw.writeComponent(component.type, pair.left, pair.right);
             }
         }
