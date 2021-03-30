@@ -66,7 +66,10 @@ public class TrieIndexFormat implements SSTableFormat
 
     // Data, primary index and row index (which may be 0-length) are required.
     // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
-    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.STATS);
+    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                Component.PARTITION_INDEX,
+                                                                Component.ROW_INDEX,
+                                                                Component.STATS);
 
     private final static Set<Component> SUPPORTED_COMPONENTS = ImmutableSet.of(Component.DATA,
                                                                                Component.PARTITION_INDEX,
@@ -77,6 +80,15 @@ public class TrieIndexFormat implements SSTableFormat
                                                                                Component.DIGEST,
                                                                                Component.CRC,
                                                                                Component.TOC);
+
+    private final static Set<Component> STREAMING_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PARTITION_INDEX,
+                                                                               Component.ROW_INDEX,
+                                                                               Component.STATS,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.FILTER,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC);
 
     public static final TrieIndexFormat instance = new TrieIndexFormat();
     public static final Version latestVersion = new TrieIndexVersion(TrieIndexVersion.current_version);
@@ -131,6 +143,12 @@ public class TrieIndexFormat implements SSTableFormat
     public Set<Component> supportedComponents()
     {
         return SUPPORTED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> streamingComponents()
+    {
+        return STREAMING_COMPONENTS;
     }
 
     static class WriterFactory extends SSTableWriter.Factory
@@ -377,6 +395,7 @@ public class TrieIndexFormat implements SSTableFormat
         {
             return hasOldBfFormat;
         }
+
         @Override
         public boolean hasIsTransient()
         {

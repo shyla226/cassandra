@@ -85,4 +85,6 @@ public interface SSTableFormat
 
     Set<Component> supportedComponents();
 
+    Set<Component> streamingComponents();
+
 }

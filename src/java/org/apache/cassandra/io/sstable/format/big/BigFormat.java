@@ -64,6 +64,15 @@ public class BigFormat implements SSTableFormat
                                                                                Component.SUMMARY,
                                                                                Component.TOC);
 
+    private final static Set<Component> STREAMING_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PRIMARY_INDEX,
+                                                                               Component.SUMMARY,
+                                                                               Component.STATS,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.FILTER,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC);
+
     private BigFormat()
     {
 
@@ -109,6 +118,12 @@ public class BigFormat implements SSTableFormat
     public Set<Component> supportedComponents()
     {
         return SUPPORTED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> streamingComponents()
+    {
+        return STREAMING_COMPONENTS;
     }
 
     static class WriterFactory extends SSTableWriter.Factory
