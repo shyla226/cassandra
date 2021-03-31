@@ -281,7 +281,7 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "bb";
+        public static final String current_version = "ca";
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
@@ -315,7 +315,7 @@ public class TrieIndexFormat implements SSTableFormat
             isLatestVersion = version.compareTo(current_version) == 0;
             hasOldBfFormat = version.compareTo("b") < 0;
             hasAccurateMinMax = version.compareTo("ac") >= 0;
-            correspondingMessagingVersion = MessagingService.current_version;
+            correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_40 : MessagingService.VERSION_3014;
         }
 
         private static String mapAb(String version)
@@ -399,7 +399,7 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public boolean hasIsTransient()
         {
-            return false;
+            return version.compareTo("ca") >= 0;
         }
 
         @Override
