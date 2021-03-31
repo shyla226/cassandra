@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.StringJoiner;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
@@ -170,5 +171,11 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
         key = null;
         dataPosition = 0;
         advance();
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("BigTable-PartitionIndexIterator(%s)", indexFile.path());
     }
 }

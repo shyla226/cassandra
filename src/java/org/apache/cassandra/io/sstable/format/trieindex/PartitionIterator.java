@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.StringJoiner;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -241,5 +242,11 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     public void reset() throws IOException
     {
         go(root);
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("TrieIndex-PartitionIndexIterator(%s)", partitionIndex.getFileHandle().path());
     }
 }

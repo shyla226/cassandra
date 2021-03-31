@@ -61,7 +61,7 @@ class RowIndexWriter implements AutoCloseable
         trie.close();
     }
 
-    void add(ClusteringPrefix firstName, ClusteringPrefix lastName, IndexInfo info) throws IOException
+    void add(ClusteringPrefix<?> firstName, ClusteringPrefix<?> lastName, IndexInfo info) throws IOException
     {
         assert info.openDeletion != null;
         ByteComparable sep = prevMax == null
