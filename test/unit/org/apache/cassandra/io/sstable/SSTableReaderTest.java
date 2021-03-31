@@ -26,7 +26,9 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -64,6 +66,7 @@ import org.apache.cassandra.utils.FilterFactory;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
+import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -339,7 +342,6 @@ public class SSTableReaderTest
 
     }
 
-
     @Test
     public void testOpeningSSTable() throws Exception
     {
@@ -375,6 +377,7 @@ public class SSTableReaderTest
 
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
         Descriptor desc = sstable.descriptor;
+        boolean hasSummary = desc.getFormat().supportedComponents().contains(Component.SUMMARY);
 
         // test to see if sstable can be opened as expected
         SSTableReader target = desc.getFormat().getReaderFactory().open(desc);
@@ -388,7 +391,7 @@ public class SSTableReaderTest
         Path summaryPath = summaryFile.toPath();
 
         long bloomModified = Files.getLastModifiedTime(bloomPath).toMillis();
-        long summaryModified = Files.getLastModifiedTime(summaryPath).toMillis();
+        long summaryModified = hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0;
 
         TimeUnit.MILLISECONDS.sleep(1000); // sleep to ensure modified time will be different
 
@@ -397,7 +400,7 @@ public class SSTableReaderTest
         target = desc.getFormat().getReaderFactory().openNoValidation(desc, store.metadata);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
-        assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
+        assertEquals(summaryModified, hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0);
 
         target.selfRef().release();
 
@@ -407,7 +410,7 @@ public class SSTableReaderTest
         target = desc.getFormat().getReaderFactory().openNoValidation(desc, components, store);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
-        assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
+        assertEquals(summaryModified, hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0);
         assertEquals(FilterFactory.AlwaysPresent, target.getBloomFilter());
 
         target.selfRef().release();
@@ -417,7 +420,7 @@ public class SSTableReaderTest
         target = desc.getFormat().getReaderFactory().open(desc, store.metadata);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
-        assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
+        assertEquals(summaryModified, hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0);
 
         target.selfRef().release();
 
@@ -428,14 +431,15 @@ public class SSTableReaderTest
         target = desc.getFormat().getReaderFactory().open(desc, components, store.metadata);
 
         assertTrue("Bloomfilter was not recreated", bloomModified < Files.getLastModifiedTime(bloomPath).toMillis());
-        assertTrue("Summary was not recreated", summaryModified < Files.getLastModifiedTime(summaryPath).toMillis());
+        assertTrue("Summary was not recreated", !hasSummary || summaryModified < Files.getLastModifiedTime(summaryPath).toMillis());
 
         target.selfRef().release();
 
         // check that only the summary is regenerated when it is deleted
         components.add(Component.FILTER);
-        summaryModified = Files.getLastModifiedTime(summaryPath).toMillis();
-        summaryFile.delete();
+        summaryModified = hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0;
+        if (hasSummary)
+            summaryFile.delete();
 
         TimeUnit.MILLISECONDS.sleep(1000); // sleep to ensure modified time will be different
         bloomModified = Files.getLastModifiedTime(bloomPath).toMillis();
@@ -443,7 +447,7 @@ public class SSTableReaderTest
         target = desc.getFormat().getReaderFactory().open(desc, components, store.metadata);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
-        assertTrue("Summary was not recreated", summaryModified < Files.getLastModifiedTime(summaryPath).toMillis());
+        assertTrue("Summary was not recreated", !hasSummary || summaryModified < Files.getLastModifiedTime(summaryPath).toMillis());
 
         target.selfRef().release();
 
@@ -451,12 +455,12 @@ public class SSTableReaderTest
         components.add(Component.SUMMARY);
         components.remove(Component.PRIMARY_INDEX);
 
-        summaryModified = Files.getLastModifiedTime(summaryPath).toMillis();
+        summaryModified = hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0;
         target = desc.getFormat().getReaderFactory().open(desc, components, store.metadata, false, false);
 
         TimeUnit.MILLISECONDS.sleep(1000); // sleep to ensure modified time will be different
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
-        assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
+        assertEquals(summaryModified, hasSummary ? Files.getLastModifiedTime(summaryPath).toMillis() : 0);
 
         target.selfRef().release();
     }
@@ -464,6 +468,8 @@ public class SSTableReaderTest
     @Test
     public void testLoadingSummaryUsesCorrectPartitioner() throws Exception
     {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
+
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Indexed1");
 
@@ -549,7 +555,7 @@ public class SSTableReaderTest
         assert sections.size() == 1 : "Expected to find range in sstable" ;
 
         // re-open the same sstable as it would be during bulk loading
-        Set<Component> components = Sets.newHashSet(Component.DATA, Component.PRIMARY_INDEX);
+        Set<Component> components = Sets.newHashSet(sstable.descriptor.getFormat().requiredComponents());
         if (sstable.components.contains(Component.COMPRESSION_INFO))
             components.add(Component.COMPRESSION_INFO);
         SSTableReader bulkLoaded = sstable.descriptor.getFormat().getReaderFactory().openForBatch(sstable.descriptor, components, store.metadata);
@@ -578,7 +584,7 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
         CompactionManager.instance.performMaximal(store, false);
 
-        List<SSTableReader> sstables = selectOnlyBigTableReaders(store.getLiveSSTables(), Collectors.toList());
+        List<SSTableReader> sstables = ImmutableList.copyOf(store.getLiveSSTables());
         assert sstables.size() == 1;
         final SSTableReader sstable = sstables.get(0);
 
@@ -625,6 +631,8 @@ public class SSTableReaderTest
     @Test
     public void testIndexSummaryUpsampleAndReload() throws Exception
     {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
+
         int originalMaxSegmentSize = MmappedRegions.MAX_SEGMENT_SIZE;
         MmappedRegions.MAX_SEGMENT_SIZE = 40; // each index entry is ~11 bytes, so this will generate lots of segments
 
