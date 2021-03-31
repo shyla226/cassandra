@@ -184,7 +184,9 @@ public class ScrubTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         //make sure to override at most 1 chunk when compression is enabled
-        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
+        //use 0x00 instead of the usual 0x7A because if by any chance it's able to iterate over the corrupt
+        //section, then we get many out-of-order errors, which we don't want
+        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"), (byte)0x00);
 
         // with skipCorrupted == false, the scrub is expected to fail
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(Arrays.asList(sstable), OperationType.SCRUB);
@@ -242,7 +244,7 @@ public class ScrubTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         // overwrite one row with garbage
-        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
+        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"), (byte)0x7A);
 
         // with skipCorrupted == false, the scrub is expected to fail
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(Arrays.asList(sstable), OperationType.SCRUB);
@@ -283,7 +285,7 @@ public class ScrubTest
         assertOrderedAll(cfs, 4);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-        overrideWithGarbage(sstable, 0, 2);
+        overrideWithGarbage(sstable, 0, 2, (byte)0x7A);
 
         CompactionManager.instance.performScrub(cfs, false, true, 2);
 
@@ -426,7 +428,7 @@ public class ScrubTest
         }
     }
 
-    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2) throws IOException
+    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2, byte junk) throws IOException
     {
         boolean compression = Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false"));
         long startPosition, endPosition;
@@ -453,14 +455,17 @@ public class ScrubTest
             endPosition = Math.max(row0Start, row1Start);
         }
 
-        overrideWithGarbage(sstable, startPosition, endPosition);
+        overrideWithGarbage(sstable, startPosition, endPosition, junk);
     }
 
-    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition) throws IOException
+    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition, byte junk) throws IOException
     {
         RandomAccessFile file = new RandomAccessFile(sstable.getFilename(), "rw");
         file.seek(startPosition);
-        file.writeBytes(StringUtils.repeat('z', (int) (endPosition - startPosition)));
+        int length = (int)(endPosition - startPosition);
+        byte[] buff = new byte[length];
+        Arrays.fill(buff, junk);
+        file.write(buff, 0, length);
         file.close();
         if (ChunkCache.instance != null)
             ChunkCache.instance.invalidateFile(sstable.getFilename());
@@ -661,7 +666,7 @@ public class ScrubTest
                 boolean failure = !scrubs[i];
                 if (failure)
                 { //make sure the next scrub fails
-                    overrideWithGarbage(indexCfs.getLiveSSTables().iterator().next(), ByteBufferUtil.bytes(1L), ByteBufferUtil.bytes(2L));
+                    overrideWithGarbage(indexCfs.getLiveSSTables().iterator().next(), ByteBufferUtil.bytes(1L), ByteBufferUtil.bytes(2L), (byte)0x7A);
                 }
                 CompactionManager.AllSSTableOpStatus result = indexCfs.scrub(false, false, false, true, false,0);
                 assertEquals(failure ?
@@ -801,7 +806,7 @@ public class ScrubTest
         assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
-        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
+        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"), (byte)0x7A);
 
         // with skipCorrupted == false, the scrub is expected to fail
         try

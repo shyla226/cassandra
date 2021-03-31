@@ -175,8 +175,8 @@ public class Scrubber implements Closeable
                 if (scrubInfo.isStopRequested())
                     throw new CompactionInterruptedException(scrubInfo.getCompactionInfo());
 
-                long rowStart = dataFile.getFilePointer();
-                outputHandler.debug("Reading row at " + rowStart);
+                long partitionStart = dataFile.getFilePointer();
+                outputHandler.debug("Reading partition at " + partitionStart);
 
                 DecoratedKey key = null;
                 try
@@ -237,10 +237,10 @@ public class Scrubber implements Closeable
                     }
 
                     if (indexIterator != null && partitionSizeFromIndex > dataFile.length())
-                        throw new IOError(new IOException("Impossible row size (greater than file length): " + partitionSizeFromIndex));
+                        throw new IOError(new IOException("Impossible partition size (greater than file length): " + partitionSizeFromIndex));
 
-                    if (indexIterator != null && rowStart != partitionStartFromIndex)
-                        outputHandler.warn(String.format("Data file row position %d differs from index file row position %d", rowStart, partitionStartFromIndex));
+                    if (indexIterator != null && partitionStart != partitionStartFromIndex)
+                        outputHandler.warn(String.format("Data file partition position %d differs from index file partition position %d", partitionStart, partitionStartFromIndex));
 
                     if (tryAppend(prevKey, key, writer))
                         prevKey = key;
@@ -249,13 +249,13 @@ public class Scrubber implements Closeable
                 catch (Throwable th)
                 {
                     throwIfFatal(th);
-                    outputHandler.warn("Error reading row (stacktrace follows):", th);
+                    outputHandler.warn("Error reading partition (stacktrace follows):", th);
 
                     if (currentIndexKey != null
-                        && (key == null || !key.getKey().equals(currentIndexKey) || rowStart != partitionStartFromIndex))
+                        && (key == null || !key.getKey().equals(currentIndexKey) || partitionStart != partitionStartFromIndex))
                     {
                         long dataStartFromIndex = partitionStartFromIndex + TypeSizes.SHORT_SIZE + currentIndexKey.remaining();
-                        outputHandler.output(String.format("Retrying from row index; data is %s bytes starting at %s",
+                        outputHandler.output(String.format("Retrying from partition index; data is %s bytes starting at %s",
                                                        partitionSizeFromIndex, dataStartFromIndex));
                         key = sstable.decorateKey(currentIndexKey);
                         try
@@ -270,7 +270,7 @@ public class Scrubber implements Closeable
                             throwIfFatal(th2);
                             throwIfCannotContinue(key, th2);
 
-                            outputHandler.warn("Retry failed too. Skipping to next row (retry's stacktrace follows)", th2);
+                            outputHandler.warn("Retry failed too. Skipping to next partition (retry's stacktrace follows)", th2);
                             badRows++;
                             seekToNextPartition();
                         }
@@ -282,7 +282,7 @@ public class Scrubber implements Closeable
                         badRows++;
                         if (indexIterator != null)
                         {
-                            outputHandler.warn("Partition starting at position " + rowStart + " is unreadable; skipping to next");
+                            outputHandler.warn("Partition starting at position " + partitionStart + " is unreadable; skipping to next");
                             seekToNextPartition();
                         }
                         else
