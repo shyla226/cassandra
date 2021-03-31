@@ -20,11 +20,13 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -216,7 +218,7 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
         {
-            return TrieIndexSSTableReader.open(descriptor, components, metadata, true, true, false);
+            return TrieIndexSSTableReader.open(descriptor, Sets.difference(components, Collections.singleton(Component.FILTER)), metadata, true, true);
         }
 
         @Override
@@ -253,19 +255,19 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
         {
-            return TrieIndexSSTableReader.open(desc, components, metadata, validate, isOffline, true);
+            return TrieIndexSSTableReader.open(desc, components, metadata, validate, isOffline);
         }
 
         @Override
         public SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
         {
-            return TrieIndexSSTableReader.open(desc, componentsFor(desc), tableMetadataRef, false, true, true);
+            return TrieIndexSSTableReader.open(desc, componentsFor(desc), tableMetadataRef, false, true);
         }
 
         @Override
         public SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
         {
-            return TrieIndexSSTableReader.open(desc, components, cfs.metadata, false, true, true);
+            return TrieIndexSSTableReader.open(desc, components, cfs.metadata, false, true);
         }
 
         @Override

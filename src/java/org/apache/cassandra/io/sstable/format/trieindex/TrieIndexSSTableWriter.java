@@ -453,6 +453,8 @@ public class TrieIndexSSTableWriter extends SSTableWriter
      */
     public RowIndexEntry<?> append(UnfilteredRowIterator partition)
     {
+        assert dataFile.isOpen() : "update is being called after releaseBuffers";
+
         if (partition.isEmpty())
             return null;
 
