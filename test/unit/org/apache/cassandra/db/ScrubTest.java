@@ -35,9 +35,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 
-import org.apache.commons.lang3.StringUtils;
 
 import org.junit.AfterClass;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -94,6 +94,7 @@ import static org.apache.cassandra.SchemaLoader.createKeyspace;
 import static org.apache.cassandra.SchemaLoader.getCompressionParameters;
 import static org.apache.cassandra.SchemaLoader.loadSchema;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -349,10 +350,12 @@ public class ScrubTest
         assertOrderedAll(cfs, 10);
     }
 
-    // TODO: STAR-247 run only for BigFormat: https://github.com/riptano/bdp/blob/6.8.10/dse-db/test/unit/org/apache/cassandra/db/ScrubTest.java#L380
     @Test
     public void testScrubOutOfOrder() throws Exception
     {
+        // TODO: STAR-247 run only for BigFormat: https://github.com/riptano/bdp/blob/6.8.10/dse-db/test/unit/org/apache/cassandra/db/ScrubTest.java#L380
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
+
         // This test assumes ByteOrderPartitioner to create out-of-order SSTable
         IPartitioner oldPartitioner = DatabaseDescriptor.getPartitioner();
         DatabaseDescriptor.setPartitionerUnsafe(new ByteOrderedPartitioner());
