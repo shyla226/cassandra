@@ -18,15 +18,34 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import com.codahale.metrics.Histogram;
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.utils.ObjectSizes;
+
+import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
  * The base RowIndexEntry is not stored on disk, only specifies a position in the data file
  */
 public class RowIndexEntry<T> implements IMeasurableMemory
 {
+    protected static final Histogram indexEntrySizeHistogram;
+    protected static final Histogram indexInfoCountHistogram;
+    protected static final Histogram indexInfoGetsHistogram;
+    protected static final Histogram indexInfoReadsHistogram;
+
+    static
+    {
+        MetricNameFactory factory = new DefaultNameFactory("Index", "RowIndexEntry");
+        indexEntrySizeHistogram = Metrics.histogram(factory.createMetricName("IndexedEntrySize"), false);
+        indexInfoCountHistogram = Metrics.histogram(factory.createMetricName("IndexInfoCount"), false);
+        indexInfoGetsHistogram = Metrics.histogram(factory.createMetricName("IndexInfoGets"), false);
+        indexInfoReadsHistogram = Metrics.histogram(factory.createMetricName("IndexInfoReads"), false);
+    }
+
     private static final long EMPTY_SIZE = ObjectSizes.measure(new RowIndexEntry<>(0));
     public final long position;
 

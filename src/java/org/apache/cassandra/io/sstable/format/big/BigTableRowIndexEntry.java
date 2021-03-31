@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-import com.codahale.metrics.Histogram;
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DeletionTime;
@@ -135,19 +134,6 @@ public class BigTableRowIndexEntry extends RowIndexEntry<IndexInfo> implements I
     static final int CACHE_NOT_INDEXED = 0;
     static final int CACHE_INDEXED = 1;
     static final int CACHE_INDEXED_SHALLOW = 2;
-
-    static final Histogram indexEntrySizeHistogram;
-    static final Histogram indexInfoCountHistogram;
-    static final Histogram indexInfoGetsHistogram;
-    static final Histogram indexInfoReadsHistogram;
-    static
-    {
-        MetricNameFactory factory = new DefaultNameFactory("Index", "RowIndexEntry");
-        indexEntrySizeHistogram = Metrics.histogram(factory.createMetricName("IndexedEntrySize"), false);
-        indexInfoCountHistogram = Metrics.histogram(factory.createMetricName("IndexInfoCount"), false);
-        indexInfoGetsHistogram = Metrics.histogram(factory.createMetricName("IndexInfoGets"), false);
-        indexInfoReadsHistogram = Metrics.histogram(factory.createMetricName("IndexInfoReads"), false);
-    }
 
     public BigTableRowIndexEntry(long position)
     {
