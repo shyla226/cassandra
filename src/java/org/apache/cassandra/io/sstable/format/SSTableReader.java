@@ -49,6 +49,7 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
@@ -700,6 +701,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
+
+    /**
+     * Partition iterator used only for scrubing (see {@link Scrubber} and {@link ScrubPartitionIterator}).
+     *
+     * @return iterator for scrubing or {@code null} if this {@link SSTableReader} doesn't have the iterator
+     * implemenation (this may be the case if there is no index file for the iterator)
+     */
+    public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
 
     public boolean equals(Object that)
     {

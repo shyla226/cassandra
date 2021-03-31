@@ -47,6 +47,10 @@ public class RowIndexEntry<T> implements IMeasurableMemory
     }
 
     private static final long EMPTY_SIZE = ObjectSizes.measure(new RowIndexEntry<>(0));
+
+    /**
+     * Data file position
+     */
     public final long position;
 
     public RowIndexEntry(long position)

@@ -66,6 +66,7 @@ import org.apache.cassandra.io.sstable.format.ForwardingSSTableReader;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairParallelism;
@@ -315,6 +316,12 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         public long getPrimaryIndexSize()
         {
             return 0;
+        }
+
+        @Override
+        public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+        {
+            return null;
         }
 
         public String toString()

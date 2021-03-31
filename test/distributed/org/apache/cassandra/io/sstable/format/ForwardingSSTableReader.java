@@ -768,4 +768,11 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     {
         return delegate.getPrimaryIndexSize();
     }
+
+    @Override
+    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    {
+        return delegate.scrubPartitionsIterator();
+    }
+
 }

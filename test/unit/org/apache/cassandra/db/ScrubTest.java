@@ -75,6 +75,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
@@ -287,7 +288,9 @@ public class ScrubTest
         CompactionManager.instance.performScrub(cfs, false, true, 2);
 
         // check data is still there
-        assertOrderedAll(cfs, 4);
+        // For Trie format we won't be able to recover the damaged partition key (partion index doesn't store the
+        // whole key)
+        assertOrderedAll(cfs, SSTableFormat.Type.current() == SSTableFormat.Type.TRIE_INDEX ? 3 : 4);
     }
 
     @Test
@@ -344,6 +347,7 @@ public class ScrubTest
         assertOrderedAll(cfs, 10);
     }
 
+    // TODO: STAR-247 run only for BigFormat: https://github.com/riptano/bdp/blob/6.8.10/dse-db/test/unit/org/apache/cassandra/db/ScrubTest.java#L380
     @Test
     public void testScrubOutOfOrder() throws Exception
     {

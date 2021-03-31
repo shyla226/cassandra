@@ -25,9 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
-import org.apache.cassandra.io.sstable.format.trieindex.ScrubIterator;
-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexSSTableReader;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -58,7 +56,7 @@ public class Scrubber implements Closeable
     private final long expectedBloomFilterSize;
 
     private final RandomAccessReader dataFile;
-    private final PartitionIndexIterator indexIterator;
+    private ScrubPartitionIterator indexIterator;
     private final ScrubInfo scrubInfo;
 
     private int goodRows;
@@ -139,11 +137,11 @@ public class Scrubber implements Closeable
             outputHandler.output("Starting scrub with reinsert overflowed TTL option");
     }
 
-    private PartitionIndexIterator openIndexIterator()
+    private ScrubPartitionIterator openIndexIterator()
     {
         try
         {
-            return ((TrieIndexSSTableReader) sstable).scrubPartitionsIterator();
+            return sstable.scrubPartitionsIterator();
         }
         catch (IOException e)
         {
@@ -191,22 +189,40 @@ public class Scrubber implements Closeable
                     // check for null key below
                 }
 
-                long dataStartFromIndex = -1;
-                long dataSizeFromIndex = -1;
+                long partitionStartFromIndex = -1;
+                long partitionSizeFromIndex = -1;
                 ByteBuffer currentIndexKey = null;
-                if (indexIterator != null)
+                if (indexAvailable())
                 {
                     currentIndexKey = indexIterator.key();
-                    dataStartFromIndex = indexIterator.dataPosition();
-
-                    if (advanceIndexNoThrow()) {
-                        dataSizeFromIndex = indexIterator.dataPosition() - dataStartFromIndex;
+                    partitionStartFromIndex = indexIterator.dataPosition();
+                    if (indexIterator.dataPosition() != -1)
+                    {
+                        try
+                        {
+                            indexIterator.advance();
+                            if (indexIterator.dataPosition() != -1)
+                                partitionSizeFromIndex = indexIterator.dataPosition() - partitionStartFromIndex;
+                        }
+                        catch (Throwable th)
+                        {
+                            throwIfFatal(th);
+                            outputHandler.warn(String.format(
+                                "Failed to advance to the next index position. Index is corrupted. " +
+                                "Continuing without the index. " +
+                                "Last position read is %d.", indexIterator.dataPosition()), th);
+                            indexIterator.close();
+                            indexIterator = null;
+                            currentIndexKey = null;
+                            partitionStartFromIndex = -1;
+                            partitionSizeFromIndex = -1;
+                        }
                     }
                 }
 
                 // avoid an NPE if key is null
                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
-                outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(dataSizeFromIndex)));
+                outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(partitionSizeFromIndex)));
 
                 try
                 {
@@ -220,14 +236,15 @@ public class Scrubber implements Closeable
                                 "_too big_", ByteBufferUtil.bytesToHex(currentIndexKey))));
                     }
 
-                    if (indexIterator != null && dataSizeFromIndex > dataFile.length())
-                        throw new IOError(new IOException("Impossible row size (greater than file length): " + dataSizeFromIndex));
+                    if (indexIterator != null && partitionSizeFromIndex > dataFile.length())
+                        throw new IOError(new IOException("Impossible row size (greater than file length): " + partitionSizeFromIndex));
 
-                    if (indexIterator != null && rowStart != dataStartFromIndex)
-                        outputHandler.warn(String.format("Data file row position %d differs from index file row position %d", rowStart, dataStartFromIndex));
+                    if (indexIterator != null && rowStart != partitionStartFromIndex)
+                        outputHandler.warn(String.format("Data file row position %d differs from index file row position %d", rowStart, partitionStartFromIndex));
 
                     if (tryAppend(prevKey, key, writer))
                         prevKey = key;
+
                 }
                 catch (Throwable th)
                 {
@@ -235,10 +252,11 @@ public class Scrubber implements Closeable
                     outputHandler.warn("Error reading row (stacktrace follows):", th);
 
                     if (currentIndexKey != null
-                        && (key == null || !key.getKey().equals(currentIndexKey) || rowStart != dataStartFromIndex))
+                        && (key == null || !key.getKey().equals(currentIndexKey) || rowStart != partitionStartFromIndex))
                     {
+                        long dataStartFromIndex = partitionStartFromIndex + TypeSizes.SHORT_SIZE + currentIndexKey.remaining();
                         outputHandler.output(String.format("Retrying from row index; data is %s bytes starting at %s",
-                                                  dataSizeFromIndex, dataStartFromIndex));
+                                                       partitionSizeFromIndex, dataStartFromIndex));
                         key = sstable.decorateKey(currentIndexKey);
                         try
                         {
@@ -254,17 +272,30 @@ public class Scrubber implements Closeable
 
                             outputHandler.warn("Retry failed too. Skipping to next row (retry's stacktrace follows)", th2);
                             badRows++;
-                            seekToNextRow();
+                            seekToNextPartition();
                         }
                     }
                     else
                     {
                         throwIfCannotContinue(key, th);
 
-                        outputHandler.warn("Row starting at position " + rowStart + " is unreadable; skipping to next");
                         badRows++;
                         if (indexIterator != null)
-                            seekToNextRow();
+                        {
+                            outputHandler.warn("Partition starting at position " + rowStart + " is unreadable; skipping to next");
+                            seekToNextPartition();
+                        }
+                        else
+                        {
+                            outputHandler.warn(String.format(
+                                "Unrecoverable error while scrubbing %s." +
+                                "Scrubbing cannot continue. The sstable will be marked for deletion. " +
+                                "You can attempt manual recovery from the pre-scrub snapshot. " +
+                                "You can also run nodetool repair to transfer the data from a healthy replica, if any.",
+                            sstable));
+                            // There's no way to resync and continue. Give up.
+                            break;
+                        }
                     }
                 }
             }
@@ -382,24 +413,23 @@ public class Scrubber implements Closeable
 
     private boolean indexAvailable()
     {
-        return indexIterator != null && !indexIterator.isExhausted();
+        return indexIterator != null && indexIterator.dataPosition() != -1;
     }
 
-    private void seekToNextRow()
+    private void seekToNextPartition()
     {
-        long nextRowPositionFromIndex = indexIterator.isExhausted()
-                                        ? dataFile.length()
-                                        : indexIterator.dataPosition();
+        long nextPartitionPositionFromIndex = indexIterator.dataPosition();
+        if (nextPartitionPositionFromIndex == -1)
+            nextPartitionPositionFromIndex = dataFile.length();
 
         try
         {
-            dataFile.seek(nextRowPositionFromIndex);
+            dataFile.seek(nextPartitionPositionFromIndex);
         }
         catch (Throwable th)
         {
             throwIfFatal(th);
-            outputHandler.warn(String.format("Failed to seek to next row position %d", nextRowPositionFromIndex), th);
-            badRows++;
+            outputHandler.warn(String.format("Failed to seek to next partition position %d", nextPartitionPositionFromIndex), th);
         }
     }
 
