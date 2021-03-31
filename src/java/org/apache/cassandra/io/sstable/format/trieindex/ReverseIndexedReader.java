@@ -22,6 +22,7 @@ import java.io.IOException;
 
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -45,9 +46,10 @@ class ReverseIndexedReader extends ReverseReader
                                 Slices slices,
                                 FileDataInput file,
                                 boolean shouldCloseFile,
-                                DeserializationHelper helper)
+                                DeserializationHelper helper,
+                                DecoratedKey key)
     {
-        super(sstable, slices, file, shouldCloseFile, helper);
+        super(sstable, slices, file, shouldCloseFile, helper, key);
         basePosition = indexEntry.position;
         this.indexEntry = indexEntry;
         this.rowIndexFile = sstable.rowIndexFile;

@@ -56,6 +56,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.UnfilteredValidation;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -290,16 +291,17 @@ public class TrieIndexSSTableReader extends SSTableReader
                                   RowIndexEntry<?> indexEntry,
                                   DeserializationHelper helper,
                                   Slices slices,
-                                  boolean reversed)
+                                  boolean reversed,
+                                  DecoratedKey key)
     throws IOException
     {
         return indexEntry.isIndexed()
                ? reversed
-                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper)
-                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper)
+                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, key)
+                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, key)
                : reversed
-                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper)
-                 : new ForwardReader(this, slices, file, shouldCloseFile, helper);
+                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper, key)
+                 : new ForwardReader(this, slices, file, shouldCloseFile, helper, key);
     }
 
     @Override
@@ -866,8 +868,11 @@ public class TrieIndexSSTableReader extends SSTableReader
                 staticRow = Rows.EMPTY_STATIC_ROW;
             }
 
+            if (!partitionLevelDeletion.validate())
+                UnfilteredValidation.handleInvalid(metadata(), key, this, "partitionLevelDeletion=" + partitionLevelDeletion.toString());
+
             @SuppressWarnings("resource")   // Closed with iterator (whose constructor can't throw)
-            PartitionReader reader = reader(dataFileInput, shouldCloseFile, indexEntry, helper, slices, reversed);
+            PartitionReader reader = reader(dataFileInput, shouldCloseFile, indexEntry, helper, slices, reversed, key);
             return new AbstractUnfilteredRowIterator(metadata(), key, partitionLevelDeletion, selectedColumns.fetchedColumns(), staticRow, reversed, stats())
             {
                 protected Unfiltered computeNext()

@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -37,9 +38,10 @@ class ForwardIndexedReader extends ForwardReader
                          Slices slices,
                          FileDataInput file,
                          boolean shouldCloseFile,
-                         DeserializationHelper helper)
+                         DeserializationHelper helper,
+                         DecoratedKey key)
     {
-        super(sstable, slices, file, shouldCloseFile, helper);
+        super(sstable, slices, file, shouldCloseFile, helper, key);
         basePosition = indexEntry.position;
         indexReader = new RowIndexReader(sstable.rowIndexFile, indexEntry);
     }

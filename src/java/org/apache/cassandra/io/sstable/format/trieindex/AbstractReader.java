@@ -21,10 +21,12 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.IOException;
 
 import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.UnfilteredDeserializer;
+import org.apache.cassandra.db.UnfilteredValidation;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
@@ -37,6 +39,8 @@ import org.apache.cassandra.schema.TableMetadata;
 public abstract class AbstractReader implements TrieIndexSSTableReader.PartitionReader
 {
     protected final TableMetadata metadata;
+
+    protected final SSTableReader sstable;
 
     protected final Slices slices;
 
@@ -65,21 +69,26 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
 
     private int currentSlice;
 
+    protected final DecoratedKey key;
+
     protected AbstractReader(SSTableReader sstable,
                              Slices slices,
                              FileDataInput file,
                              boolean shouldCloseFile,
                              DeserializationHelper helper,
-                             boolean reversed)
+                             boolean reversed,
+                             DecoratedKey key)
     {
         assert file != null;
         this.metadata = sstable.metadata();
+        this.sstable = sstable;
         this.slices = slices;
         this.file = file;
         this.shouldCloseFile = shouldCloseFile;
         this.direction = reversed ? -1 : +1;
         this.deserializer = UnfilteredDeserializer.create(metadata, file, sstable.header, helper);
         this.currentSlice = reversed ? slices.size() : -1;
+        this.key = key;
     }
 
     public Unfiltered next()
@@ -197,7 +206,7 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
         return openMarker = marker.isOpen(false) ? marker.openDeletionTime(false) : null;
     }
 
-    public static RangeTombstoneBoundMarker markerFrom(ClusteringBound where, DeletionTime deletion)
+    public static RangeTombstoneBoundMarker markerFrom(ClusteringBound<?> where, DeletionTime deletion)
     {
         if (deletion == null)
             return null;
@@ -211,7 +220,7 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
             file.close();
     }
 
-    protected boolean skipSmallerRow(ClusteringBound bound) throws IOException
+    protected boolean skipSmallerRow(ClusteringBound<?> bound) throws IOException
     {
         assert bound != null;
         // Note that the following comparison is strict. The reason is that the only cases
@@ -227,7 +236,11 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
         if (deserializer.nextIsRow())
             deserializer.skipNext();
         else
-            updateOpenMarker((RangeTombstoneMarker)deserializer.readNext());
+        {
+            Unfiltered next = deserializer.readNext();
+            UnfilteredValidation.maybeValidateUnfiltered(next, metadata, key, sstable);
+            updateOpenMarker((RangeTombstoneMarker) next);
+        }
         return false;
     }
 
@@ -257,6 +270,8 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
             }
 
             Unfiltered next = deserializer.readNext();
+            UnfilteredValidation.maybeValidateUnfiltered(next, metadata, key, sstable);
+
             // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
             // This should be rare (i.e. does not warrant saving state).
             if (next.isEmpty())
