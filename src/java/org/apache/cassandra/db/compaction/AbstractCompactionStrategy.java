@@ -414,7 +414,7 @@ public abstract class AbstractCompactionStrategy
         else
         {
             // what percentage of columns do we expect to compact outside of overlap?
-            if (sstable.descriptor.formatType == SSTableFormat.Type.BIG && ((SSTableReader) sstable).getIndexSummarySize() < 2)
+            if (sstable.getIndexSummarySize() < 2)
             {
                 // we have too few samples to estimate correct percentage
                 return false;
