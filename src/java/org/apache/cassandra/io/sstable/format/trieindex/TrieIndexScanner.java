@@ -308,6 +308,10 @@ public class TrieIndexScanner implements ISSTableScanner
                  */
                 currentRowIterator = new LazilyInitializedUnfilteredRowIterator(currentKey)
                 {
+                    // Store currentEntry referency during object instantination as later (during initialize) the
+                    // reference may point to a different entry.
+                    private RowIndexEntry<?> rowIndexEntry = currentEntry;
+
                     protected UnfilteredRowIterator initializeIterator()
                     {
                         try
@@ -315,15 +319,15 @@ public class TrieIndexScanner implements ISSTableScanner
                             if (startScan != -1)
                                 bytesScanned += getCurrentPosition() - startScan;
 
-                            startScan = currentEntry.position;
+                            startScan = rowIndexEntry.position;
                             if (dataRange == null)
                             {
-                                return sstable.simpleIterator(() -> dfile, partitionKey(), currentEntry, false);
+                                return sstable.simpleIterator(() -> dfile, partitionKey(), rowIndexEntry, false);
                             }
                             else
                             {
                                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed());
+                                return sstable.iterator(dfile, partitionKey(), rowIndexEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed());
                             }
                         }
                         catch (CorruptSSTableException e)
