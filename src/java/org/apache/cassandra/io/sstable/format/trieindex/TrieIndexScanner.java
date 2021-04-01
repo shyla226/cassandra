@@ -58,6 +58,7 @@ import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.apache.cassandra.dht.AbstractBounds.maxLeft;
 import static org.apache.cassandra.dht.AbstractBounds.minRight;
 
+// TODO STAR-247: implement unit test
 public class TrieIndexScanner implements ISSTableScanner
 {
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
@@ -269,7 +270,7 @@ public class TrieIndexScanner implements ISSTableScanner
 
         protected UnfilteredRowIterator computeNext()
         {
-            if (currentRowIterator != null && currentRowIterator.initialized() && currentRowIterator.hasNext())
+            if (currentRowIterator != null && currentRowIterator.initialized() && !currentRowIterator.isClosed() && currentRowIterator.hasNext())
                 throw new IllegalStateException("The UnfilteredRowIterator returned by the last call to next() was initialized: " +
                                                 "it should be either exhausted or closed before calling hasNext() or next() again.");
 
@@ -293,6 +294,7 @@ public class TrieIndexScanner implements ISSTableScanner
                         iterator = null;
                     }
 
+                    // try next range
                     if (!rangeIterator.hasNext())
                         return endOfData();
                     iterator = sstable.coveredKeysIterator(rangeIterator.next());
@@ -329,12 +331,6 @@ public class TrieIndexScanner implements ISSTableScanner
                             sstable.markSuspect();
                             throw new CorruptSSTableException(e, sstable.getFilename());
                         }
-                    }
-
-                    public void close()
-                    {
-                        super.close();
-                        currentRowIterator = null;
                     }
                 };
                 return currentRowIterator;
