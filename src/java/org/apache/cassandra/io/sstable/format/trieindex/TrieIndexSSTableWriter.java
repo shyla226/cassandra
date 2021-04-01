@@ -258,14 +258,14 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     }
 
     @Override
-    public RowIndexEntry endPartition() throws IOException
+    public RowIndexEntry<?> endPartition() throws IOException
     {
         metadataCollector.addCellPerPartitionCount();
 
         long trieRoot = partitionWriter.finish();
-        RowIndexEntry entry = TrieIndexEntry.create(currentStartPosition, trieRoot,
-                                                    currentPartitionLevelDeletion,
-                                                    partitionWriter.rowIndexCount);
+        RowIndexEntry<?> entry = TrieIndexEntry.create(currentStartPosition, trieRoot,
+                                                       currentPartitionLevelDeletion,
+                                                       partitionWriter.rowIndexCount);
 
         long endPosition = dataFile.position();
         long partitionSize = endPosition - currentStartPosition;
@@ -515,7 +515,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             dataFile.setPostFlushListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
         }
 
-        public long append(DecoratedKey key, RowIndexEntry<RowIndexReader.IndexInfo> indexEntry) throws IOException
+        public long append(DecoratedKey key, RowIndexEntry<?> indexEntry) throws IOException
         {
             bf.add(key);
             long position;
