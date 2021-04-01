@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -63,6 +64,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.PageAware;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
@@ -149,8 +151,9 @@ public class SSTableReaderTest
     @Test
     public void testSpannedIndexPositions() throws IOException
     {
+        // expect to create many regions - that is, the size of index must exceed the page size multiple times
         int originalMaxSegmentSize = MmappedRegions.MAX_SEGMENT_SIZE;
-        MmappedRegions.MAX_SEGMENT_SIZE = 40; // each index entry is ~11 bytes, so this will generate lots of segments
+        MmappedRegions.MAX_SEGMENT_SIZE = PageAware.PAGE_SIZE;
 
         try
         {
@@ -160,7 +163,7 @@ public class SSTableReaderTest
 
             // insert a bunch of data and compact to a single sstable
             CompactionManager.instance.disableAutoCompaction();
-            for (int j = 0; j < 100; j += 2)
+            for (int j = 0; j < 10000; j += 2)
             {
                 new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
                 .clustering("0")
@@ -173,7 +176,7 @@ public class SSTableReaderTest
 
             // check that all our keys are found correctly
             SSTableReader sstable = store.getLiveSSTables().iterator().next();
-            for (int j = 0; j < 100; j += 2)
+            for (int j = 0; j < 10000; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
                 FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position);
@@ -182,7 +185,7 @@ public class SSTableReaderTest
             }
 
             // check no false positives
-            for (int j = 1; j < 110; j += 2)
+            for (int j = 1; j < 11000; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
                 assert sstable.getPosition(dk, SSTableReader.Operator.EQ) == null;
