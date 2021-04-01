@@ -376,11 +376,11 @@ public class RowIndexTest
                 logger.error(e.getMessage(), e);
                 ClusteringPrefix<?> ll = left;
                 ClusteringPrefix<?> rr = right;
-//                logger.info(keys.stream()
-//                                       .filter(x -> comparator.compare(ll, x) <= 0 && comparator.compare(x, rr) <= 0)
-//                                       .map(clustering -> comparator.asByteComparable(clustering))
-//                                       .map(bc -> bc.byteComparableAsString(VERSION))
-//                                       .collect(Collectors.joining(", ")));
+                logger.info(keys.stream()
+                                       .filter(x -> comparator.compare(ll, x) <= 0 && comparator.compare(x, rr) <= 0)
+                                       .map(clustering -> comparator.asByteComparable(clustering))
+                                       .map(bc -> bc.byteComparableAsString(VERSION))
+                                       .collect(Collectors.joining(", ")));
                 logger.info("Left {}{} Right {}{}", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
                 try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right)))
                 {
@@ -444,11 +444,11 @@ public class RowIndexTest
             {
                 logger.error(e.getMessage(), e);
                 ClusteringPrefix<?> rr = right;
-//                logger.info(keys.stream()
-//                                       .filter(x -> comparator.compare(x, rr) <= 0)
-//                                       .map(comparator::asByteComparable)
-//                                       .map(bc -> bc.byteComparableAsString(VERSION))
-//                                       .collect(Collectors.joining(", ")));
+                logger.info(keys.stream()
+                                       .filter(x -> comparator.compare(x, rr) <= 0)
+                                       .map(comparator::asByteComparable)
+                                       .map(bc -> bc.byteComparableAsString(VERSION))
+                                       .collect(Collectors.joining(", ")));
                 logger.info("Right {}{}", comparator.asByteComparable(right), exactRight ? "#" : "");
                 try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right)))
                 {
