@@ -188,8 +188,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         reader.first = partitionIndex.firstKey();
         reader.last = partitionIndex.lastKey();
 
-        reader.setup(true);
-
         return reader;
     }
 

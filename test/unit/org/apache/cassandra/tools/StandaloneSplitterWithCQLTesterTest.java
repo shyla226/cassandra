@@ -43,7 +43,6 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-// TODO STAR-247: this class reports some leaks
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class StandaloneSplitterWithCQLTesterTest extends CQLTester
 {

@@ -309,6 +309,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
             sstable.first = getMinimalKey(partitionIndex.firstKey());
             sstable.last = getMinimalKey(partitionIndex.lastKey());
+            sstable.setup(true);
             callWhenReady.accept(sstable);
         });
     }
@@ -364,6 +365,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                                             header);
         sstable.first = getMinimalKey(first);
         sstable.last = getMinimalKey(last);
+        sstable.setup(true);
         return sstable;
     }
 
