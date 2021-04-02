@@ -79,6 +79,7 @@ import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
@@ -191,6 +192,23 @@ public class TrieIndexSSTableReader extends SSTableReader
         return reader;
     }
 
+    static TrieIndexSSTableReader internalOpen(Descriptor desc,
+                                               Set<Component> components,
+                                               TableMetadataRef metadata,
+                                               FileHandle dfile,
+                                               IFilter bf,
+                                               long maxDataAge,
+                                               StatsMetadata sstableMetadata,
+                                               OpenReason openReason,
+                                               SerializationHeader header)
+    {
+        assert desc != null && dfile != null && bf != null && sstableMetadata != null;
+
+        // Make sure the SSTableReader internalOpen part does the same.
+        assert desc.getFormat() == TrieIndexFormat.instance;
+        return new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, null, null, bf);
+    }
+
     @Override
     public void setup(boolean trackHotness)
     {
@@ -250,7 +268,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     private void verifyPartitionIndex() throws IOException
     {
         StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-        try (FileHandle.Builder builder = forVerify(defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
+        try (FileHandle.Builder builder = forVerify(SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
              PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
              IndexPosIterator iter = index.allKeysIterator())
         {
@@ -1389,29 +1407,41 @@ public class TrieIndexSSTableReader extends SSTableReader
         boolean recreatedBFIfNeeded = !isOffline;
 
         try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor).compressed(compressedData);
-             FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-             FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
-             FileHandle partitionIdxFH = partitionIdxFHBuilder.complete();
-             PartitionIndex partitionIdx = PartitionIndex.load(partitionIdxFH, metadata.get().partitioner, loadBFIfNeeded && !hasBloomFilter(fpChance));
-             IFilter bf = getBloomFilter(descriptor, loadBFIfNeeded, recreatedBFIfNeeded, metadata.get(), partitionIdx.size(), sstableMetadata, fpChance))
+             IFilter bf = getBloomFilter(descriptor, loadBFIfNeeded, recreatedBFIfNeeded, metadata.get(), statsMetadata.totalRows, sstableMetadata, fpChance))
         {
+            TrieIndexSSTableReader sstable;
             dataFH = dataFHBuilder.complete();
-            partitionIndex = partitionIdx.sharedCopy();
-            rowIdxFH = rowIdxFHBuilder.complete();
             bloomFilter = bf.sharedCopy();
 
-            TrieIndexSSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                                                 components,
-                                                                                 metadata,
-                                                                                 rowIdxFH,
-                                                                                 dataFH,
-                                                                                 partitionIndex,
-                                                                                 bloomFilter,
-                                                                                 System.currentTimeMillis(),
-                                                                                 statsMetadata,
-                                                                                 OpenReason.NORMAL,
-                                                                                 header.toHeader(metadata.get()));
-
+            if (components.contains(Component.PARTITION_INDEX)) {
+                try (FileHandle.Builder partitionIdxFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+                     FileHandle.Builder rowIdxFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
+                {
+                    rowIdxFH = rowIdxFHBuilder.complete();
+                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, loadBFIfNeeded && !hasBloomFilter(fpChance));
+                    sstable = TrieIndexSSTableReader.internalOpen(descriptor,
+                                                                  components,
+                                                                  metadata,
+                                                                  rowIdxFH,
+                                                                  dataFH,
+                                                                  partitionIndex,
+                                                                  bloomFilter,
+                                                                  System.currentTimeMillis(),
+                                                                  statsMetadata,
+                                                                  OpenReason.NORMAL,
+                                                                  header.toHeader(metadata.get()));
+                }
+            } else {
+                sstable = TrieIndexSSTableReader.internalOpen(descriptor,
+                                                              components,
+                                                              metadata,
+                                                              dataFH,
+                                                              bloomFilter,
+                                                              System.currentTimeMillis(),
+                                                              statsMetadata,
+                                                              OpenReason.NORMAL,
+                                                              header.toHeader(metadata.get()));
+            }
             sstable.setup(!isOffline);
             if (validate)
                 sstable.validate();

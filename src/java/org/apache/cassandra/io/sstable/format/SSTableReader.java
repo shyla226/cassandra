@@ -2457,13 +2457,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         resetTidying();
     }
 
-    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
-    {
-        return new FileHandle.Builder(descriptor.filenameFor(component))
-               .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
-               .withChunkCache(ChunkCache.instance);
-    }
-
     public static void checkRequiredComponents(Descriptor descriptor, Set<Component> components, boolean validate)
     {
         if (validate)
