@@ -30,7 +30,6 @@ import org.apache.cassandra.db.UnfilteredValidation;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -51,9 +50,9 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
     public UnfilteredDeserializer deserializer;
 
     // The start of the current slice. This will be null as soon as we know we've passed that bound.
-    protected ClusteringBound start = ClusteringBound.BOTTOM;
+    protected ClusteringBound<?> start = ClusteringBound.BOTTOM;
     // The end of the current slice. Will never be null.
-    protected ClusteringBound end = ClusteringBound.TOP;
+    protected ClusteringBound<?> end = ClusteringBound.TOP;
 
     private Slice pendingSlice;
 
@@ -178,7 +177,7 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
                     filePos = file.getFilePointer();
                 }
 
-                stage = stage.READY;
+                stage = Stage.READY;
             }
         }
     }
