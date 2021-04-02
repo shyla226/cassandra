@@ -26,11 +26,13 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -39,7 +41,6 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -48,6 +49,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -58,6 +60,8 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public abstract class SSTableWriter extends SSTable implements Transactional
 {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableWriter.class);
+
     protected long repairedAt;
     protected UUID pendingRepair;
     protected boolean isTransient;
@@ -444,5 +448,14 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                            Collection<SSTableFlushObserver> observers,
                                            LifecycleNewTracker lifecycleNewTracker,
                                            Set<Component> indexComponents);
+    }
+
+    protected void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
+    {
+        if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())
+        {
+            String keyString = metadata().partitionKeyType.getString(key.getKey());
+            logger.warn("Writing large partition {}/{}:{} ({}) to sstable {}", metadata.keyspace, metadata.name, keyString, FBUtilities.prettyPrintMemory(rowSize), getFilename());
+        }
     }
 }
