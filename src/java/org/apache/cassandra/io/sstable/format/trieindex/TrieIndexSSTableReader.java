@@ -1343,7 +1343,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     public static TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
     {
-        checkRequiredComponents(descriptor, components, true);
+        checkRequiredComponents(descriptor, components, validate);
 
         EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
         Map<MetadataType, MetadataComponent> sstableMetadata;
