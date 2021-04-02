@@ -298,15 +298,19 @@ public class TrieIndexFormat implements SSTableFormat
         //               improved min/max clustering representation
         //               presence marker for partition level deletions
         // bb (DSE 6.8.5): added hostId of the node from which the sstable originated (DB-4629)
+        // ca (DSE-DB aka Stargazer based on OSS 4.0): all bb fields  + all OSS fields
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
         private final boolean isLatestVersion;
+
         /**
          * DB-2648/CASSANDRA-9067: DSE 6.8/OSS 4.0 bloom filter representation changed (bitset data is no longer stored
          * as BIG_ENDIAN longs, which avoids some redundant bit twiddling).
          */
         private final boolean hasOldBfFormat;
-        private final boolean hasAccurateMinMax;
+        private final boolean hasAccurateLegacyMinMax;
+        private final boolean hasOriginatingHostId;
+        private final boolean hasMaxColumnValueLengths;
 
         private final int correspondingMessagingVersion;
 
@@ -316,13 +320,16 @@ public class TrieIndexFormat implements SSTableFormat
 
             isLatestVersion = version.compareTo(current_version) == 0;
             hasOldBfFormat = version.compareTo("b") < 0;
-            hasAccurateMinMax = version.compareTo("ac") >= 0;
+            hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
+            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])"); // TODO TBD
+            hasMaxColumnValueLengths = version.matches("b[a-z]"); // TODO TBD
             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_40 : MessagingService.VERSION_3014;
         }
 
+        // this is for the ab version which was used in the LABS, and then has been renamed to ba
         private static String mapAb(String version)
         {
-            return "ab".equals(version) ? "b" : version;
+            return "ab".equals(version) ? "ba" : version;
         }
 
         @Override
@@ -362,9 +369,21 @@ public class TrieIndexFormat implements SSTableFormat
         }
 
         @Override
+        public boolean hasZeroCopyMetadata()
+        {
+            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
+        }
+
+        @Override
+        public boolean hasIncrementalNodeSyncMetadata()
+        {
+            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
+        }
+
+        @Override
         public boolean hasAccurateMinMax()
         {
-            return hasAccurateMinMax;
+            return hasAccurateLegacyMinMax;
         }
 
         @Override
@@ -379,11 +398,18 @@ public class TrieIndexFormat implements SSTableFormat
             return version.compareTo("ba") >= 0;
         }
 
-
+        // TODO TBD
         @Override
-        public int correspondingMessagingVersion()
+        public boolean hasMaxColumnValueLengths()
         {
-            return correspondingMessagingVersion;
+            return hasMaxColumnValueLengths;
+        }
+
+        // TODO TBD
+        @Override
+        public boolean hasOriginatingHostId()
+        {
+            return hasOriginatingHostId;
         }
 
         @Override
@@ -398,16 +424,25 @@ public class TrieIndexFormat implements SSTableFormat
             return hasOldBfFormat;
         }
 
+        // this field is not present in DSE
         @Override
-        public boolean hasIsTransient()
+        public int correspondingMessagingVersion()
         {
-            return version.compareTo("ca") >= 0;
+            return correspondingMessagingVersion;
         }
 
+        // this field is not present in DSE
         @Override
         public boolean isCompatibleForStreaming()
         {
             return isCompatible() && version.charAt(0) == current_version.charAt(0);
+        }
+
+        // this field is not present in DSE
+        @Override
+        public boolean hasIsTransient()
+        {
+            return version.compareTo("ca") >= 0;
         }
     }
 }

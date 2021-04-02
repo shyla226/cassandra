@@ -19,7 +19,10 @@ package org.apache.cassandra.io.sstable.metadata;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.apache.commons.lang3.builder.EqualsBuilder;
@@ -320,6 +323,24 @@ public class StatsMetadata extends MetadataComponent
                     size += UUIDSerializer.serializer.serializedSize(component.pendingRepair, 0);
             }
 
+            // we do not have zero copy metadata
+            if (version.hasZeroCopyMetadata())
+            {
+                size += 1;
+            }
+
+            // we do not have node sync metadata
+            if (version.hasIncrementalNodeSyncMetadata())
+            {
+                size += Long.BYTES;
+            }
+
+            // TODO TBD
+            if (version.hasMaxColumnValueLengths())
+            {
+                size += 4; // num columns
+            }
+
             if (version.hasIsTransient())
             {
                 size += TypeSizes.sizeof(component.isTransient);
@@ -327,6 +348,12 @@ public class StatsMetadata extends MetadataComponent
 
             if (version.hasPartitionLevelDeletionsPresenceMarker())
                 size += TypeSizes.sizeof(component.hasPartitionLevelDeletions);
+
+            // TODO TBD
+            if (version.hasOriginatingHostId())
+            {
+                size += 1;
+            }
 
             return size;
         }
@@ -391,6 +418,24 @@ public class StatsMetadata extends MetadataComponent
                 }
             }
 
+            // we do not have zero copy metadata
+            if (version.hasZeroCopyMetadata())
+            {
+                out.writeByte(0);
+            }
+
+            // we do not have node sync metadata
+            if (version.hasIncrementalNodeSyncMetadata())
+            {
+                out.writeLong(Long.MAX_VALUE);
+            }
+
+            // TODO TBD
+            if (version.hasMaxColumnValueLengths())
+            {
+                out.writeInt(0);
+            }
+
             if (version.hasIsTransient())
             {
                 out.writeBoolean(component.isTransient);
@@ -398,6 +443,12 @@ public class StatsMetadata extends MetadataComponent
 
             if (version.hasPartitionLevelDeletionsPresenceMarker())
                 out.writeBoolean(component.hasPartitionLevelDeletions);
+
+            // TODO TBD
+            if (version.hasOriginatingHostId())
+            {
+                out.writeByte(0);
+            }
         }
 
         public StatsMetadata deserialize(Version version, DataInputPlus in) throws IOException
@@ -483,6 +534,34 @@ public class StatsMetadata extends MetadataComponent
                 pendingRepair = UUIDSerializer.serializer.deserialize(in, 0);
             }
 
+            if (version.hasZeroCopyMetadata() && in.readByte() != 0)
+            {
+                logger.warn("Ignoring zero copy metadata from {} as it is not supported", in);
+                in.skipBytes(Long.BYTES +                   // start offset
+                             Long.BYTES +                   // end offset
+                             Integer.BYTES +                // chunk size
+                             Long.BYTES);                   // estimated keys
+                ByteBufferUtil.readWithShortLength(in);     // first key
+                ByteBufferUtil.readWithShortLength(in);     // last key
+            }
+
+            if (version.hasIncrementalNodeSyncMetadata())
+            {
+                logger.warn("Ignoring incremental node sync metadata from {} as it is not supported", in);
+                in.readLong();
+            }
+
+            // TODO TBD
+            if (version.hasMaxColumnValueLengths())
+            {
+                int colCount = in.readInt();
+                for (int i = 0; i < colCount; i++)
+                {
+                    ByteBufferUtil.readWithVIntLength(in);
+                    in.readInt();
+                }
+            }
+
             boolean isTransient = version.hasIsTransient() && in.readBoolean();
 
             // If not recorded, the only time we can guarantee there is no partition level deletion is if there is no
@@ -490,6 +569,12 @@ public class StatsMetadata extends MetadataComponent
             boolean hasPartitionLevelDeletions = version.hasPartitionLevelDeletionsPresenceMarker()
                                                  ? in.readBoolean()
                                                  : minLocalDeletionTime != Cell.NO_DELETION_TIME;
+
+            // TODO TBD
+            if (version.hasOriginatingHostId() && in.readByte() != 0)
+            {
+                UUIDSerializer.serializer.deserialize(in, 0);
+            }
 
             return new StatsMetadata(partitionSizes,
                                      columnCounts,
