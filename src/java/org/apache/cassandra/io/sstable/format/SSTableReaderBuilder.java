@@ -111,6 +111,7 @@ public abstract class SSTableReaderBuilder
         return this;
     }
 
+    @SuppressWarnings("resource")
     public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
     {
         return new FileHandle.Builder(descriptor.filenameFor(component))
@@ -118,6 +119,7 @@ public abstract class SSTableReaderBuilder
                .withChunkCache(ChunkCache.instance);
     }
 
+    @SuppressWarnings("resource")
     public static FileHandle.Builder defaultDataHandleBuilder(Descriptor descriptor)
     {
         return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
