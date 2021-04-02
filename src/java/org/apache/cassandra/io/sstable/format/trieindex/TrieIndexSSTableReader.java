@@ -75,11 +75,9 @@ import org.apache.cassandra.io.sstable.Downsampling;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.IndexFileEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
@@ -624,11 +622,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         {
             return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight);
         }
-
-        public Iterator<IndexFileEntry> iterator(RandomAccessReader dataFileReader)
-        {
-            return coveredKeysFlow(dataFileReader, left, inclusiveLeft, right, inclusiveRight);
-        }
     }
 
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
@@ -660,29 +653,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         if (partitionIndex == null)
             return null;
         return new ScrubIterator(partitionIndex, rowIndexFile);
-    }
-
-    public Iterator<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfileReader,
-                                                    PartitionPosition left,
-                                                    boolean inclusiveLeft,
-                                                    PartitionPosition right,
-                                                    boolean inclusiveRight)
-    {
-        boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0 && last.compareTo(left) >= 0;
-        boolean isRightInSStableRange = !filterLast() || first.compareTo(right) <= 0 && last.compareTo(right) >= 0;
-        if (isLeftInSStableRange || isRightInSStableRange)
-        {
-            inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
-            inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
-            return new TrieIndexFileIterator(dfileReader,
-                                             this,
-                                             isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
-                                             isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
-        }
-        else
-        {
-            return Collections.emptyIterator();
-        }
     }
 
     @Override
