@@ -279,12 +279,12 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
-    private boolean filterFirst()
+    protected boolean filterFirst()
     {
         return openReason == OpenReason.MOVED_START;
     }
 
-    private boolean filterLast()
+    protected boolean filterLast()
     {
         return false;
     }
