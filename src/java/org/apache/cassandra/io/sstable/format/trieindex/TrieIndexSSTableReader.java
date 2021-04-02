@@ -118,6 +118,7 @@ import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.LT;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -268,7 +269,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     private void verifyPartitionIndex() throws IOException
     {
         StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-        try (FileHandle.Builder builder = forVerify(SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
+        try (FileHandle.Builder builder = forVerify(defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
              PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
              IndexPosIterator iter = index.allKeysIterator())
         {
@@ -1414,8 +1415,8 @@ public class TrieIndexSSTableReader extends SSTableReader
             bloomFilter = bf.sharedCopy();
 
             if (components.contains(Component.PARTITION_INDEX)) {
-                try (FileHandle.Builder partitionIdxFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-                     FileHandle.Builder rowIdxFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
+                try (FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+                     FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
                 {
                     rowIdxFH = rowIdxFHBuilder.complete();
                     partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, loadBFIfNeeded && !hasBloomFilter(fpChance));
@@ -1431,7 +1432,9 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                                   OpenReason.NORMAL,
                                                                   header.toHeader(metadata.get()));
                 }
-            } else {
+            }
+            else
+            {
                 sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                               components,
                                                               metadata,
@@ -1442,9 +1445,9 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                               OpenReason.NORMAL,
                                                               header.toHeader(metadata.get()));
             }
-            sstable.setup(!isOffline);
             if (validate)
                 sstable.validate();
+            sstable.setup(!isOffline); // this should come last, right before returning sstable
             return sstable;
         }
         catch (RuntimeException e)
