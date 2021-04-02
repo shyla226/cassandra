@@ -524,14 +524,14 @@ public class VerifyTest
     @Test
     public void testVerifyPartitionIndex() throws IOException
     {
-        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.TRIE_INDEX));
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BTI));
         testBrokenComponentHelper(Component.PARTITION_INDEX);
     }
 
     @Test
     public void testVerifyRowIndex() throws IOException
     {
-        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.TRIE_INDEX));
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BTI));
         testBrokenComponentHelper(Component.ROW_INDEX);
     }
 

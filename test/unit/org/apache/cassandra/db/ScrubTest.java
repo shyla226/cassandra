@@ -293,7 +293,7 @@ public class ScrubTest
         // check data is still there
         // For Trie format we won't be able to recover the damaged partition key (partion index doesn't store the
         // whole key)
-        assertOrderedAll(cfs, SSTableFormat.Type.current() == SSTableFormat.Type.TRIE_INDEX ? 3 : 4);
+        assertOrderedAll(cfs, SSTableFormat.Type.current() == SSTableFormat.Type.BTI ? 3 : 4);
     }
 
     @Test

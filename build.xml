@@ -1656,7 +1656,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
-        <jvmarg value="-Dcassandra.sstable.format.default=BIG" />
+        <jvmarg value="-Dcassandra.sstable.format.default=big" />
       </testmacrohelper>
     </sequential>
   </macrodef>

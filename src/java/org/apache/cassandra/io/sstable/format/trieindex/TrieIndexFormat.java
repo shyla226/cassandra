@@ -107,7 +107,7 @@ public class TrieIndexFormat implements SSTableFormat
     @Override
     public Type getType()
     {
-        return Type.TRIE_INDEX;
+        return Type.BTI;
     }
 
     @Override

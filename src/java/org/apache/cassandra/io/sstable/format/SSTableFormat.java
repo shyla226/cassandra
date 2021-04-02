@@ -17,14 +17,13 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
-import java.util.Collection;
 import java.util.Set;
 
 import com.google.common.base.CharMatcher;
-import com.google.common.collect.Sets;
+
+import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 
@@ -33,7 +32,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
  */
 public interface SSTableFormat
 {
-    static boolean enableSSTableDevelopmentTestMode = Boolean.getBoolean("cassandra.test.sstableformatdevelopment");
+    public final static String FORMAT_DEFAULT_PROP = "cassandra.sstable.format.default";
 
     Type getType();
 
@@ -49,14 +48,14 @@ public interface SSTableFormat
         BIG("big", BigFormat.instance),
 
         //Sstable format with trie indices
-        TRIE_INDEX("bti", TrieIndexFormat.instance);
+        BTI("bti", TrieIndexFormat.instance);
 
         public final SSTableFormat info;
         public final String name;
 
         public static Type current()
         {
-            return Type.valueOf(System.getProperty("cassandra.sstable.format.default", TRIE_INDEX.name()));
+            return Type.valueOf(System.getProperty(FORMAT_DEFAULT_PROP, BTI.name()).toUpperCase());
         }
 
         Type(String name, SSTableFormat info)
