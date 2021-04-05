@@ -118,7 +118,7 @@ public abstract class ReadTest extends CQLTester
         System.err.format("... done in %.3f s.\n", writeLength / 1000.0);
 
         Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        Memtable.MemoryUsage usage = memtable.getMemoryUsage();
+        Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
         System.err.format("%s in %s mode: %d ops, %s serialized bytes, %s\n",
                           memtable.getClass().getSimpleName(),
                           DatabaseDescriptor.getMemtableAllocationType(),

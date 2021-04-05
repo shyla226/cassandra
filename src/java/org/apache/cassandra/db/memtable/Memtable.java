@@ -20,6 +20,8 @@ package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.util.concurrent.ListenableFuture;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -105,8 +107,11 @@ public interface Memtable extends Comparable<Memtable>
         }
 
         /**
-         * Normally we can receive streamed sstables directly, but if the memtable can request to receive the data
-         * instead by returning true here.
+         * Normally we can receive streamed sstables directly, skipping the memtable stage (zero-copy-streaming). When
+         * the memtable is the primary data store (e.g. persistent memtables), it will usually prefer to receive the
+         * data instead.
+         * If this returns true, all streamed sstables's content will be read and replayed as mutations, disabling
+         * zero-copy streaming.
          */
         default boolean streamToMemtable()
         {
@@ -129,7 +134,14 @@ public interface Memtable extends Comparable<Memtable>
      */
     interface Owner
     {
-        void signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason);
+        /** Signal to the owner that a flush is required (e.g. in response to hitting space limits) */
+        ListenableFuture<CommitLogPosition> signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason);
+
+        /**
+         * Collect the index memtables flushed together with this. Used to accurately calculate memory that would be
+         * freed by a flush.
+         */
+        Iterable<Memtable> getIndexMemtables();
     }
 
 
@@ -176,7 +188,7 @@ public interface Memtable extends Comparable<Memtable>
     // Statistics
 
     /** Number of partitions stored in the memtable */
-    int partitionCount();
+    long partitionCount();
 
     /** Size of the data not accounting for any metadata / mapping overheads */
     long getLiveDataSize();
@@ -199,17 +211,32 @@ public interface Memtable extends Comparable<Memtable>
     // Memory usage tracking
 
     /**
+     * Add this memtable's used memory to the given usage object. This can be used to retrieve a single memtable's usage
+     * as well as to combine the ones of related sstables (e.g. a table and its table-based secondary indexes).
+     */
+    void addMemoryUsageTo(MemoryUsage usage);
+
+
+    /**
      * This memtable's used memory.
      *
      * This tracks on- and off-heap memory, as well as the ratio to the total permitted memtable memory.
      */
-    MemoryUsage getMemoryUsage();
+    static MemoryUsage newMemoryUsage()
+    {
+        return new MemoryUsage();
+    }
 
     /**
-     * Add this memtable's used memory to the given usage object. Used mainly to aggregate the usage data between a
-     * table and its table-based indexes.
+     * Shorthand for the getting a given table's memory usage.
+     * Implemented as a static to prevent implementations altering expectations by e.g. returning a cached object.
      */
-    void addMemoryUsageTo(MemoryUsage usage);
+    static MemoryUsage getMemoryUsage(Memtable memtable)
+    {
+        MemoryUsage usage = newMemoryUsage();
+        memtable.addMemoryUsageTo(usage);
+        return usage;
+    }
 
     class MemoryUsage
     {
@@ -221,13 +248,6 @@ public interface Memtable extends Comparable<Memtable>
         public float ownershipRatioOnHeap = 0.0f;
         /** Off-heap memory as ratio to permitted memtable space */
         public float ownershipRatioOffHeap = 0.0f;
-        /** The memtable memory pool that this memtable is using */
-        public final MemtablePool memoryPool;
-
-        public MemoryUsage(MemtablePool memoryPool)
-        {
-            this.memoryPool = memoryPool;
-        }
 
         public String toString()
         {

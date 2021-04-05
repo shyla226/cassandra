@@ -40,12 +40,9 @@ public class PersistentMemoryMemtable
 //extends AbstractMemtable
 extends SkipListMemtable        // to test framework
 {
-    private final Owner owner;
-
     public PersistentMemoryMemtable(TableMetadataRef metadaRef, Owner owner)
     {
-        super(metadaRef);
-        this.owner = owner;
+        super(null, metadaRef, owner);
         // We should possibly link the persistent data of this memtable
     }
 
@@ -67,7 +64,7 @@ extends SkipListMemtable        // to test framework
         return super.getPartition(key);
     }
 
-    public int partitionCount()
+    public long partitionCount()
     {
         // TODO: implement
         return super.partitionCount();
@@ -192,12 +189,6 @@ extends SkipListMemtable        // to test framework
     {
         // We don't track commit log positions, so if we are dirty, we may.
         return !isClean();
-    }
-
-    public MemoryUsage getMemoryUsage()
-    {
-        // our memory usage is not counted, return a zero-filled one
-        return new MemoryUsage(null);
     }
 
     public void addMemoryUsageTo(MemoryUsage stats)

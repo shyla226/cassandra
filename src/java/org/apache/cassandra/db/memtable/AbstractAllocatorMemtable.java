@@ -18,10 +18,13 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,7 +74,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
         long heapLimit = DatabaseDescriptor.getMemtableHeapSpaceInMb() << 20;
         long offHeapLimit = DatabaseDescriptor.getMemtableOffheapSpaceInMb() << 20;
         float memtableCleanupThreshold = DatabaseDescriptor.getMemtableCleanupThreshold();
-        MemtableCleaner cleaner = ColumnFamilyStore::flushLargestMemtable;
+        MemtableCleaner cleaner = AbstractAllocatorMemtable::flushLargestMemtable;
         switch (DatabaseDescriptor.getMemtableAllocationType())
         {
         case unslabbed_heap_buffers:
@@ -214,13 +217,6 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
         liveDataSize.addAndGet(1024L * 1024 * 1024 * 1024 * 1024);
     }
 
-    public MemoryUsage getMemoryUsage()
-    {
-        MemoryUsage stats = new MemoryUsage(MEMORY_POOL);
-        addMemoryUsageTo(stats);
-        return stats;
-    }
-
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         stats.ownershipRatioOnHeap += getAllocator().onHeap().ownershipRatio();
@@ -264,5 +260,85 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
             };
             ScheduledExecutors.scheduledTasks.schedule(runnable, period, TimeUnit.MILLISECONDS);
         }
+    }
+
+    /**
+     * Finds the largest memtable, as a percentage of *either* on- or off-heap memory limits, and immediately
+     * queues it for flushing. If the memtable selected is flushed before this completes, no work is done.
+     */
+    public static CompletableFuture<Boolean> flushLargestMemtable()
+    {
+        float largestRatio = 0f;
+        AbstractAllocatorMemtable largestMemtable = null;
+        Memtable.MemoryUsage largestUsage = null;
+        float liveOnHeap = 0, liveOffHeap = 0;
+        // we take a reference to the current main memtable for the CF prior to snapping its ownership ratios
+        // to ensure we have some ordering guarantee for performing the switchMemtableIf(), i.e. we will only
+        // swap if the memtables we are measuring here haven't already been swapped by the time we try to swap them
+        for (Memtable currentMemtable : ColumnFamilyStore.activeMemtables())
+        {
+            if (!(currentMemtable instanceof AbstractAllocatorMemtable))
+                continue;
+            AbstractAllocatorMemtable current = (AbstractAllocatorMemtable) currentMemtable;
+
+            // find the total ownership ratio for the memtable and all SecondaryIndexes owned by this CF,
+            // both on- and off-heap, and select the largest of the two ratios to weight this CF
+            MemoryUsage usage = Memtable.newMemoryUsage();
+            current.addMemoryUsageTo(usage);
+
+            for (Memtable indexMemtable : current.owner.getIndexMemtables())
+                if (indexMemtable instanceof AbstractAllocatorMemtable)
+                    indexMemtable.addMemoryUsageTo(usage);
+
+            float ratio = Math.max(usage.ownershipRatioOnHeap, usage.ownershipRatioOffHeap);
+            if (ratio > largestRatio)
+            {
+                largestMemtable = current;
+                largestUsage = usage;
+                largestRatio = ratio;
+            }
+
+            liveOnHeap += usage.ownershipRatioOnHeap;
+            liveOffHeap += usage.ownershipRatioOffHeap;
+        }
+
+        CompletableFuture<Boolean> returnFuture = new CompletableFuture<>();
+
+        if (largestMemtable != null)
+        {
+            float usedOnHeap = MEMORY_POOL.onHeap.usedRatio();
+            float usedOffHeap = MEMORY_POOL.offHeap.usedRatio();
+            float flushingOnHeap = MEMORY_POOL.onHeap.reclaimingRatio();
+            float flushingOffHeap = MEMORY_POOL.offHeap.reclaimingRatio();
+            logger.debug("Flushing largest {} to free up room. Used total: {}, live: {}, flushing: {}, this: {}",
+                         largestMemtable.owner, ratio(usedOnHeap, usedOffHeap), ratio(liveOnHeap, liveOffHeap),
+                         ratio(flushingOnHeap, flushingOffHeap), ratio(largestUsage.ownershipRatioOnHeap, largestUsage.ownershipRatioOffHeap));
+
+            ListenableFuture<CommitLogPosition> flushFuture = largestMemtable.owner.signalFlushRequired(largestMemtable, ColumnFamilyStore.FlushReason.MEMTABLE_LIMIT);
+            flushFuture.addListener(() -> {
+                try
+                {
+                    flushFuture.get();
+                    returnFuture.complete(true);
+                }
+                catch (Throwable t)
+                {
+                    returnFuture.completeExceptionally(t);
+                }
+            }, MoreExecutors.directExecutor());
+        }
+        else
+        {
+            logger.debug("Flushing of largest memtable, not done, no memtable found");
+
+            returnFuture.complete(false);
+        }
+
+        return returnFuture;
+    }
+
+    private static String ratio(float onHeap, float offHeap)
+    {
+        return String.format("%.2f/%.2f", onHeap, offHeap);
     }
 }

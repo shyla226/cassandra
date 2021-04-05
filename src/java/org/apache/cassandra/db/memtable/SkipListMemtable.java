@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.memtable;
 
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentNavigableMap;
@@ -24,10 +25,12 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -72,11 +75,24 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         super(commitLogLowerBound, metadataRef, owner);
     }
 
-    // Only for testing and PersistentMemoryMemtable
+    // Only for testing
     @VisibleForTesting
     public SkipListMemtable(TableMetadataRef metadataRef)
     {
-        this(null, metadataRef, (m, r) -> {});
+        this(null, metadataRef, new Owner()
+        {
+            @Override
+            public ListenableFuture<CommitLogPosition> signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason)
+            {
+                return null;
+            }
+
+            @Override
+            public Iterable<Memtable> getIndexMemtables()
+            {
+                return Collections.emptyList();
+            }
+        });
     }
 
     protected Factory factory()
@@ -126,7 +142,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         return updater.colUpdateTimeDelta;
     }
 
-    public int partitionCount()
+    public long partitionCount()
     {
         return partitions.size();
     }

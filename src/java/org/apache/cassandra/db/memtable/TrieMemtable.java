@@ -165,7 +165,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return updater.colUpdateTimeDelta;
     }
 
-    public int partitionCount()
+    public long partitionCount()
     {
         return partitions.valuesCount();
     }

@@ -878,7 +878,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private void logFlush(FlushReason reason)
     {
         // reclaiming includes that which we are GC-ing;
-        Memtable.MemoryUsage usage = getTracker().getView().getCurrentMemtable().getMemoryUsage();
+        Memtable.MemoryUsage usage = Memtable.newMemoryUsage();
+        getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
 
         for (ColumnFamilyStore indexCfs : indexManager.getAllIndexColumnFamilyStores())
             indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
@@ -1255,83 +1256,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
     }
 
-    /**
-     * Finds the largest memtable, as a percentage of *either* on- or off-heap memory limits, and immediately
-     * queues it for flushing. If the memtable selected is flushed before this completes, no work is done.
-     */
-    public static CompletableFuture<Boolean> flushLargestMemtable()
+    public ListenableFuture<CommitLogPosition> signalFlushRequired(Memtable memtable, FlushReason reason)
     {
-        float largestRatio = 0f;
-        ColumnFamilyStore largest = null;
-        Memtable largestMemtable = null;
-        Memtable.MemoryUsage largestUsage = null;
-        float liveOnHeap = 0, liveOffHeap = 0;
-        for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
-        {
-            // we take a reference to the current main memtable for the CF prior to snapping its ownership ratios
-            // to ensure we have some ordering guarantee for performing the switchMemtableIf(), i.e. we will only
-            // swap if the memtables we are measuring here haven't already been swapped by the time we try to swap them
-            Memtable current = cfs.getTracker().getView().getCurrentMemtable();
-
-            // find the total ownership ratio for the memtable and all SecondaryIndexes owned by this CF,
-            // both on- and off-heap, and select the largest of the two ratios to weight this CF
-            Memtable.MemoryUsage usage = current.getMemoryUsage();
-
-            for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
-                indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
-
-            float ratio = Math.max(usage.ownershipRatioOnHeap, usage.ownershipRatioOffHeap);
-            if (ratio > largestRatio)
-            {
-                largest = cfs;
-                largestMemtable = current;
-                largestUsage = usage;
-                largestRatio = ratio;
-            }
-
-            liveOnHeap += usage.ownershipRatioOnHeap;
-            liveOffHeap += usage.ownershipRatioOffHeap;
-        }
-
-        CompletableFuture<Boolean> returnFuture = new CompletableFuture<>();
-
-        if (largest != null)
-        {
-            MemtablePool memtablePool = largestUsage.memoryPool;
-            float usedOnHeap = memtablePool.onHeap.usedRatio();
-            float usedOffHeap = memtablePool.offHeap.usedRatio();
-            float flushingOnHeap = memtablePool.onHeap.reclaimingRatio();
-            float flushingOffHeap = memtablePool.offHeap.reclaimingRatio();
-            logger.debug("Flushing largest {} to free up room. Used total: {}, live: {}, flushing: {}, this: {}",
-                         largest, ratio(usedOnHeap, usedOffHeap), ratio(liveOnHeap, liveOffHeap),
-                         ratio(flushingOnHeap, flushingOffHeap), ratio(largestUsage.ownershipRatioOnHeap, largestUsage.ownershipRatioOffHeap));
-
-            ListenableFuture<CommitLogPosition> flushFuture = largest.flushMemtable(largestMemtable, FlushReason.MEMTABLE_LIMIT);
-            flushFuture.addListener(() -> {
-                try
-                {
-                    flushFuture.get();
-                    returnFuture.complete(true);
-                }
-                catch (Throwable t)
-                {
-                    returnFuture.completeExceptionally(t);
-                }
-            }, MoreExecutors.directExecutor());
-        }
-        else
-        {
-            logger.debug("Flushing of largest memtable, not done, no memtable found");
-
-            returnFuture.complete(false);
-        }
-
-        return returnFuture;
+        return switchMemtableIfCurrent(memtable, reason);
     }
 
-    private static String ratio(float onHeap, float offHeap)
+    public static Iterable<Memtable> activeMemtables()
     {
-        return String.format("%.2f/%.2f", onHeap, offHeap);
+        return Iterables.transform(ColumnFamilyStore.all(),
+                                   cfs -> cfs.getTracker().getView().getCurrentMemtable());
+    }
+
+    public Iterable<Memtable> getIndexMemtables()
+    {
+        return Iterables.transform(indexManager.getAllIndexColumnFamilyStores(),
+                                   cfs -> cfs.getTracker().getView().getCurrentMemtable());
     }
 
     /**
@@ -1369,11 +1308,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                        + " for ks: "
                                        + keyspace.getName() + ", table: " + name, e);
         }
-    }
-
-    public void signalFlushRequired(Memtable memtable, FlushReason reason)
-    {
-        switchMemtableIfCurrent(memtable, reason);
     }
 
     /**

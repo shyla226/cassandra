@@ -429,12 +429,12 @@ public class TableMetrics
 
         // MemtableOnHeapSize naming deprecated in 4.0
         memtableOnHeapDataSize = createTableGaugeWithDeprecation("MemtableOnHeapDataSize", "MemtableOnHeapSize", 
-                                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage().ownsOnHeap,
+                                                                 () -> Memtable.getMemoryUsage(cfs.getTracker().getView().getCurrentMemtable()).ownsOnHeap,
                                                                  new GlobalTableGauge("MemtableOnHeapDataSize"));
 
         // MemtableOffHeapSize naming deprecated in 4.0
         memtableOffHeapDataSize = createTableGaugeWithDeprecation("MemtableOffHeapDataSize", "MemtableOffHeapSize", 
-                                                                  () -> cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage().ownsOffHeap,
+                                                                  () -> Memtable.getMemoryUsage(cfs.getTracker().getView().getCurrentMemtable()).ownsOffHeap,
                                                                   new GlobalTableGauge("MemtableOnHeapDataSize"));
         
         memtableLiveDataSize = createTableGauge("MemtableLiveDataSize", 
@@ -903,7 +903,8 @@ public class TableMetrics
 
     private Memtable.MemoryUsage getMemoryUsageWithIndexes(ColumnFamilyStore cfs)
     {
-        Memtable.MemoryUsage usage = cfs.getTracker().getView().getCurrentMemtable().getMemoryUsage();
+        Memtable.MemoryUsage usage = Memtable.newMemoryUsage();
+        cfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
         for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
             indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
         return usage;

@@ -117,7 +117,7 @@ public class MemtableSizeTest extends CQLTester
             System.out.println("Warning: " + cfs.getLiveSSTables().size() + " sstables created.");
 
         Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        Memtable.MemoryUsage usage = memtable.getMemoryUsage();
+        Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
         long actualHeap = usage.ownsOnHeap;
         System.out.printf("Memtable in %s mode: %d ops, %s serialized bytes, %s%n",
                           DatabaseDescriptor.getMemtableAllocationType(),
