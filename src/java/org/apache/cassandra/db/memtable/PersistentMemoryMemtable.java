@@ -150,7 +150,7 @@ extends SkipListMemtable        // to test framework
     {
         super.switchOut(writeBarrier, commitLogUpperBound);
         // This can prepare the memtable data for deletion; it will still be used while the flush is proceeding.
-        // A setDiscarded call will follow.
+        // A discard call will follow.
     }
 
     public void discard()
@@ -196,12 +196,12 @@ extends SkipListMemtable        // to test framework
         // our memory usage is not counted
     }
 
-    public void allocateExtraOnHeap(long additionalSpace, OpOrder.Group opGroup)
+    public void markExtraOnHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
         // we don't track this
     }
 
-    public void allocateExtraOffHeap(long additionalSpace, OpOrder.Group opGroup)
+    public void markExtraOffHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
         // we don't track this
     }

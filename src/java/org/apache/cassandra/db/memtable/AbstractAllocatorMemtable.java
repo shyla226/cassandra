@@ -46,7 +46,11 @@ import org.apache.cassandra.utils.memory.MemtablePool;
 import org.apache.cassandra.utils.memory.NativePool;
 import org.apache.cassandra.utils.memory.SlabPool;
 
-public abstract class AbstractAllocatorMemtable extends AbstractMemtable
+/**
+ * A memtable that uses memory tracked and maybe allocated via a MemtableAllocator from a MemtablePool.
+ * Provides methods of memory tracking and triggering flushes when the relevant limits are reached.
+ */
+public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithCommitlog
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractAllocatorMemtable.class);
 
@@ -54,15 +58,6 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
 
     protected final Owner owner;
     protected final MemtableAllocator allocator;
-
-    // the precise upper bound of CommitLogPosition owned by this memtable
-    private volatile AtomicReference<CommitLogPosition> commitLogUpperBound;
-    // the precise lower bound of CommitLogPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
-    private AtomicReference<CommitLogPosition> commitLogLowerBound;
-
-    // The approximate lower bound by this memtable; must be <= commitLogLowerBound once our predecessor
-    // has been finalised, and this is enforced in the ColumnFamilyStore.setCommitLogUpperBound
-    private final CommitLogPosition approximateCommitLogLowerBound = CommitLog.instance.getCurrentPosition();
 
     // Record the comparator of the CFS at the creation of the memtable. This
     // is only used when a user update the CF comparator, to know if the
@@ -97,17 +92,11 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
     // only to be used by init(), to setup the very first memtable for the cfs
     public AbstractAllocatorMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
-        super(metadataRef);
-        this.commitLogLowerBound = commitLogLowerBound;
+        super(metadataRef, commitLogLowerBound);
         this.allocator = MEMORY_POOL.newAllocator();
         this.initialComparator = metadata.get().comparator;
         this.owner = owner;
         scheduleFlush();
-    }
-
-    public CommitLogPosition getApproximateCommitLogLowerBound()
-    {
-        return approximateCommitLogLowerBound;
     }
 
     public MemtableAllocator getAllocator()
@@ -143,58 +132,13 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
     public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
         super.switchOut(writeBarrier, commitLogUpperBound);
-        this.commitLogUpperBound = commitLogUpperBound;
         allocator.setDiscarding();
     }
 
     public void discard()
     {
+        super.discard();
         allocator.setDiscarded();
-    }
-
-    // decide if this memtable should take the write, or if it should go to the next memtable
-    public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
-    {
-        // if the barrier hasn't been set yet, then this memtable is still taking ALL writes
-        OpOrder.Barrier barrier = this.writeBarrier;
-        if (barrier == null)
-            return true;
-        // if the barrier has been set, but is in the past, we are definitely destined for a future memtable
-        if (!barrier.isAfter(opGroup))
-            return false;
-        // if we aren't durable we are directed only by the barrier
-        if (commitLogPosition == null)
-            return true;
-        while (true)
-        {
-            // otherwise we check if we are in the past/future wrt the CL boundary;
-            // if the boundary hasn't been finalised yet, we simply update it to the max of
-            // its current value and ours; if it HAS been finalised, we simply accept its judgement
-            // this permits us to coordinate a safe boundary, as the boundary choice is made
-            // atomically wrt our max() maintenance, so an operation cannot sneak into the past
-            CommitLogPosition currentLast = commitLogUpperBound.get();
-            if (currentLast instanceof LastCommitLogPosition)
-                return currentLast.compareTo(commitLogPosition) >= 0;
-            if (currentLast != null && currentLast.compareTo(commitLogPosition) >= 0)
-                return true;
-            if (commitLogUpperBound.compareAndSet(currentLast, commitLogPosition))
-                return true;
-        }
-    }
-
-    public CommitLogPosition getCommitLogLowerBound()
-    {
-        return commitLogLowerBound.get();
-    }
-
-    public CommitLogPosition getCommitLogUpperBound()
-    {
-        return commitLogUpperBound.get();
-    }
-
-    public boolean mayContainDataBefore(CommitLogPosition position)
-    {
-        return approximateCommitLogLowerBound.compareTo(position) < 0;
     }
 
     public String toString()
@@ -225,12 +169,12 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtable
         stats.ownsOffHeap += getAllocator().offHeap().owns();
     }
 
-    public void allocateExtraOnHeap(long additionalSpace, OpOrder.Group opGroup)
+    public void markExtraOnHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
         getAllocator().onHeap().allocate(additionalSpace, opGroup);
     }
 
-    public void allocateExtraOffHeap(long additionalSpace, OpOrder.Group opGroup)
+    public void markExtraOffHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
         getAllocator().offHeap().allocate(additionalSpace, opGroup);
     }

@@ -110,6 +110,7 @@ public interface Memtable extends Comparable<Memtable>
          * Normally we can receive streamed sstables directly, skipping the memtable stage (zero-copy-streaming). When
          * the memtable is the primary data store (e.g. persistent memtables), it will usually prefer to receive the
          * data instead.
+         *
          * If this returns true, all streamed sstables's content will be read and replayed as mutations, disabling
          * zero-copy streaming.
          */
@@ -119,9 +120,15 @@ public interface Memtable extends Comparable<Memtable>
         }
 
         /**
-         * When we need to stream data, we usually flush and stream the resulting sstables. If the sstable does not
-         * want to flush, it should return true here and false on shouldSwitch(STREAMING/REPAIR).
-         * In that case, temporary sstables will be created, streamed and then deleted.
+         * When we need to stream data, we usually flush and stream the resulting sstables. This will not work correctly
+         * if the memtable does not want to flush for streaming (e.g. persistent memtables acting as primary data
+         * store), because data (not just recent) will be missing from the streamed view. Such memtables must present
+         * their data separately for streaming.
+         * In other words if the memtable returns false on shouldSwitch(STREAMING/REPAIR), its factory must return true
+         * here.
+         *
+         * If this flag returns true, streaming will write the relevant content that resides in the memtable to
+         * temporary sstables, stream these sstables and then delete them.
          */
         default boolean streamFromMemtable()
         {
@@ -267,7 +274,7 @@ public interface Memtable extends Comparable<Memtable>
      * @param opGroup write operation group, used to permit the operation to complete if it is needed to complete a
      *                flush to free space.
      */
-    void allocateExtraOnHeap(long additionalSpace, OpOrder.Group opGroup);
+    void markExtraOnHeapUsed(long additionalSpace, OpOrder.Group opGroup);
 
     /**
      * Adjust the used off-heap space by the given size (e.g. to reflect memory used by a non-table-based index).
@@ -277,7 +284,7 @@ public interface Memtable extends Comparable<Memtable>
      * @param opGroup write operation group, used to permit the operation to complete if it is needed to complete a
      *                flush to free space.
      */
-    void allocateExtraOffHeap(long additionalSpace, OpOrder.Group opGroup);
+    void markExtraOffHeapUsed(long additionalSpace, OpOrder.Group opGroup);
 
 
     // Flushing

@@ -40,36 +40,14 @@ public abstract class AbstractMemtable implements Memtable
     protected final AtomicLong currentOperations = new AtomicLong(0);
     protected final ColumnsCollector columnsCollector;
     protected final StatsCollector statsCollector = new StatsCollector();
-    private final long creationNano = System.nanoTime();
     // The smallest timestamp for all partitions stored in this memtable
     protected AtomicLong minTimestamp = new AtomicLong(Long.MAX_VALUE);
-    // the write barrier for directing writes to this memtable or the next during a switch
-    protected volatile OpOrder.Barrier writeBarrier;
     protected TableMetadataRef metadata;
 
     public AbstractMemtable(TableMetadataRef metadataRef)
     {
         this.metadata = metadataRef;
         this.columnsCollector = new ColumnsCollector(metadata.get().regularAndStaticColumns());
-    }
-
-    public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
-    {
-        assert this.writeBarrier == null;
-        this.writeBarrier = writeBarrier;
-        // This can prepare the memtable data for deletion; it will still be used while the flush is proceeding.
-        // A setDiscarded call will follow.
-    }
-
-    // decide if this memtable should take the write, or if it should go to the next memtable
-    public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
-    {
-        // if the barrier hasn't been set yet, then this memtable is still taking ALL writes
-        OpOrder.Barrier barrier = this.writeBarrier;
-        if (barrier == null)
-            return true;
-        // if the barrier has been set, the write is for this memtable if it was issued before it
-        return barrier.isAfter(opGroup);
     }
 
     public TableMetadata metadata()
