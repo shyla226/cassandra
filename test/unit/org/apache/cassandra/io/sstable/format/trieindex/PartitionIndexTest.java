@@ -108,17 +108,13 @@ public class PartitionIndexTest
     @Test
     public void testGetEq() throws IOException, InterruptedException
     {
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
         testGetEq(generateRandomIndex(COUNT));
         testGetEq(generateSequentialIndex(COUNT));
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
     }
 
     @Test
     public void testBrokenFile() throws IOException, InterruptedException
     {
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
-
         // put some garbage in the file
         final Pair<List<DecoratedKey>, PartitionIndex> data = generateRandomIndex(COUNT);
         File f = new File(data.right.getFileHandle().path());
@@ -137,7 +133,6 @@ public class PartitionIndexTest
             thrown = true;
         }
         assertTrue(thrown);
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
     }
 
     @Test
@@ -164,10 +159,8 @@ public class PartitionIndexTest
     @Test
     public void testGetGt() throws IOException
     {
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
         testGetGt(generateRandomIndex(COUNT));
         testGetGt(generateSequentialIndex(COUNT));
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
     }
 
     private void testGetGt(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
@@ -188,10 +181,8 @@ public class PartitionIndexTest
     @Test
     public void testGetGe() throws IOException
     {
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
         testGetGe(generateRandomIndex(COUNT));
         testGetGe(generateSequentialIndex(COUNT));
-//        assertEquals(0, ChunkReader.bufferPool.usedMemoryBytes());
     }
 
     public void testGetGe(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
@@ -548,7 +539,7 @@ public class PartitionIndexTest
                         builder.addEntry(list.get(i), i);
                     builder.complete();
 
-                    try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false))
+                    try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, true))
                     {
                         checkIteration(list, list.size(), index);
                     }
