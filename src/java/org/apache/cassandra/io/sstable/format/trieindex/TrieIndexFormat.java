@@ -254,7 +254,7 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
         {
-            return TrieIndexSSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
+            return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
         }
     }
 

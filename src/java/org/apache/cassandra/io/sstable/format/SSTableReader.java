@@ -1758,7 +1758,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         public static final Operator EQ = new Equals();
         public static final Operator GE = new GreaterThanOrEqualTo();
         public static final Operator GT = new GreaterThan();
-        public static final Operator LT = new LowerThan();
 
         /**
          * @param comparison The result of a call to compare/compareTo, with the desired field on the rhs.
@@ -1779,11 +1778,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         final static class GreaterThan extends Operator
         {
             public int apply(int comparison) { return comparison > 0 ? 0 : 1; }
-        }
-
-        final static class LowerThan extends Operator
-        {
-            public int apply(int comparison) { return comparison < 0 ? 0 : 1; }
         }
     }
 
@@ -2440,7 +2434,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         SSTableReader reader;
         try
         {
-            reader = SSTableReader.open(newDescriptor, components, cfs.metadata);
+            reader = newDescriptor.formatType.info.getReaderFactory().open(newDescriptor, components, cfs.metadata);
         }
         catch (Throwable t)
         {

@@ -114,7 +114,6 @@ import static org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.rea
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
-import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.LT;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
@@ -261,26 +260,6 @@ public class TrieIndexSSTableReader extends SSTableReader
             }
         }
 
-        if (op == LT)
-        {
-            if (filterFirst() && first.compareTo(key) >= 0)
-                return null;
-            boolean filteredRight = filterLast() && last.compareTo(key) < 0;
-            searchKey = filteredRight ? last : key;
-            searchOp = LT;
-
-            try (PartitionIndex.Reader reader = partitionIndex.openReader())
-            {
-                return reader.floor(searchKey,
-                                    (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
-            }
-            catch (IOException e)
-            {
-                markSuspect();
-                throw new CorruptSSTableException(e, rowIndexFile.path());
-            }
-        }
-
         throw new UnsupportedOperationException("Unsupported op: " + op);
     }
 
@@ -360,8 +339,6 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     public RowIndexEntry<?> getExactPosition(DecoratedKey dk,
                                              SSTableReadsListener listener,
-                                             FileDataInput rowIndexInput,
-                                             FileDataInput dataInput,
                                              boolean updateStats)
     {
         if (!inBloomFilter(dk))
@@ -390,39 +367,25 @@ public class TrieIndexSSTableReader extends SSTableReader
                 return null;
             }
 
-            FileDataInput in;
             FileHandle fh;
             long seekPosition;
             if (indexPos >= 0)
             {
-                in = rowIndexInput;
                 fh = rowIndexFile;
                 seekPosition = indexPos;
             }
             else
             {
-                in = dataInput;
                 fh = dfile;
                 seekPosition = ~indexPos;
             }
 
-            if (in != null)
+            try (FileDataInput in = fh.createReader(seekPosition))
             {
-                in.seek(seekPosition);
                 return ByteBufferUtil.equalsWithShortLength(in, dk.getKey())
                        ? handleKeyFound(updateStats, listener, in, indexPos)
                        : handleKeyNotFound(updateStats, listener);
             }
-            else
-            {
-                try (FileDataInput tmpIn = fh.createReader(seekPosition))
-                {
-                    return ByteBufferUtil.equalsWithShortLength(tmpIn, dk.getKey())
-                           ? handleKeyFound(updateStats, listener, tmpIn, indexPos)
-                           : handleKeyNotFound(updateStats, listener);
-                }
-            }
-
         }
         catch (IOException e)
         {
@@ -446,11 +409,6 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
         return entry;
-    }
-
-    public RowIndexEntry<?> getExactPosition(DecoratedKey dk, SSTableReadsListener listener, boolean updateStats)
-    {
-        return getExactPosition(dk, listener, null, null, updateStats);
     }
 
     /**
@@ -1261,65 +1219,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         {
             throw new CorruptSSTableException(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH), descriptor.filenameFor(Component.DATA));
         }
-    }
-
-    /**
-     * Moves the sstable in oldDescriptor to a new place (with generation etc) in newDescriptor.
-     *
-     * All components given will be moved/renamed
-     */
-    public static SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
-    {
-        if (!oldDescriptor.isCompatible())
-            throw new RuntimeException(String.format("Can't open incompatible SSTable! Current version %s, found file: %s",
-                                                     oldDescriptor.getFormat().getLatestVersion(),
-                                                     oldDescriptor));
-
-        boolean isLive = cfs.getLiveSSTables().stream().anyMatch(r -> r.descriptor.equals(newDescriptor)
-                                                                      || r.descriptor.equals(oldDescriptor));
-        if (isLive)
-        {
-            String message = String.format("Can't move and open a file that is already in use in the table %s -> %s", oldDescriptor, newDescriptor);
-            logger.error(message);
-            throw new RuntimeException(message);
-        }
-        if (new File(newDescriptor.filenameFor(Component.DATA)).exists())
-        {
-            String msg = String.format("File %s already exists, can't move the file there", newDescriptor.filenameFor(Component.DATA));
-            logger.error(msg);
-            throw new RuntimeException(msg);
-        }
-
-        if (copyData)
-        {
-            try
-            {
-                logger.info("Hardlinking new SSTable {} to {}", oldDescriptor, newDescriptor);
-                SSTableWriter.hardlink(oldDescriptor, newDescriptor, components);
-            }
-            catch (FSWriteError ex)
-            {
-                logger.warn("Unable to hardlink new SSTable {} to {}, falling back to copying", oldDescriptor, newDescriptor, ex);
-                SSTableWriter.copy(oldDescriptor, newDescriptor, components);
-            }
-        }
-        else
-        {
-            logger.info("Moving new SSTable {} to {}", oldDescriptor, newDescriptor);
-            SSTableWriter.rename(oldDescriptor, newDescriptor, components);
-        }
-
-        SSTableReader reader;
-        try
-        {
-            reader = TrieIndexSSTableReader.open(newDescriptor, components, cfs.metadata, true, false);
-        }
-        catch (Throwable t)
-        {
-            logger.error("Aborting import of sstables. {} was corrupt", newDescriptor);
-            throw new RuntimeException(newDescriptor + " is corrupt, can't import", t);
-        }
-        return reader;
     }
 
 }
