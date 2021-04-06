@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.io.sstable.format.big;
+package org.apache.cassandra.io.sstable.format;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -46,6 +46,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableZeroCopyWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -62,7 +63,7 @@ import static org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
-public class BigTableZeroCopyWriterTest
+public class SSTableZeroCopyWriterTest
 {
     public static final String KEYSPACE1 = "BigTableBlockWriterTest";
     public static final String CF_STANDARD = "Standard1";
@@ -153,7 +154,7 @@ public class BigTableZeroCopyWriterTest
         Set<Component> componentsToWrite = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX,
                                                            Component.STATS);
 
-        BigTableZeroCopyWriter btzcw = new BigTableZeroCopyWriter(desc, metadata, txn, componentsToWrite);
+        SSTableZeroCopyWriter btzcw = new SSTableZeroCopyWriter(desc, metadata, txn, componentsToWrite);
 
         for (Component component : componentsToWrite)
         {
