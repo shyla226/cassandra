@@ -515,10 +515,13 @@ public class SSTableReaderTest
         boolean foundScanner = false;
         for (SSTableReader s : store.getLiveSSTables())
         {
-            try (ISSTableScanner scanner = s.getScanner(new Range<Token>(t(0), t(1))))
+            try (ISSTableScanner scanner = s.getScanner(new Range<>(t(0), t(1))))
             {
-                scanner.next(); // throws exception pre 5407
-                foundScanner = true;
+                if (scanner.hasNext())
+                {
+                    scanner.next(); // throws exception pre 5407
+                    foundScanner = true;
+                }
             }
         }
         assertTrue(foundScanner);
