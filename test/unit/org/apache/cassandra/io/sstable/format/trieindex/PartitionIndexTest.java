@@ -353,10 +353,6 @@ public class PartitionIndexTest
             }
             assertEquals(keysSize, i);
         }
-        catch (IOException e)
-        {
-            throw new AssertionError(e);
-        }
     }
 
     @Test
