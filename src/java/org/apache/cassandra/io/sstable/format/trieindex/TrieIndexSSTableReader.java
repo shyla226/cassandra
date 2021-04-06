@@ -1112,7 +1112,8 @@ public class TrieIndexSSTableReader extends SSTableReader
      * @param sstableMetadata the sstable metadata, for extracting and changing the FP chance
      * @param fpChance the current FP chance taken from the table metadata
      */
-    private static @Nonnull IFilter getBloomFilter(Descriptor descriptor, boolean loadIfNeeded, boolean recreateIfNeeded, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
+    @VisibleForTesting
+    static @Nonnull IFilter getBloomFilter(Descriptor descriptor, boolean loadIfNeeded, boolean recreateIfNeeded, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
     {
         if (Math.abs(1 - fpChance) <= fpChanceTolerance)
         {
@@ -1210,7 +1211,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         boolean recreatedBFIfNeeded = !isOffline;
 
         try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor).compressed(compressedData);
-             IFilter bf = getBloomFilter(descriptor, loadBFIfNeeded, recreatedBFIfNeeded, metadata.get(), statsMetadata.totalRows, sstableMetadata, fpChance))
+             @Nonnull IFilter bf = getBloomFilter(descriptor, loadBFIfNeeded, recreatedBFIfNeeded, metadata.get(), statsMetadata.totalRows, sstableMetadata, fpChance))
         {
             TrieIndexSSTableReader sstable;
             dataFH = dataFHBuilder.complete();
