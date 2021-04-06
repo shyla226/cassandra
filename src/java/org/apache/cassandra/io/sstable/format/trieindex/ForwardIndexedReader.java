@@ -24,14 +24,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.rows.DeserializationHelper;
-import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.Rebufferer;
 
 class ForwardIndexedReader extends ForwardReader
 {
     private final RowIndexReader indexReader;
-    long basePosition;
+    final long basePosition;
 
     ForwardIndexedReader(TrieIndexSSTableReader sstable,
                          TrieIndexEntry indexEntry,

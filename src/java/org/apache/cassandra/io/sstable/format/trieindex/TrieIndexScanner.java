@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -142,12 +143,12 @@ public class TrieIndexScanner implements ISSTableScanner
 
     private static void addRange(SSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)
     {
-        if (requested instanceof Range && ((Range)requested).isWrapAround())
+        if (requested instanceof Range && ((Range<?>) requested).isWrapAround())
         {
             if (requested.right.compareTo(sstable.first) >= 0)
             {
                 // since we wrap, we must contain the whole sstable prior to stopKey()
-                Boundary<PartitionPosition> left = new Boundary<PartitionPosition>(sstable.first, true);
+                Boundary<PartitionPosition> left = new Boundary<>(sstable.first, true);
                 Boundary<PartitionPosition> right;
                 right = requested.rightBoundary();
                 right = minRight(right, sstable.last, true);
@@ -157,7 +158,7 @@ public class TrieIndexScanner implements ISSTableScanner
             if (requested.left.compareTo(sstable.last) <= 0)
             {
                 // since we wrap, we must contain the whole sstable after dataRange.startKey()
-                Boundary<PartitionPosition> right = new Boundary<PartitionPosition>(sstable.last, true);
+                Boundary<PartitionPosition> right = new Boundary<>(sstable.last, true);
                 Boundary<PartitionPosition> left;
                 left = requested.leftBoundary();
                 left = maxLeft(left, sstable.first, true);
@@ -173,7 +174,7 @@ public class TrieIndexScanner implements ISSTableScanner
             right = requested.rightBoundary();
             left = maxLeft(left, sstable.first, true);
             // apparently isWrapAround() doesn't count Bounds that extend to the limit (min) as wrapping
-            right = requested.right.isMinimum() ? new Boundary<PartitionPosition>(sstable.last, true)
+            right = requested.right.isMinimum() ? new Boundary<>(sstable.last, true)
                                                     : minRight(right, sstable.last, true);
             if (!isEmpty(left, right))
                 boundsList.add(AbstractBounds.bounds(left, right));
@@ -310,7 +311,7 @@ public class TrieIndexScanner implements ISSTableScanner
                 {
                     // Store currentEntry referency during object instantination as later (during initialize) the
                     // reference may point to a different entry.
-                    private RowIndexEntry<?> rowIndexEntry = currentEntry;
+                    private final RowIndexEntry<?> rowIndexEntry = currentEntry;
 
                     protected UnfilteredRowIterator initializeIterator()
                     {
@@ -327,7 +328,7 @@ public class TrieIndexScanner implements ISSTableScanner
                             else
                             {
                                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                                return sstable.iterator(dfile, partitionKey(), rowIndexEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed());
+                                return sstable.iterator(dfile, false, partitionKey(), rowIndexEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed());
                             }
                         }
                         catch (CorruptSSTableException e)
@@ -357,10 +358,7 @@ public class TrieIndexScanner implements ISSTableScanner
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "(" +
-               "dfile=" + dfile +
-               " sstable=" + sstable +
-               ")";
+        return String.format("%s(dfile=%s sstable=%s)", getClass().getSimpleName(), dfile, sstable);
     }
 
     public static class EmptySSTableScanner extends AbstractUnfilteredPartitionIterator implements ISSTableScanner
@@ -409,7 +407,7 @@ public class TrieIndexScanner implements ISSTableScanner
 
         public UnfilteredRowIterator next()
         {
-            return null;
+            throw new NoSuchElementException();
         }
 
         @Override

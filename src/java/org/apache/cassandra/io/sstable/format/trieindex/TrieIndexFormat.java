@@ -23,15 +23,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.dht.IPartitioner;
@@ -52,7 +48,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 import static org.apache.cassandra.io.sstable.SSTable.componentsFor;
@@ -64,11 +60,9 @@ import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaul
  */
 public class TrieIndexFormat implements SSTableFormat
 {
-    private final static Logger logger = LoggerFactory.getLogger(TrieIndexFormat.class);
-
     // Data, primary index and row index (which may be 0-length) are required.
     // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
-    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA,
+    private static final Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA,
                                                                 Component.PARTITION_INDEX,
                                                                 Component.ROW_INDEX,
                                                                 Component.STATS);
@@ -96,8 +90,6 @@ public class TrieIndexFormat implements SSTableFormat
     public static final Version latestVersion = new TrieIndexVersion(TrieIndexVersion.current_version);
     static final ReaderFactory readerFactory = new ReaderFactory();
     static final WriterFactory writerFactory = new WriterFactory();
-
-    private static final Pattern VALIDATION = Pattern.compile("[a-z]+");
 
     private TrieIndexFormat()
     {
@@ -175,6 +167,7 @@ public class TrieIndexFormat implements SSTableFormat
 
     static class ReaderFactory implements SSTableReader.Factory
     {
+        @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
         @Override
         public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata)
         {
@@ -182,7 +175,7 @@ public class TrieIndexFormat implements SSTableFormat
             boolean compressedData = new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists();
             try
             {
-                StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
+                @SuppressWarnings("unused") StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
 
                 try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
                      FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
@@ -199,19 +192,7 @@ public class TrieIndexFormat implements SSTableFormat
             }
             catch (IOException e)
             {
-                throw new RuntimeException(e);
-            }
-        }
-
-        public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
-        {
-            File indexFile = new File(descriptor.filenameFor(Component.PARTITION_INDEX));
-            if (!indexFile.exists())
-                return null;
-            try (FileHandle.Builder fhBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
-            {
-                return Pair.create(pIndex.firstKey(), pIndex.lastKey());
+                throw Throwables.cleaned(e);
             }
         }
 

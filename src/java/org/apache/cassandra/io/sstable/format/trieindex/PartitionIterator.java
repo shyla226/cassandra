@@ -19,7 +19,6 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.StringJoiner;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -28,7 +27,6 @@ import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 
@@ -54,7 +52,6 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     /**
      * Note: For performance reasons this class does not request a reference of the files it uses.
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
-     * See {@link TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
      */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile,
                       PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight) throws IOException
@@ -79,7 +76,6 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     /**
      * Note: For performance reasons this class does not request a reference of the files it uses.
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
-     * See {@link TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
      */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile) throws IOException
     {
@@ -227,7 +223,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     }
 
     @Override
-    public void indexPosition(long position) throws IOException
+    public void indexPosition(long position)
     {
         throw new UnsupportedOperationException();
     }
@@ -239,7 +235,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     }
 
     @Override
-    public void reset() throws IOException
+    public void reset()
     {
         go(root);
     }

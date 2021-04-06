@@ -46,7 +46,7 @@ import org.apache.cassandra.io.util.FileDataInput;
  */
 class ReverseReader extends AbstractReader
 {
-    LongStack rowOffsets = new LongStack();
+    final LongStack rowOffsets = new LongStack();
     DeletionTime sliceOpenMarker, sliceCloseMarker;
     boolean foundLessThan;
     long startPos = -1;
@@ -114,7 +114,7 @@ class ReverseReader extends AbstractReader
         return prepStep(end);
     }
 
-    boolean preStep(ClusteringBound start) throws IOException
+    boolean preStep(ClusteringBound<?> start) throws IOException
     {
         assert filePos == file.getFilePointer();
         if (skipSmallerRow(start))
@@ -129,7 +129,7 @@ class ReverseReader extends AbstractReader
         }
     }
 
-    boolean prepStep(ClusteringBound end) throws IOException
+    boolean prepStep(ClusteringBound<?> end) throws IOException
     {
         // filePos could be in the middle of a row when prepSteps finish
         if (skipSmallerRow(end))

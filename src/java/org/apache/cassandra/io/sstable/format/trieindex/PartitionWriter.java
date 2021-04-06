@@ -64,8 +64,8 @@ class PartitionWriter implements AutoCloseable
     private int written;
     private long previousRowStart;
 
-    private ClusteringPrefix firstClustering;
-    private ClusteringPrefix lastClustering;
+    private ClusteringPrefix<?> firstClustering;
+    private ClusteringPrefix<?> lastClustering;
 
     private DeletionTime openMarker = DeletionTime.LIVE;
     private DeletionTime startOpenMarker = DeletionTime.LIVE;
@@ -121,10 +121,9 @@ class PartitionWriter implements AutoCloseable
         ByteBufferUtil.writeWithShortLength(partitionKey.getKey(), writer);
 
         long deletionTimePosition = writer.position();
-        DeletionTime deletionTime = partitionLevelDeletion;
-        DeletionTime.serializer.serialize(deletionTime, writer);
+        DeletionTime.serializer.serialize(partitionLevelDeletion, writer);
         if (!observers.isEmpty())
-            observers.forEach(o -> o.partitionLevelDeletion(deletionTime, deletionTimePosition));
+            observers.forEach(o -> o.partitionLevelDeletion(partitionLevelDeletion, deletionTimePosition));
         state = header.hasStatic() ? State.AWAITING_STATIC_ROW : State.AWAITING_ROWS;
     }
 

@@ -60,8 +60,6 @@ public class PartitionIndexBuilder implements AutoCloseable
     private DecoratedKey lastWrittenKey;
     private PartitionIndex.Payload lastPayload;
 
-
-    @SuppressWarnings("resource")
     public PartitionIndexBuilder(SequentialWriter writer, FileHandle.Builder fhBuilder)
     {
         this.writer = writer;
@@ -112,7 +110,6 @@ public class PartitionIndexBuilder implements AutoCloseable
 
         try (FileHandle fh = fhBuilder.complete(writer.getLastFlushOffset()))
         {
-            @SuppressWarnings("resource")   // consumer to close
             PartitionIndex pi = new PartitionIndexEarly(fh, partialIndexTail.root(), partialIndexTail.count(), firstKey, partialIndexLastKey, partialIndexTail.cutoff(), partialIndexTail.tail());
             partialIndexConsumer.accept(pi);
             partialIndexConsumer = null;

@@ -85,6 +85,7 @@ import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.big.BigTableWriter.compressionFor;
 
@@ -144,11 +145,10 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                                        descriptor.fileFor(Component.DIGEST),
                                                        WRITER_OPTION);
         }
-        dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(compression)
-                                                                                 .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap);
+
+        dbuilder = defaultDataHandleBuilder(descriptor).compressed(compression);
         chunkCache.ifPresent(dbuilder::withChunkCache);
         iwriter = new IndexWriter(metadata.get());
-
         partitionWriter = new PartitionWriter(this.header, metadata().comparator, dataFile, iwriter.rowIndexFile, descriptor.version, this.observers);
     }
 

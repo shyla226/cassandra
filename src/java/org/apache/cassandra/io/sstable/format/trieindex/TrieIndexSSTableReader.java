@@ -37,6 +37,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import javax.annotation.Nonnull;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -46,7 +48,6 @@ import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -62,7 +63,6 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
-import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
@@ -75,7 +75,6 @@ import org.apache.cassandra.io.sstable.Downsampling;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
@@ -111,6 +110,7 @@ import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.readStaticRow;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
@@ -137,32 +137,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, null, dfile, null, bf);
         this.rowIndexFile = rowIndexFile;
         this.partitionIndex = partitionIndex;
-    }
-
-    protected void releaseIndex()
-    {
-        if (rowIndexFile != null)
-        {
-            rowIndexFile.close();
-            rowIndexFile = null;
-        }
-
-        if (partitionIndex != null)
-        {
-            partitionIndex.close();
-            partitionIndex = null;
-        }
-    }
-
-    /**
-     * Clone this reader with the new open reason and set the clone as replacement.
-     *
-     * @param openReason the {@code OpenReason} for the replacement.
-     * @return the cloned reader. That reader is set as a replacement by the method.
-     */
-    protected SSTableReader clone(OpenReason openReason)
-    {
-        return cloneInternal(first, openReason, bf.sharedCopy());
     }
 
     /**
@@ -223,60 +197,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         partitionIndex.addTo(identities);
     }
 
-    public void verifyComponent(Component component) throws IOException
-    {
-        switch (component.type)
-        {
-            case PARTITION_INDEX:
-                verifyPartitionIndex();
-                break;
-            case ROW_INDEX:
-                verifyRowIndex();
-                break;
-            case FILTER:
-                verifyBloomFilter();
-                break;
-            default:
-                // just ignore anything else
-                break;
-        }
-    }
-
-    private void verifyBloomFilter() throws IOException
-    {
-        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER)))));
-             IFilter bf = BloomFilterSerializer.deserialize(stream, descriptor.version.hasOldBfFormat()))
-        {
-        }
-    }
-
-    private void verifyRowIndex() throws IOException
-    {
-        try (PartitionIndexIterator keyIter = TrieIndexFormat.readerFactory.indexIterator(descriptor, metadata()))
-        {
-            while (true)
-            {
-                keyIter.advance();
-                DecoratedKey key = metadata().partitioner.decorateKey(keyIter.key());
-                if (key == null)
-                    break;
-            }
-        }
-    }
-
-    private void verifyPartitionIndex() throws IOException
-    {
-        StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-        try (FileHandle.Builder builder = forVerify(defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
-             PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
-             IndexPosIterator iter = index.allKeysIterator())
-        {
-            while (iter.nextIndexPos() != PartitionIndex.NOT_FOUND)
-            {
-            }
-        }
-    }
-
     protected boolean filterFirst()
     {
         return openReason == OpenReason.MOVED_START;
@@ -299,7 +219,6 @@ public class TrieIndexSSTableReader extends SSTableReader
                                   Slices slices,
                                   boolean reversed,
                                   DecoratedKey key)
-    throws IOException
     {
         return indexEntry.isIndexed()
                ? reversed
@@ -413,41 +332,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         return first.compareTo(dk) <= 0 && last.compareTo(dk) >= 0 && bf.isPresent(dk);
     }
 
-    public boolean contains(DecoratedKey dk)
-    {
-        if (!inBloomFilter(dk))
-            return false;
-        if (filterFirst() && first.compareTo(dk) > 0)
-            return false;
-        if (filterLast() && last.compareTo(dk) < 0)
-            return false;
-
-        try (PartitionIndex.Reader reader = partitionIndex.openReader())
-        {
-            long indexPos = reader.exactCandidate(dk);
-            if (indexPos == PartitionIndex.NOT_FOUND)
-                return false;
-
-            try (FileDataInput in = createIndexOrDataReader(indexPos))
-            {
-                return ByteBufferUtil.equalsWithShortLength(in, dk.getKey());
-            }
-        }
-        catch (IOException e)
-        {
-            markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
-        }
-    }
-
-    FileDataInput createIndexOrDataReader(long indexPos)
-    {
-        if (indexPos >= 0)
-            return rowIndexFile.createReader(indexPos);
-        else
-            return dfile.createReader(~indexPos);
-    }
-
     @Override
     public DecoratedKey keyAt(RandomAccessReader reader, long dataPosition) throws IOException
     {
@@ -506,54 +390,39 @@ public class TrieIndexSSTableReader extends SSTableReader
                 return null;
             }
 
-            FileDataInput toClose = null;
-            try
+            FileDataInput in;
+            FileHandle fh;
+            long seekPosition;
+            if (indexPos >= 0)
             {
-                FileDataInput in;
-                if (indexPos >= 0)
-                {
-                    in = rowIndexInput;
-                    if (in == null)
-                    {
-                        in = rowIndexFile.createReader(indexPos);
-                        toClose = in;
-                    }
-                    else
-                        in.seek(indexPos);
-                }
-                else
-                {
-                    in = dataInput;
-                    if (in == null)
-                    {
-                        in = dfile.createReader(~indexPos);
-                        toClose = in;
-                    }
-                    else
-                        in.seek(~indexPos);
-                }
-
-                if (!ByteBufferUtil.equalsWithShortLength(in, dk.getKey()))
-                {
-                    if (updateStats)
-                        bloomFilterTracker.addFalsePositive();
-                    listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
-                    return null;
-                }
-
-                if (updateStats)
-                    bloomFilterTracker.addTruePositive();
-                RowIndexEntry<?> entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
-                                                       : new RowIndexEntry<>(~indexPos);
-
-                listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
-                return entry;
+                in = rowIndexInput;
+                fh = rowIndexFile;
+                seekPosition = indexPos;
             }
-            finally
+            else
             {
-                if (toClose != null)
-                    toClose.close();
+                in = dataInput;
+                fh = dfile;
+                seekPosition = ~indexPos;
             }
+
+            if (in != null)
+            {
+                in.seek(seekPosition);
+                return ByteBufferUtil.equalsWithShortLength(in, dk.getKey())
+                       ? handleKeyFound(updateStats, listener, in, indexPos)
+                       : handleKeyNotFound(updateStats, listener);
+            }
+            else
+            {
+                try (FileDataInput tmpIn = fh.createReader(seekPosition))
+                {
+                    return ByteBufferUtil.equalsWithShortLength(tmpIn, dk.getKey())
+                           ? handleKeyFound(updateStats, listener, tmpIn, indexPos)
+                           : handleKeyNotFound(updateStats, listener);
+                }
+            }
+
         }
         catch (IOException e)
         {
@@ -562,20 +431,31 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
+    private RowIndexEntry<?> handleKeyNotFound(boolean updateStats, SSTableReadsListener listener) {
+        if (updateStats)
+            bloomFilterTracker.addFalsePositive();
+        listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
+        return null;
+    }
+
+    private RowIndexEntry<?> handleKeyFound(boolean updateStats, SSTableReadsListener listener, FileDataInput in, long indexPos) throws IOException {
+        if (updateStats)
+            bloomFilterTracker.addTruePositive();
+        RowIndexEntry<?> entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
+                                               : new RowIndexEntry<>(~indexPos);
+
+        listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
+        return entry;
+    }
+
     public RowIndexEntry<?> getExactPosition(DecoratedKey dk, SSTableReadsListener listener, boolean updateStats)
     {
         return getExactPosition(dk, listener, null, null, updateStats);
     }
 
-    protected FileHandle[] getFilesToBeLocked()
-    {
-        return new FileHandle[]{ partitionIndex.getFileHandle(), rowIndexFile, dfile };
-    }
-
     /**
      * @param bounds Must not be wrapped around ranges
      * @return PartitionIndexIterator within the given bounds
-     * @throws IOException
      */
     public PartitionIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds) throws IOException
     {
@@ -599,7 +479,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         KeysRange(AbstractBounds<PartitionPosition> bounds)
         {
-            assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : "[" + bounds.left + "," + bounds.right + "]";
+            assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : String.format("[%s,%s]", bounds.left, bounds.right);
 
             left = bounds.left;
             inclusiveLeft = bounds.inclusiveLeft();
@@ -658,6 +538,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
+
         Iterator<IndexPosIterator> partitionKeyIterators = TrieIndexScanner.makeBounds(this, Collections.singleton(range))
                                                                            .stream()
                                                                            .map(this::indexPosIteratorForRange)
@@ -666,66 +547,59 @@ public class TrieIndexSSTableReader extends SSTableReader
         if (!partitionKeyIterators.hasNext())
             return Collections.emptyList();
 
-        return new Iterable<DecoratedKey>()
+        return () -> new AbstractIterator<DecoratedKey>()
         {
-            @Override
-            public Iterator<DecoratedKey> iterator()
+            IndexPosIterator currentItr = partitionKeyIterators.next();
+            long count = -1;
+
+            private long getNextPos() throws IOException
             {
-                return new AbstractIterator<DecoratedKey>()
+                long pos;
+                while ((pos = currentItr.nextIndexPos()) == PartitionIndex.NOT_FOUND
+                       && partitionKeyIterators.hasNext())
                 {
-                    IndexPosIterator currentItr = partitionKeyIterators.next();
-                    long count = -1;
+                    closeCurrentIt();
+                    currentItr = partitionKeyIterators.next();
+                }
+                return pos;
+            }
 
-                    private long getNextPos() throws IOException
-                    {
-                        long pos = PartitionIndex.NOT_FOUND;
-                        while ((pos = currentItr.nextIndexPos()) == PartitionIndex.NOT_FOUND
-                               && partitionKeyIterators.hasNext())
-                        {
-                            closeCurrentIt();
-                            currentItr = partitionKeyIterators.next();
-                        }
-                        return pos;
-                    }
+            private void closeCurrentIt()
+            {
+                if (currentItr != null)
+                    currentItr.close();
+                currentItr = null;
+            }
 
-                    private void closeCurrentIt()
+            @Override
+            protected DecoratedKey computeNext()
+            {
+                try
+                {
+                    while (true)
                     {
-                        if (currentItr != null)
-                            currentItr.close();
-                        currentItr = null;
-                    }
-
-                    @Override
-                    protected DecoratedKey computeNext()
-                    {
-                        try
+                        long pos = getNextPos();
+                        count++;
+                        if (pos == PartitionIndex.NOT_FOUND)
+                            break;
+                        if (count % Downsampling.BASE_SAMPLING_LEVEL == 0)
                         {
-                            while (true)
-                            {
-                                long pos = getNextPos();
-                                count++;
-                                if (pos == PartitionIndex.NOT_FOUND)
-                                    break;
-                                if (count % Downsampling.BASE_SAMPLING_LEVEL == 0)
-                                {
-                                    // handle exclusive start and exclusive end
-                                    DecoratedKey key = getKeyByPos(pos);
-                                    if (range.contains(key.getToken()))
-                                        return key;
-                                    count--;
-                                }
-                            }
-                            closeCurrentIt();
-                            return endOfData();
-                        }
-                        catch (IOException e)
-                        {
-                            closeCurrentIt();
-                            markSuspect();
-                            throw new CorruptSSTableException(e, dfile.path());
+                            // handle exclusive start and exclusive end
+                            DecoratedKey key = getKeyByPos(pos);
+                            if (range.contains(key.getToken()))
+                                return key;
+                            count--;
                         }
                     }
-                };
+                    closeCurrentIt();
+                    return endOfData();
+                }
+                catch (IOException e)
+                {
+                    closeCurrentIt();
+                    markSuspect();
+                    throw new CorruptSSTableException(e, dfile.path());
+                }
             }
         };
     }
@@ -786,12 +660,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         return (long) (selectedDataSize / sstableMetadata.estimatedPartitionSize.rawMean());
     }
 
-    protected FileHandle.Builder forVerify(FileHandle.Builder builder)
-    {
-        return builder.withChunkCache(null)
-                      .mmapped(false);
-    }
-
     @Override
     public UnfilteredRowIterator iterator(DecoratedKey key,
                                           Slices slices,
@@ -800,10 +668,19 @@ public class TrieIndexSSTableReader extends SSTableReader
                                           SSTableReadsListener listener)
     {
         RowIndexEntry<?> rie = getExactPosition(key, listener, true);
-        return iterator(null, key, rie, slices, selectedColumns, reversed);
+        RandomAccessReader dataFileInput = openDataReader();
+        try
+        {
+            return iterator(dataFileInput, true, key, rie, slices, selectedColumns, reversed);
+        }
+        catch (CorruptSSTableException ex)
+        {
+            throw Throwables.cleaned(Throwables.close(ex, dataFileInput));
+        }
     }
 
     public UnfilteredRowIterator iterator(FileDataInput dataFileInput,
+                                          boolean shouldCloseFile,
                                           DecoratedKey key,
                                           RowIndexEntry<?> indexEntry,
                                           Slices slices,
@@ -812,13 +689,6 @@ public class TrieIndexSSTableReader extends SSTableReader
     {
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
-
-        boolean shouldCloseFile = false;
-        if (dataFileInput == null)
-        {
-            dataFileInput = openDataReader();
-            shouldCloseFile = true;
-        }
 
         DeletionTime partitionLevelDeletion;
         Row staticRow;
@@ -849,7 +719,6 @@ public class TrieIndexSSTableReader extends SSTableReader
             if (!partitionLevelDeletion.validate())
                 UnfilteredValidation.handleInvalid(metadata(), key, this, "partitionLevelDeletion=" + partitionLevelDeletion.toString());
 
-            @SuppressWarnings("resource")   // Closed with iterator (whose constructor can't throw)
             PartitionReader reader = reader(dataFileInput, shouldCloseFile, indexEntry, helper, slices, reversed, key);
             return new AbstractUnfilteredRowIterator(metadata(), key, partitionLevelDeletion, selectedColumns.fetchedColumns(), staticRow, reversed, stats())
             {
@@ -889,17 +758,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         catch (IOException e)
         {
             markSuspect();
-            if (shouldCloseFile)
-            {
-                try
-                {
-                    dataFileInput.close();
-                }
-                catch (IOException suppressed)
-                {
-                    e.addSuppressed(suppressed);
-                }
-            }
             throw new CorruptSSTableException(e, dfile.path());
         }
     }
@@ -910,32 +768,6 @@ public class TrieIndexSSTableReader extends SSTableReader
          * Returns next item or null if exhausted.
          */
         Unfiltered next() throws IOException;
-
-        /**
-         * Resets the state as it was before the last attempted next() call.
-         */
-        void resetReaderState() throws IOException;
-    }
-
-    static Row readStaticRow(SSTableReader sstable,
-                             FileDataInput file,
-                             DeserializationHelper helper,
-                             Columns statics) throws IOException
-    {
-        if (!sstable.header.hasStatic())
-            return Rows.EMPTY_STATIC_ROW;
-
-        UnfilteredSerializer serializer = UnfilteredSerializer.serializer;
-
-        if (statics.isEmpty())
-        {
-            serializer.skipStaticRow(file, sstable.header, helper);
-            return Rows.EMPTY_STATIC_ROW;
-        }
-        else
-        {
-            return serializer.deserializeStaticRow(file, sstable.header, helper);
-        }
     }
 
     @Override
@@ -1060,7 +892,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
+    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel)
     {
         // nothing to do here, the method updates something in index summary which is missing in trie index impl
         return cloneInternal(first, openReason, bf.sharedCopy());
@@ -1280,7 +1112,7 @@ public class TrieIndexSSTableReader extends SSTableReader
      * @param sstableMetadata the sstable metadata, for extracting and changing the FP chance
      * @param fpChance the current FP chance taken from the table metadata
      */
-    private static IFilter getBloomFilter(Descriptor descriptor, boolean loadIfNeeded, boolean recreateIfNeeded, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
+    private static @Nonnull IFilter getBloomFilter(Descriptor descriptor, boolean loadIfNeeded, boolean recreateIfNeeded, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
     {
         if (Math.abs(1 - fpChance) <= fpChanceTolerance)
         {

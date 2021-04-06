@@ -19,7 +19,6 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.Closeable;
 import java.io.DataOutput;
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
@@ -124,7 +123,7 @@ public class PartitionIndex implements Closeable
             Payload payload = node.payload();
             if (payload != null)
             {
-                int payloadBits = 0;
+                int payloadBits;
                 int size = SizedInts.nonZeroSize(payload.position);
                 payloadBits = 7 + size;
                 type.serialize(dest, node, payloadBits, nodePosition);
@@ -193,11 +192,7 @@ public class PartitionIndex implements Closeable
                 logger.trace("Checksum {}", csum);      // Note: trace is required so that reads aren't optimized away.
             }
 
-            DecoratedKey filterFirst = null;
-            DecoratedKey filterLast = null;
-
-
-            return new PartitionIndex(fh, root, keyCount, first, last, filterFirst, filterLast);
+            return new PartitionIndex(fh, root, keyCount, first, last, null, null);
         }
     }
 
@@ -354,6 +349,7 @@ public class PartitionIndex implements Closeable
         /**
          * To be used only in analysis.
          */
+        @SuppressWarnings("unused")
         protected int payloadSize()
         {
             int bytes = payloadFlags();
@@ -389,7 +385,7 @@ public class PartitionIndex implements Closeable
         /**
          * Returns the position in the row index or data file.
          */
-        protected long nextIndexPos() throws IOException
+        protected long nextIndexPos()
         {
             // The IndexInfo read below may trigger a NotInCacheException. To be able to resume from that
             // without missing positions, we save and reuse the unreturned position.
@@ -410,9 +406,10 @@ public class PartitionIndex implements Closeable
     /**
      * debug/test code
      */
+    @SuppressWarnings("unused")
     private void dumpTrie(String fileName)
     {
-        try(PrintStream ps = new PrintStream(new File(fileName)))
+        try(PrintStream ps = new PrintStream(fileName))
         {
             dumpTrie(ps);
         }
