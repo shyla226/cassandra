@@ -175,13 +175,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public static final Ordering<SSTableReader> sstableOrdering = Ordering.from(sstableComparator);
 
-    public static final Comparator<SSTableReader> sizeComparator = new Comparator<SSTableReader>()
-    {
-        public int compare(SSTableReader o1, SSTableReader o2)
-        {
-            return Longs.compare(o1.onDiskLength(), o2.onDiskLength());
-        }
-    };
+    public static final Comparator<? super SSTableReader> sizeComparator = (o1, o2) -> Longs.compare(o1.onDiskLength(), o2.onDiskLength());
 
     /**
      * maxDataAge is a timestamp in local server time (e.g. System.currentTimeMilli) which represents an upper bound
@@ -246,7 +240,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param sstables SSTables to calculate key count
      * @return estimated key count
      */
-    public static long getApproximateKeyCount(Iterable<SSTableReader> sstables)
+    public static long getApproximateKeyCount(Iterable<? extends SSTableReader> sstables)
     {
         long count = -1;
 
@@ -767,7 +761,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * @param task to be guarded by sstable lock
      */
-    public <R> R runWithLock(CheckedFunction<Descriptor, R, IOException> task) throws IOException
+    public <R, E extends Exception> R runWithLock(CheckedFunction<Descriptor, R, E> task) throws E
     {
         synchronized (tidy.global)
         {

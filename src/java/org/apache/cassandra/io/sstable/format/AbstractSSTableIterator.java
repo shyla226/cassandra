@@ -154,7 +154,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry<?>> implem
      */
     protected abstract boolean hasMoreSlices();
 
-    private static Row readStaticRow(SSTableReader sstable,
+    public static Row readStaticRow(SSTableReader sstable,
                                      FileDataInput file,
                                      DeserializationHelper helper,
                                      Columns statics) throws IOException

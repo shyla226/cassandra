@@ -119,7 +119,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         logger.trace("Index summaries for compacting SSTables are using {} MB of space",
                      (memoryPoolBytes - remainingBytes) / 1024.0 / 1024.0);
         List<SSTableReader> newSSTables;
-        try (Refs<SSTableReader> refs = Refs.ref(sstablesByHotness))
+        try (Refs<? extends SSTableReader> refs = Refs.ref(sstablesByHotness))
         {
             newSSTables = adjustSamplingLevels(sstablesByHotness, transactions, totalReadsPerSec, remainingBytes);
 

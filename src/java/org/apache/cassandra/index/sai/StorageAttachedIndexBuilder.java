@@ -140,7 +140,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         CountDownLatch perSSTableFileLock = null;
         StorageAttachedIndexWriter indexWriter = null;
 
-        Ref<SSTableReader> ref = sstable.tryRef();
+        Ref<? extends SSTableReader> ref = sstable.tryRef();
         if (ref == null)
         {
             logger.warn(logMessage("Couldn't acquire reference to the SSTable {}. It may have been removed."), sstable.descriptor);
@@ -176,7 +176,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                     indexWriter.startPartition(key, keyPosition);
 
-                    RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                    RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
                     dataFile.seek(indexEntry.position);
                     ByteBufferUtil.skipShortLength(dataFile); // key
 
