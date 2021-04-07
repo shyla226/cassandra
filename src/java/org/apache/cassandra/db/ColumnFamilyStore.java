@@ -90,7 +90,6 @@ import org.apache.cassandra.streaming.TableStreamManager;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
-import org.apache.cassandra.utils.memory.MemtablePool;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
@@ -1083,7 +1082,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             try
             {
-                boolean first = false;
+                boolean first = true;
                 // Flush "data" memtable with non-cf 2i first;
                 for (Map.Entry<ColumnFamilyStore, Memtable> entry : memtables.entrySet())
                 {
@@ -1476,7 +1475,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         // skip snapshot creation during scrub, SEE JIRA 5891
         if(!disableSnapshot)
-            snapshotWithoutFlush("pre-scrub-" + System.currentTimeMillis());
+            snapshotWithoutMemtable("pre-scrub-" + System.currentTimeMillis());
 
         try
         {
@@ -1778,15 +1777,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return metadata().comparator;
     }
 
-    public void snapshotWithoutFlush(String snapshotName)
+    public void snapshotWithoutMemtable(String snapshotName)
     {
-        snapshotWithoutFlush(snapshotName, null, false, null);
+        snapshotWithoutMemtable(snapshotName, null, false, null);
     }
 
     /**
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned during next startup
      */
-    public Set<SSTableReader> snapshotWithoutFlush(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, RateLimiter rateLimiter)
+    public Set<SSTableReader> snapshotWithoutMemtable(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, RateLimiter rateLimiter)
     {
         if (rateLimiter == null)
             rateLimiter = DatabaseDescriptor.getSnapshotRateLimiter();
@@ -1951,32 +1950,32 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * Take a snap shot of this columnfamily store.
      *
      * @param snapshotName the name of the associated with the snapshot
-     * @param skipFlush Skip blocking flush of memtable
+     * @param skipMemtable Skip flushing the memtable
      * @param rateLimiter Rate limiter for hardlinks-per-second
      */
-    public Set<SSTableReader> snapshot(String snapshotName, boolean skipFlush, RateLimiter rateLimiter)
+    public Set<SSTableReader> snapshot(String snapshotName, boolean skipMemtable, RateLimiter rateLimiter)
     {
-        return snapshot(snapshotName, null, false, skipFlush, rateLimiter);
+        return snapshot(snapshotName, null, false, skipMemtable, rateLimiter);
     }
 
 
     /**
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned up during next startup
-     * @param skipFlush Skip blocking flush of memtable
+     * @param skipMemtable Skip flushing the memtable
      */
-    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, boolean skipFlush)
+    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, boolean skipMemtable)
     {
-        return snapshot(snapshotName, predicate, ephemeral, skipFlush, null);
+        return snapshot(snapshotName, predicate, ephemeral, skipMemtable, null);
     }
 
     /**
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned up during next startup
-     * @param skipFlush Skip blocking flush of memtable
+     * @param skipMemtable Skip flushing the memtable
      * @param rateLimiter Rate limiter for hardlinks-per-second
      */
-    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, boolean skipFlush, RateLimiter rateLimiter)
+    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, boolean skipMemtable, RateLimiter rateLimiter)
     {
-        if (!skipFlush)
+        if (!skipMemtable)
         {
             Memtable current = getTracker().getView().getCurrentMemtable();
             if (current.shouldSwitch(FlushReason.SNAPSHOT))
@@ -1984,7 +1983,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             else
                 current.performSnapshot(snapshotName);
         }
-        return snapshotWithoutFlush(snapshotName, predicate, ephemeral, rateLimiter);
+        return snapshotWithoutMemtable(snapshotName, predicate, ephemeral, rateLimiter);
     }
 
     public boolean snapshotExists(String snapshotName)
