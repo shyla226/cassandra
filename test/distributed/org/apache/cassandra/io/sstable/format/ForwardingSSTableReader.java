@@ -762,4 +762,11 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     {
         return delegate.getBounds();
     }
+
+    @Override
+    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    {
+        return delegate.scrubPartitionsIterator();
+    }
+
 }

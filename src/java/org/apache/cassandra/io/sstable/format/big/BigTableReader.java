@@ -41,6 +41,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -315,5 +316,13 @@ public class BigTableReader extends SSTableReader
         if (reader.isEOF()) return null;
 
         return decorateKey(ByteBufferUtil.readWithShortLength(reader));
+    }
+
+    @Override
+    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    {
+        if (ifile == null)
+            return null;
+        return new ScrubIterator(ifile, rowIndexEntrySerializer);
     }
 }

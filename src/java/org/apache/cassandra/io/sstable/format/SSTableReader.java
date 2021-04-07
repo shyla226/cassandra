@@ -683,6 +683,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
 
+    /**
+     * Partition iterator used only for scrubing (see {@link Scrubber} and {@link ScrubPartitionIterator}).
+     *
+     * @return iterator for scrubing or {@code null} if this {@link SSTableReader} doesn't have the iterator
+     * implemenation (this may be the case if there is no index file for the iterator)
+     */
+    public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
+
     public boolean equals(Object that)
     {
         return that instanceof SSTableReader && ((SSTableReader) that).descriptor.equals(this.descriptor);

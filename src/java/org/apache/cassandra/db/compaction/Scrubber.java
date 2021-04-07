@@ -24,7 +24,7 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -56,7 +56,7 @@ public class Scrubber implements Closeable
     private final long expectedBloomFilterSize;
 
     private final RandomAccessReader dataFile;
-    private final PartitionIndexIterator indexIterator;
+    private ScrubPartitionIterator indexIterator;
     private final ScrubInfo scrubInfo;
 
     private int goodRows;
@@ -137,11 +137,11 @@ public class Scrubber implements Closeable
             outputHandler.output("Starting scrub with reinsert overflowed TTL option");
     }
 
-    private PartitionIndexIterator openIndexIterator()
+    private ScrubPartitionIterator openIndexIterator()
     {
         try
         {
-            return sstable.allKeysIterator();
+            return sstable.scrubPartitionsIterator();
         }
         catch (IOException e)
         {
@@ -360,7 +360,15 @@ public class Scrubber implements Closeable
     {
         try
         {
-            return indexAvailable() && indexIterator.advance();
+            if (indexAvailable())
+            {
+                indexIterator.advance();
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
         catch (Throwable th)
         {
