@@ -172,7 +172,7 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "nb";
+        public static final String current_version = "nc";
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
@@ -180,9 +180,11 @@ public class BigFormat implements SSTableFormat
         // mb (3.0.7, 3.7): commit log lower bound included
         // mc (3.0.8, 3.9): commit log intervals included
         // md (3.0.18, 3.11.4): corrected sstable min/max clustering
+        // me (DSE 6.8): originating host id TODO make sure this is the last version in m group before merging to upstream
 
         // na (4.0.0): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
         // nb (4.1.0): improved min/max
+        // nc (DSE 6.8): originating host id TODO make sure this is the last version in n group before merging to upstream
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
@@ -197,6 +199,7 @@ public class BigFormat implements SSTableFormat
         private final boolean hasPendingRepair;
         private final boolean hasMetadataChecksum;
         private final boolean hasIsTransient;
+        private final boolean hasOriginatingHostId;
 
         /**
          * CASSANDRA-9067: 4.0 bloom filter representation changed (two longs just swapped)
@@ -221,6 +224,7 @@ public class BigFormat implements SSTableFormat
             hasIsTransient = version.compareTo("na") >= 0;
             hasMetadataChecksum = version.compareTo("na") >= 0;
             hasOldBfFormat = version.compareTo("na") < 0;
+            hasOriginatingHostId = version.matches("(m[e-z])|(n[c-z])");
         }
 
         @Override
@@ -241,6 +245,7 @@ public class BigFormat implements SSTableFormat
             return hasCommitLogIntervals;
         }
 
+        @Override
         public boolean hasPendingRepair()
         {
             return hasPendingRepair;
@@ -282,6 +287,7 @@ public class BigFormat implements SSTableFormat
             return hasPartitionLevelDeletionPresenceMarker;
         }
 
+        @Override
         public boolean isCompatible()
         {
             return version.compareTo(earliest_supported_version) >= 0 && version.charAt(0) <= current_version.charAt(0);
@@ -303,6 +309,32 @@ public class BigFormat implements SSTableFormat
         public boolean hasOldBfFormat()
         {
             return hasOldBfFormat;
+        }
+
+        @Override
+        public boolean hasZeroCopyMetadata()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasIncrementalNodeSyncMetadata()
+        {
+            return false;
+        }
+
+        // TODO TBD
+        @Override
+        public boolean hasOriginatingHostId()
+        {
+            return hasOriginatingHostId;
+        }
+
+        // TODO TBD
+        @Override
+        public boolean hasMaxColumnValueLengths()
+        {
+            return false;
         }
     }
 }
