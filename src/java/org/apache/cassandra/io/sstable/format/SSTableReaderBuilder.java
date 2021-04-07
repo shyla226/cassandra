@@ -113,9 +113,9 @@ public abstract class SSTableReaderBuilder
         return this;
     }
 
-    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor)
+    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
     {
-        return new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
+        return new FileHandle.Builder(descriptor.filenameFor(component))
                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
                .withChunkCache(ChunkCache.instance);
     }
@@ -289,7 +289,7 @@ public abstract class SSTableReaderBuilder
             initSummary(dataFilePath, components, statsMetadata);
 
             boolean compression = components.contains(Component.COMPRESSION_INFO);
-            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor);
+            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
                  FileHandle.Builder dbuilder = defaultDataHandleBuilder(descriptor).compressed(compression))
             {
                 long indexFileLength = new File(descriptor.filenameFor(Component.PRIMARY_INDEX)).length();
@@ -423,7 +423,7 @@ public abstract class SSTableReaderBuilder
                   Set<Component> components) throws IOException
         {
             boolean compression = components.contains(Component.COMPRESSION_INFO);
-            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor);
+            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
                  FileHandle.Builder dbuilder = defaultDataHandleBuilder(descriptor).compressed(compression))
             {
                 loadSummary();
