@@ -69,6 +69,11 @@ public class BigTableReader extends SSTableReader
     }
 
     @Override
+    public void setup(boolean trackHotness) {
+        tidy.setup(this, trackHotness, Arrays.asList(bf, indexSummary, dfile, ifile));
+        super.setup(trackHotness);
+    }
+    @Override
     public PartitionIndexIterator allKeysIterator() throws IOException
     {
         return BigTablePartitionIndexIterator.create(getIndexFile(), rowIndexEntrySerializer);

@@ -81,6 +81,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 
@@ -227,7 +228,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
     protected final AtomicLong keyCacheRequest = new AtomicLong(0);
 
-    private final InstanceTidier tidy;
+    protected final InstanceTidier tidy;
     private final Ref<SSTableReader> selfRef;
 
     private RestorableMeter readMeter;
@@ -1055,7 +1056,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public void releaseSummary()
     {
-        tidy.releaseSummary();
+        indexSummary.close();
+        assert indexSummary.isCleanedUp();
     }
 
     private void validate()
@@ -2023,9 +2025,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return selfRef.ref();
     }
 
-    protected void setup(boolean trackHotness)
+    public void setup(boolean trackHotness)
     {
-        tidy.setup(this, trackHotness);
         this.readMeter = tidy.global.readMeter;
     }
 
@@ -2055,15 +2056,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * When the InstanceTidier cleansup, it releases its reference to its GlobalTidy; when all InstanceTidiers
      * for that type have run, the GlobalTidy cleans up.
      */
-    private static final class InstanceTidier implements Tidy
+    protected static final class InstanceTidier implements RefCounted.Tidy
     {
         private final Descriptor descriptor;
         private final TableId tableId;
-        private IFilter bf;
-        private IndexSummary summary;
 
-        private FileHandle dfile;
-        private FileHandle ifile;
+        private List<AutoCloseable> closables;
         private Runnable runOnClose;
         private boolean isReplaced = false;
 
@@ -2074,18 +2072,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         private volatile boolean setup;
 
-        void setup(SSTableReader reader, boolean trackHotness)
+        public void setup(SSTableReader reader, boolean trackHotness, List<AutoCloseable> closables)
         {
             this.setup = true;
-            this.bf = reader.bf;
-            this.summary = reader.indexSummary;
-            this.dfile = reader.dfile;
-            this.ifile = reader.ifile;
             // get a new reference to the shared descriptor-type tidy
             this.globalRef = GlobalTidy.get(reader);
             this.global = globalRef.get();
             if (trackHotness)
                 global.ensureReadMeter();
+            this.closables = closables;
         }
 
         InstanceTidier(Descriptor descriptor, TableId tableId)
@@ -2113,10 +2108,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             else
                 barrier = null;
 
-            ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
-            {
-                public void run()
-                {
+            ScheduledExecutors.nonPeriodicTasks.execute(() -> {
                     if (logger.isTraceEnabled())
                         logger.trace("Async instance tidier for {}, before barrier", descriptor);
 
@@ -2126,21 +2118,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     if (logger.isTraceEnabled())
                         logger.trace("Async instance tidier for {}, after barrier", descriptor);
 
-                    if (bf != null)
-                        bf.close();
-                    if (summary != null)
-                        summary.close();
                     if (runOnClose != null)
                         runOnClose.run();
-                    if (dfile != null)
-                        dfile.close();
-                    if (ifile != null)
-                        ifile.close();
+                Throwable ex = Throwables.close(null, closables);
+                if (ex != null)
+                    throw Throwables.cleaned(ex);
                     globalRef.release();
 
                     if (logger.isTraceEnabled())
                         logger.trace("Async instance tidier for {}, completed", descriptor);
-                }
             });
         }
 
@@ -2149,12 +2135,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             return descriptor.toString();
         }
 
-        void releaseSummary()
-        {
-            summary.close();
-            assert summary.isCleanedUp();
-            summary = null;
-        }
     }
 
     /**
@@ -2165,7 +2145,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * and stash a reference to it to be released when they are. Once all such references are
      * released, this shared tidy will be performed.
      */
-    static final class GlobalTidy implements Tidy
+    static final class GlobalTidy implements RefCounted.Tidy
     {
         static final WeakReference<ScheduledFuture<?>> NULL = new WeakReference<>(null);
         // keyed by descriptor, mapping to the shared GlobalTidy for that descriptor
