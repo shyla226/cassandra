@@ -19,18 +19,29 @@ package org.apache.cassandra.cql3;
 
 import java.util.Random;
 
+import org.junit.Assume;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.hamcrest.Matchers.is;
+
 public class TombstonesWithIndexedSSTableTest extends CQLTester
 {
+    @BeforeClass
+    public static void beforeClass()
+    {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
+    }
+
     @Test
     public void testTombstoneBoundariesInIndexCached() throws Throwable
     {
