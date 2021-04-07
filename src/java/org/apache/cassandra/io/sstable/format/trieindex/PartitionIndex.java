@@ -162,12 +162,11 @@ public class PartitionIndex implements Closeable
     }
 
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
-                                      IPartitioner partitioner, ZeroCopyMetadata zeroCopyMetadata,
+                                      IPartitioner partitioner,
                                       boolean preload) throws IOException
     {
-        FileAccessType fileAccessType = preload ? FileAccessType.FULL_FILE : FileAccessType.RANDOM;
         try (FileHandle fh = fhBuilder.complete();
-             FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH, Rebufferer.ReaderConstraint.NONE, fileAccessType))
+             FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {
             long firstPos = rdr.readLong();
             long keyCount = rdr.readLong();
@@ -187,27 +186,7 @@ public class PartitionIndex implements Closeable
                 logger.trace("Checksum {}", csum);      // Note: trace is required so that reads aren't optimized away.
             }
 
-            DecoratedKey filterFirst = null;
-            DecoratedKey filterLast = null;
-
-            // Adjust keys estimate plus bounds if ZeroCopy, otherwise we would see un-owned data from the index:
-            if (zeroCopyMetadata.exists())
-            {
-                DecoratedKey newFirst = partitioner.decorateKey(zeroCopyMetadata.firstKey);
-                DecoratedKey newLast = partitioner.decorateKey(zeroCopyMetadata.lastKey);
-                if (!newFirst.equals(first))
-                {
-                    filterFirst = first = newFirst;
-                }
-                if (!newLast.equals(last))
-                {
-                    filterLast = last = newLast;
-                }
-                keyCount = zeroCopyMetadata.estimatedKeys;
-                logger.debug("Adjusted index bounds for {} to {} and {}", fh.path(), first, last);
-            }
-
-            return new PartitionIndex(fh, root, keyCount, first, last, filterFirst, filterLast);
+            return new PartitionIndex(fh, root, keyCount, first, last, null, null);
         }
     }
 
@@ -217,19 +196,19 @@ public class PartitionIndex implements Closeable
         fh.close();
     }
 
-    public Reader openReader(Rebufferer.ReaderConstraint rc)
+    public Reader openReader()
     {
-        return new Reader(this, rc);
+        return new Reader(this);
     }
 
-    protected IndexPosIterator allKeysIterator(Rebufferer.ReaderConstraint rc)
+    protected IndexPosIterator allKeysIterator()
     {
-        return new IndexPosIterator(this, rc);
+        return new IndexPosIterator(this);
     }
 
-    protected Rebufferer instantiateRebufferer(FileAccessType fileAccessType)
+    protected Rebufferer instantiateRebufferer()
     {
-        return fh.instantiateRebufferer(fileAccessType);
+        return fh.instantiateRebufferer();
     }
 
 
@@ -265,9 +244,9 @@ public class PartitionIndex implements Closeable
      */
     public static class Reader extends Walker<Reader>
     {
-        protected Reader(PartitionIndex index, Rebufferer.ReaderConstraint rc)
+        protected Reader(PartitionIndex index)
         {
-            super(index.instantiateRebufferer(FileAccessType.RANDOM), index.root, rc);
+            super(index.instantiateRebufferer(), index.root);
         }
 
         /**
@@ -386,26 +365,18 @@ public class PartitionIndex implements Closeable
          * Note: For performance reasons this class does not keep a reference of the index. Caller must ensure a
          * reference is held for the lifetime of this object.
          */
-        public IndexPosIterator(PartitionIndex index, Rebufferer.ReaderConstraint rc)
+        public IndexPosIterator(PartitionIndex index)
         {
-            super(index.instantiateRebufferer(FileAccessType.FULL_FILE), index.root, index.filterFirst, index.filterLast, true, rc);
+            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, true);
         }
 
-        IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end, Rebufferer.ReaderConstraint rc)
+        IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end)
         {
-            super(index.instantiateRebufferer(FileAccessType.SEQUENTIAL), index.root, start, end, true, rc);
-        }
-
-        IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end, Rebufferer.ReaderConstraint rc, FileAccessType fileAccessType)
-        {
-            super(index.instantiateRebufferer(fileAccessType), index.root, start, end, true, rc);
+            super(index.instantiateRebufferer(), index.root, start, end, true);
         }
 
         /**
          * Returns the position in the row index or data file.
-         *
-         * This method must be async-read-safe, {@link #go(long)} may throw
-         * {@link Rebufferer.NotInCacheException}.
          */
         protected long nextIndexPos() throws IOException
         {
@@ -442,7 +413,7 @@ public class PartitionIndex implements Closeable
 
     private void dumpTrie(PrintStream out)
     {
-        try (Reader rdr = openReader(Rebufferer.ReaderConstraint.NONE))
+        try (Reader rdr = openReader())
         {
             rdr.dumpTrie(out, (buf, ppos, pbits) -> Long.toString(getIndexPos(buf, ppos, pbits)));
         }

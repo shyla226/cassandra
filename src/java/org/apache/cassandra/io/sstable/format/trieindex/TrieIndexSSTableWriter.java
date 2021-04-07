@@ -215,8 +215,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
     public void addUnfiltered(Unfiltered unfiltered) throws IOException
     {
-        SSTableWriter.guardCollectionSize(metadata(), currentKey, unfiltered);
-
         if (unfiltered.isRow())
         {
             Row row = (Row) unfiltered;
@@ -242,14 +240,14 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         partitionWriter.addUnfiltered(unfiltered);
     }
 
-    public RowIndexEntry endPartition() throws IOException
+    public RowIndexEntry<?> endPartition() throws IOException
     {
         metadataCollector.addCellPerPartitionCount();
 
         long trieRoot = partitionWriter.finish();
-        RowIndexEntry entry = TrieIndexEntry.create(currentStartPosition, trieRoot,
-                                                    currentPartitionLevelDeletion,
-                                                    partitionWriter.rowIndexCount);
+        RowIndexEntry<?> entry = TrieIndexEntry.create(currentStartPosition, trieRoot,
+                                                       currentPartitionLevelDeletion,
+                                                       partitionWriter.rowIndexCount);
 
         long endPosition = dataFile.position();
         long partitionSize = endPosition - currentStartPosition;
@@ -508,7 +506,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                 long indexStart = rowIndexFile.position();
                 try
                 {
-                    ByteBufferUtil.writeWithShortLength(key.getTempKey(), rowIndexFile);
+                    ByteBufferUtil.writeWithShortLength(key.getKey(), rowIndexFile);
                     indexEntry.serialize(rowIndexFile, rowIndexFile.position());
                 }
                 catch (IOException e)
@@ -604,7 +602,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             complete();
             try
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), ZeroCopyMetadata.EMPTY, false);
+                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false);
             }
             catch (IOException e)
             {

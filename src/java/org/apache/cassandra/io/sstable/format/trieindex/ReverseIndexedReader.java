@@ -24,10 +24,9 @@ import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 
 class ReverseIndexedReader extends ReverseReader
 {
@@ -38,20 +37,17 @@ class ReverseIndexedReader extends ReverseReader
     long currentBlockStart;
     long currentBlockEnd;
     RowIndexReader.IndexInfo currentIndexInfo;
-    Rebufferer.ReaderConstraint rc;
 
     public ReverseIndexedReader(TrieIndexSSTableReader sstable,
                                 TrieIndexEntry indexEntry,
                                 Slices slices,
                                 FileDataInput file,
                                 boolean shouldCloseFile,
-                                SerializationHelper helper,
-                                Rebufferer.ReaderConstraint rc)
+                                DeserializationHelper helper)
     {
         super(sstable, slices, file, shouldCloseFile, helper);
         basePosition = indexEntry.position;
         this.indexEntry = indexEntry;
-        this.rc = rc;
         this.rowIndexFile = sstable.rowIndexFile;
     }
 
@@ -86,8 +82,7 @@ class ReverseIndexedReader extends ReverseReader
             }
             indexReader = new RowIndexReverseIterator(rowIndexFile,
                                                       indexEntry,
-                                                      comparator.asByteComparable(end),
-                                                      rc);
+                                                      comparator.asByteComparable(end));
             sliceOpenMarker = null;
             currentIndexInfo = indexReader.nextIndexInfo(); // this shouldn't throw (constructor calculated it)
             if (currentIndexInfo == null)

@@ -34,6 +34,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -53,6 +54,7 @@ class PartitionWriter implements AutoCloseable
     private final SequentialWriter writer;
     private final Collection<SSTableFlushObserver> observers;
     private final RowIndexWriter rowTrie;
+    private final Version version;
 
     private long initialPosition;
     private long startPosition;
@@ -60,8 +62,8 @@ class PartitionWriter implements AutoCloseable
     private int written;
     private long previousRowStart;
 
-    private ClusteringPrefix firstClustering;
-    private ClusteringPrefix lastClustering;
+    private ClusteringPrefix<?> firstClustering;
+    private ClusteringPrefix<?> lastClustering;
 
     private DeletionTime openMarker = DeletionTime.LIVE;
     private DeletionTime startOpenMarker = DeletionTime.LIVE;
@@ -84,10 +86,10 @@ class PartitionWriter implements AutoCloseable
     {
         this.header = header;
         this.writer = writer;
-        EncodingVersion version1 = version.encodingVersion();
         this.observers = observers;
         this.rowTrie = new RowIndexWriter(comparator, indexWriter);
-        this.unfilteredSerializer = UnfilteredSerializer.serializers.get(version1);
+        this.unfilteredSerializer = UnfilteredSerializer.serializer;
+        this.version = version;
     }
 
     public void reset()
@@ -113,7 +115,7 @@ class PartitionWriter implements AutoCloseable
     void writePartitionHeader(DecoratedKey partitionKey, DeletionTime partitionLevelDeletion) throws IOException
     {
         assert state == State.AWAITING_PARTITION_HEADER;
-        ByteBufferUtil.writeWithShortLength(partitionKey.getTempKey(), writer);
+        ByteBufferUtil.writeWithShortLength(partitionKey.getKey(), writer);
 
         long deletionTimePosition = writer.position();
         DeletionTime deletionTime = partitionLevelDeletion;
@@ -127,7 +129,7 @@ class PartitionWriter implements AutoCloseable
     {
         assert state == State.AWAITING_STATIC_ROW;
         long staticRowPosition = writer.position();
-        unfilteredSerializer.serializeStaticRow(staticRow, header, writer);
+        unfilteredSerializer.serializeStaticRow(staticRow, header, writer, version.correspondingMessagingVersion());
         if (!observers.isEmpty())
             observers.forEach(o -> o.staticRow(staticRow, staticRowPosition));
         state = State.AWAITING_ROWS;
@@ -159,7 +161,7 @@ class PartitionWriter implements AutoCloseable
         }
 
         long unfilteredPosition = writer.position();
-        unfilteredSerializer.serialize(unfiltered, header, writer, pos - previousRowStart);
+        unfilteredSerializer.serialize(unfiltered, header, writer, pos - previousRowStart, version.correspondingMessagingVersion());
 
         // notify observers about each new row
         if (!observers.isEmpty())
@@ -211,8 +213,7 @@ class PartitionWriter implements AutoCloseable
 
     private void addIndexBlock() throws IOException
     {
-        IndexInfo cIndexInfo = new IndexInfo(startPosition,
-                                             startOpenMarker);
+        IndexInfo cIndexInfo = new IndexInfo(startPosition, startOpenMarker);
         rowTrie.add(firstClustering, lastClustering, cIndexInfo);
         firstClustering = null;
         ++rowIndexCount;

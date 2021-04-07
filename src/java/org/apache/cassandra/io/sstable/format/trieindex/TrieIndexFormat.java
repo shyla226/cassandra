@@ -134,16 +134,15 @@ public class TrieIndexFormat implements SSTableFormat
 
                 try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.PARTITION_INDEX, compressedData);
                      FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.ROW_INDEX, compressedData);
-                     FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, stats.zeroCopyMetadata, compressedData);
-                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, stats.zeroCopyMetadata, false);
+                     FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, compressedData);
+                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
                 {
                     return new PartitionIterator(index.sharedCopy(),
                                                  partitioner,
                                                  riFile.sharedCopy(),
-                                                 dFile.sharedCopy(),
-                                                 Rebufferer.ReaderConstraint.NONE)
+                                                 dFile.sharedCopy())
                             .closeHandles();
                 }
             }
@@ -167,7 +166,7 @@ public class TrieIndexFormat implements SSTableFormat
             try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor,
                                                                                      TableMetadata.minimal(descriptor.ksname, descriptor.cfname),
                                                                                      Component.PARTITION_INDEX, compressedData);
-                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, stats.zeroCopyMetadata,false))
+                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
             {
                 return Pair.create(pIndex.firstKey(), pIndex.lastKey());
             }

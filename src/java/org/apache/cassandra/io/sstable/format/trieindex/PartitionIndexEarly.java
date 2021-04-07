@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.TailOverridingRebufferer;
 
 /**
  * Early-opened partition index. Part of the data is already written to file, but some nodes, including the ones in the
@@ -42,8 +43,8 @@ class PartitionIndexEarly extends PartitionIndex
     }
 
     @Override
-    protected Rebufferer instantiateRebufferer(FileAccessType fileAccessType)
+    protected Rebufferer instantiateRebufferer()
     {
-        return new TailOverridingRebufferer(super.instantiateRebufferer(fileAccessType), cutoff, tail);
+        return new TailOverridingRebufferer(super.instantiateRebufferer(), cutoff, tail);
     }
 }

@@ -34,6 +34,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -43,6 +44,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
@@ -89,7 +91,7 @@ class TrieIndexSSTableReader extends SSTableReader
             {
                 rowIndexFile = rowIndexBuilder.complete();
                 // only preload if memmapped
-                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, sstableMetadata.zeroCopyMetadata, preload);
+                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, preload);
                 first = partitionIndex.firstKey();
                 last = partitionIndex.lastKey();
             }
@@ -124,7 +126,7 @@ class TrieIndexSSTableReader extends SSTableReader
                                                           components,
                                                           metadata,
                                                           rowIndexFile.sharedCopy(),
-                                                          dataFile.sharedCopy(),
+                                                          dfile.sharedCopy(),
                                                           partitionIndex.sharedCopy(),
                                                           bf.sharedCopy(),
                                                           maxDataAge,
@@ -160,7 +162,7 @@ class TrieIndexSSTableReader extends SSTableReader
 
         reader.bf = bf;
         reader.rowIndexFile = ifile;
-        reader.dataFile = dfile;
+        reader.dfile = dfile;
         reader.partitionIndex = partitionIndex;
         reader.setup(true);
 
@@ -227,8 +229,8 @@ class TrieIndexSSTableReader extends SSTableReader
     {
         StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
         try (FileHandle.Builder builder = forVerify(indexFileHandleBuilder(Component.PARTITION_INDEX));
-             PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, statsMetadata.zeroCopyMetadata, false);
-             IndexPosIterator iter = index.allKeysIterator(ReaderConstraint.NONE))
+             PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
+             IndexPosIterator iter = index.allKeysIterator())
         {
             while (iter.nextIndexPos() != PartitionIndex.NOT_FOUND)
             {}
@@ -242,24 +244,23 @@ class TrieIndexSSTableReader extends SSTableReader
 
     public PartitionReader reader(FileDataInput file,
                                   boolean shouldCloseFile,
-                                  RowIndexEntry indexEntry,
-                                  SerializationHelper helper,
+                                  RowIndexEntry<?> indexEntry,
+                                  DeserializationHelper helper,
                                   Slices slices,
-                                  boolean reversed,
-                                  Rebufferer.ReaderConstraint readerConstraint)
+                                  boolean reversed)
     throws IOException
     {
         return indexEntry.isIndexed()
                ? reversed
-                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, readerConstraint)
-                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, readerConstraint)
+                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper)
+                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper)
                : reversed
                  ? new ReverseReader(this, slices, file, shouldCloseFile, helper)
                  : new ForwardReader(this, slices, file, shouldCloseFile, helper);
     }
 
     @Override
-    public RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
+    public RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener)
     {
 
         PartitionPosition searchKey;
@@ -268,7 +269,7 @@ class TrieIndexSSTableReader extends SSTableReader
         switch (op)
         {
             case EQ:
-                return getExactPosition((DecoratedKey) key, listener, rc);
+                return getExactPosition((DecoratedKey) key, listener);
             case GT:
             case GE:
                 if (filterLast() && last.compareTo(key) < 0)
@@ -277,10 +278,10 @@ class TrieIndexSSTableReader extends SSTableReader
                 searchKey = filteredLeft ? first : key;
                 searchOp = filteredLeft ? Operator.GE : op;
 
-                try (PartitionIndex.Reader reader = partitionIndex.openReader(rc))
+                try (PartitionIndex.Reader reader = partitionIndex.openReader())
                 {
                     return reader.ceiling(searchKey,
-                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch, rc));
+                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
                 }
                 catch (IOException e)
                 {
@@ -295,10 +296,10 @@ class TrieIndexSSTableReader extends SSTableReader
                 searchKey = filteredRight ? last : key;
                 searchOp = Operator.LT;
 
-                try (PartitionIndex.Reader reader = partitionIndex.openReader(rc))
+                try (PartitionIndex.Reader reader = partitionIndex.openReader())
                 {
                     return reader.floor(searchKey,
-                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch, rc));
+                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
                 }
                 catch (IOException e)
                 {
@@ -320,11 +321,11 @@ class TrieIndexSSTableReader extends SSTableReader
      * (with assumeNoMatch: true).
      * Returns the index entry at this position, or null if the search op rejects it.
      */
-    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch, Rebufferer.ReaderConstraint rc) throws IOException
+    private RowIndexEntry<?> retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
     {
         if (pos >= 0)
         {
-            try (FileDataInput in = rowIndexFile.createReader(pos, rc))
+            try (FileDataInput in = rowIndexFile.createReader(pos))
             {
                 if (assumeNoMatch)
                     ByteBufferUtil.skipShortLength(in);
@@ -335,7 +336,7 @@ class TrieIndexSSTableReader extends SSTableReader
                     if (searchOp.apply(decorated.compareTo(searchKey)) != 0)
                         return null;
                 }
-                return TrieIndexEntry.deserialize(in, in.getSeekPosition());
+                return TrieIndexEntry.deserialize(in, in.getFilePointer());
             }
         }
         else
@@ -343,7 +344,7 @@ class TrieIndexSSTableReader extends SSTableReader
             pos = ~pos;
             if (!assumeNoMatch)
             {
-                try (FileDataInput in = dataFile.createReader(pos, rc))
+                try (FileDataInput in = dfile.createReader(pos))
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
                     DecoratedKey decorated = decorateKey(indexKey);
@@ -351,11 +352,11 @@ class TrieIndexSSTableReader extends SSTableReader
                         return null;
                 }
             }
-            return new RowIndexEntry(pos);
+            return new RowIndexEntry<>(pos);
         }
     }
 
-    public boolean contains(DecoratedKey dk, Rebufferer.ReaderConstraint rc)
+    public boolean contains(DecoratedKey dk)
     {
         if (!inBloomFilter(dk))
             return false;
@@ -364,15 +365,15 @@ class TrieIndexSSTableReader extends SSTableReader
         if (filterLast() && last.compareTo(dk) < 0)
             return false;
 
-        try (PartitionIndex.Reader reader = partitionIndex.openReader(rc))
+        try (PartitionIndex.Reader reader = partitionIndex.openReader())
         {
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
                 return false;
 
-            try (FileDataInput in = createIndexOrDataReader(indexPos, rc))
+            try (FileDataInput in = createIndexOrDataReader(indexPos))
             {
-                return ByteBufferUtil.equalsWithShortLength(in, dk.getTempKey());
+                return ByteBufferUtil.equalsWithShortLength(in, dk.getKey());
             }
         }
         catch (IOException e)
@@ -381,13 +382,13 @@ class TrieIndexSSTableReader extends SSTableReader
             throw new CorruptSSTableException(e, rowIndexFile.path());
         }
     }
-
-    FileDataInput createIndexOrDataReader(long indexPos, Rebufferer.ReaderConstraint rc)
+    
+    FileDataInput createIndexOrDataReader(long indexPos)
     {
         if (indexPos >= 0)
-            return rowIndexFile.createReader(indexPos, rc);
+            return rowIndexFile.createReader(indexPos);
         else
-            return dataFile.createReader(~indexPos, rc);
+            return dfile.createReader(~indexPos);
     }
 
     @Override
@@ -399,9 +400,9 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long dataPosition, Rebufferer.ReaderConstraint rc) throws IOException
+    public DecoratedKey keyAt(long dataPosition) throws IOException
     {
-        try (FileDataInput in = dataFile.createReader(dataPosition, rc))
+        try (FileDataInput in = dfile.createReader(dataPosition))
         {
             if (in.isEOF()) return null;
             return decorateKey(ByteBufferUtil.readWithShortLength(in));
@@ -411,7 +412,6 @@ class TrieIndexSSTableReader extends SSTableReader
     @Override
     public RowIndexEntry getExactPosition(DecoratedKey dk,
                                           SSTableReadsListener listener,
-                                          Rebufferer.ReaderConstraint rc,
                                           FileDataInput rowIndexInput,
                                           FileDataInput dataInput)
     {
@@ -430,7 +430,7 @@ class TrieIndexSSTableReader extends SSTableReader
             return null;
         }
 
-        try (PartitionIndex.Reader reader = partitionIndex.openReader(rc))
+        try (PartitionIndex.Reader reader = partitionIndex.openReader())
         {
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
@@ -449,7 +449,7 @@ class TrieIndexSSTableReader extends SSTableReader
                     in = rowIndexInput;
                     if (in == null)
                     {
-                        in = rowIndexFile.createReader(indexPos, rc);
+                        in = rowIndexFile.createReader(indexPos);
                         toClose = in;
                     }
                     else
@@ -460,14 +460,14 @@ class TrieIndexSSTableReader extends SSTableReader
                     in = dataInput;
                     if (in == null)
                     {
-                        in = dataFile.createReader(~indexPos, rc);
+                        in = dfile.createReader(~indexPos);
                         toClose = in;
                     }
                     else
                         in.seek(~indexPos);
                 }
 
-                if (!ByteBufferUtil.equalsWithShortLength(in, dk.getTempKey()))
+                if (!ByteBufferUtil.equalsWithShortLength(in, dk.getKey()))
                 {
                     getBloomFilterTracker().addFalsePositive();
                     listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
@@ -475,7 +475,7 @@ class TrieIndexSSTableReader extends SSTableReader
                 }
 
                 getBloomFilterTracker().addTruePositive();
-                RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getSeekPosition())
+                RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
                                                     : new RowIndexEntry(~indexPos);
 
                 listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
@@ -495,14 +495,14 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
+    public RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener)
     {
-        return getExactPosition(dk, listener, rc, null, null);
+        return getExactPosition(dk, listener, null, null);
     }
 
     protected FileHandle[] getFilesToBeLocked()
     {
-        return new FileHandle[] { partitionIndex.getFileHandle(), rowIndexFile, dataFile };
+        return new FileHandle[] { partitionIndex.getFileHandle(), rowIndexFile, dfile };
     }
 
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
@@ -516,18 +516,17 @@ class TrieIndexSSTableReader extends SSTableReader
             inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
             return new PartitionIterator(partitionIndex,
                                          metadata().partitioner,
-                                         rowIndexFile, dataFile,
+                                         rowIndexFile, dfile,
                                          isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
-                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1,
-                                         Rebufferer.ReaderConstraint.NONE);
+                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
         }
         else
-            return PartitionIterator.empty(partitionIndex, Rebufferer.ReaderConstraint.NONE);
+            return PartitionIterator.empty(partitionIndex);
     }
 
     public PartitionIterator allKeysIterator() throws IOException
     {
-        return new PartitionIterator(partitionIndex, metadata().partitioner, rowIndexFile, dataFile, Rebufferer.ReaderConstraint.NONE);
+        return new PartitionIterator(partitionIndex, metadata().partitioner, rowIndexFile, dfile);
     }
 
     public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
@@ -538,7 +537,7 @@ class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dataFileReader,
+    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfileReader,
                                                 PartitionPosition left,
                                                 boolean inclusiveLeft,
                                                 PartitionPosition right,
@@ -550,7 +549,7 @@ class TrieIndexSSTableReader extends SSTableReader
         {
             inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
             inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
-            return new TrieIndexFileFlow(dataFileReader,
+            return new TrieIndexFileFlow(dfileReader,
                                          this,
                                          isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
                                          isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
@@ -627,7 +626,7 @@ class TrieIndexSSTableReader extends SSTableReader
                         {
                             closeCurrentIt();
                             markSuspect();
-                            throw new CorruptSSTableException(e, dataFile.path());
+                            throw new CorruptSSTableException(e, dfile.path());
                         }
                     }
                 };
@@ -640,12 +639,12 @@ class TrieIndexSSTableReader extends SSTableReader
         assert pos != PartitionIndex.NOT_FOUND;
 
         if (pos >= 0)
-            try (FileDataInput in = rowIndexFile.createReader(pos, ReaderConstraint.NONE))
+            try (FileDataInput in = rowIndexFile.createReader(pos))
             {
                 return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             }
         else
-            try (FileDataInput in = dataFile.createReader(~pos, ReaderConstraint.NONE))
+            try (FileDataInput in = dfile.createReader(~pos))
             {
                 return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             }
@@ -653,7 +652,7 @@ class TrieIndexSSTableReader extends SSTableReader
 
     private IndexPosIterator indexPosIteratorForRange(AbstractBounds<PartitionPosition> bound)
     {
-        return new IndexPosIterator(partitionIndex, bound.left, bound.right, ReaderConstraint.NONE);
+        return new IndexPosIterator(partitionIndex, bound.left, bound.right);
     }
 
     @Override

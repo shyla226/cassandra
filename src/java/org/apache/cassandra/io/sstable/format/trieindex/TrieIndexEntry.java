@@ -20,7 +20,6 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.IOException;
 
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -96,7 +95,7 @@ public final class TrieIndexEntry extends RowIndexEntry<Object>
         return new TrieIndexEntry(dataStartPosition, trieRoot, rowIndexCount, partitionLevelDeletion);
     }
 
-    public static RowIndexEntry deserialize(DataInputPlus in, long basePosition) throws IOException
+    public static RowIndexEntry<?> deserialize(DataInputPlus in, long basePosition) throws IOException
     {
         long dataFilePosition = in.readUnsignedVInt();
         long indexTrieRoot = in.readVInt() + basePosition;

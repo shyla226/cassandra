@@ -26,7 +26,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -53,7 +53,7 @@ class ReverseReader extends AbstractReader
                   Slices slices,
                   FileDataInput file,
                   boolean shouldCloseFile,
-                  SerializationHelper helper)
+                  DeserializationHelper helper)
     {
         super(sstable, slices, file, shouldCloseFile, helper, true);
     }
@@ -63,7 +63,7 @@ class ReverseReader extends AbstractReader
     {
         // read full row and filter
         if (startPos == -1)
-            startPos = file.getSeekPosition();
+            startPos = file.getFilePointer();
         else
             seekToPosition(startPos);
 
@@ -110,9 +110,9 @@ class ReverseReader extends AbstractReader
         return prepStep(end);
     }
 
-    boolean preStep(ClusteringBound start) throws IOException
+    boolean preStep(ClusteringBound<?> start) throws IOException
     {
-        assert filePos == file.getSeekPosition();
+        assert filePos == file.getFilePointer();
         if (skipSmallerRow(start))
         {
             sliceOpenMarker = openMarker;
@@ -125,7 +125,7 @@ class ReverseReader extends AbstractReader
         }
     }
 
-    boolean prepStep(ClusteringBound end) throws IOException
+    boolean prepStep(ClusteringBound<?> end) throws IOException
     {
         // filePos could be in the middle of a row when prepSteps finish
         if (skipSmallerRow(end))

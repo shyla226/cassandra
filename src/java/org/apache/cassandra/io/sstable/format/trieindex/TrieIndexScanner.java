@@ -89,7 +89,7 @@ public class TrieIndexScanner implements ISSTableScanner
     public static ISSTableScanner getScanner(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        List<Pair<Long, Long>> positions = sstable.getPositionsForRanges(tokenRanges);
+        List<PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
         if (positions.isEmpty())
             return new EmptySSTableScanner(sstable);
 
@@ -109,7 +109,7 @@ public class TrieIndexScanner implements ISSTableScanner
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader(FileAccessType.FULL_FILE);
+        this.dfile = sstable.openDataReader();
         this.sstable = sstable;
         this.columns = columns;
         this.dataRange = dataRange;
@@ -139,12 +139,12 @@ public class TrieIndexScanner implements ISSTableScanner
 
     private static void addRange(SSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)
     {
-        if (requested instanceof Range && ((Range)requested).isWrapAround())
+        if (requested instanceof Range && ((Range<?>) requested).isWrapAround())
         {
             if (requested.right.compareTo(sstable.first) >= 0)
             {
                 // since we wrap, we must contain the whole sstable prior to stopKey()
-                Boundary<PartitionPosition> left = new Boundary<PartitionPosition>(sstable.first, true);
+                Boundary<PartitionPosition> left = new Boundary<>(sstable.first, true);
                 Boundary<PartitionPosition> right;
                 right = requested.rightBoundary();
                 right = minRight(right, sstable.last, true);
@@ -154,7 +154,7 @@ public class TrieIndexScanner implements ISSTableScanner
             if (requested.left.compareTo(sstable.last) <= 0)
             {
                 // since we wrap, we must contain the whole sstable after dataRange.startKey()
-                Boundary<PartitionPosition> right = new Boundary<PartitionPosition>(sstable.last, true);
+                Boundary<PartitionPosition> right = new Boundary<>(sstable.last, true);
                 Boundary<PartitionPosition> left;
                 left = requested.leftBoundary();
                 left = maxLeft(left, sstable.first, true);
@@ -170,7 +170,7 @@ public class TrieIndexScanner implements ISSTableScanner
             right = requested.rightBoundary();
             left = maxLeft(left, sstable.first, true);
             // apparently isWrapAround() doesn't count Bounds that extend to the limit (min) as wrapping
-            right = requested.right.isMinimum() ? new Boundary<PartitionPosition>(sstable.last, true)
+            right = requested.right.isMinimum() ? new Boundary<>(sstable.last, true)
                                                     : minRight(right, sstable.last, true);
             if (!isEmpty(left, right))
                 boundsList.add(AbstractBounds.bounds(left, right));
@@ -258,7 +258,7 @@ public class TrieIndexScanner implements ISSTableScanner
     protected class KeyScanningIterator extends AbstractIterator<UnfilteredRowIterator> implements CloseableIterator<UnfilteredRowIterator>
     {
         private DecoratedKey currentKey;
-        private RowIndexEntry currentEntry;
+        private RowIndexEntry<?> currentEntry;
         private PartitionIndexIterator iterator;
         private LazilyInitializedUnfilteredRowIterator currentRowIterator;
 
@@ -372,7 +372,7 @@ public class TrieIndexScanner implements ISSTableScanner
             return FileProgressIndicator.NONE;
         }
 
-        public long getSeekPosition()
+        public long getFilePointer()
         {
             return 0;
         }

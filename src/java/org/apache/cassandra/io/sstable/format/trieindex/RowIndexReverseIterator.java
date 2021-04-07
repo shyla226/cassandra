@@ -20,8 +20,8 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.PrintStream;
 
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
+import org.apache.cassandra.io.tries.ReverseValueIterator;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -31,14 +31,14 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 {
     private long currentNode = -1;
 
-    public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end, Rebufferer.ReaderConstraint rc)
+    public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end)
     {
-        super(file.instantiateRebufferer(), root, start, end, true, rc);
+        super(file.instantiateRebufferer(), root, start, end, true);
     }
 
-    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end, Rebufferer.ReaderConstraint rc)
+    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end)
     {
-        this(file, entry.indexTrieRoot, ByteComparable.EMPTY, end, rc);
+        this(file, entry.indexTrieRoot, ByteComparable.EMPTY, end);
     }
 
     /**

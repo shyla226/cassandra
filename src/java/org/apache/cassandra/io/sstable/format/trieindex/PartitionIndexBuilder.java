@@ -162,8 +162,8 @@ public class PartitionIndexBuilder implements AutoCloseable
         long firstKeyPos = writer.position();
         if (firstKey != null)
         {
-            ByteBufferUtil.writeWithShortLength(firstKey.getTempKey(), writer);
-            ByteBufferUtil.writeWithShortLength(lastKey.getTempKey(), writer);
+            ByteBufferUtil.writeWithShortLength(firstKey.getKey(), writer);
+            ByteBufferUtil.writeWithShortLength(lastKey.getKey(), writer);
         }
         else
         {
@@ -171,10 +171,6 @@ public class PartitionIndexBuilder implements AutoCloseable
             writer.writeShort(0);
             writer.writeShort(0);
         }
-
-        // The next three longs are needed to be able to open the table and must be readable at a fixed offset from the
-        // end of the file. The call below ensures that for encrypted files which do not provide precise file length.
-        writer.establishEndAddressablePosition(PartitionIndex.FOOTER_LENGTH);
 
         writer.writeLong(firstKeyPos);
         writer.writeLong(count);
