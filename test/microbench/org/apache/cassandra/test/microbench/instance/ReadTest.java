@@ -19,11 +19,14 @@
 package org.apache.cassandra.test.microbench.instance;
 
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
-import java.util.stream.IntStream;
-import java.util.stream.LongStream;
 
 import com.google.common.base.Throwables;
 
@@ -67,40 +70,41 @@ public abstract class ReadTest extends CQLTester
     @Param({""})
     String memtableClass = "";
 
-    public enum Execution
-    {
-        SERIAL,
-        SERIAL_NET,
-        PARALLEL,
-        PARALLEL_NET,
-    }
+    @Param({"false"})
+    boolean useNet = false;
 
-    @Param({"PARALLEL"})
-    Execution async = Execution.PARALLEL;
+    @Param({"1"})
+    int threadCount = 1;
+
+    ExecutorService executorService;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
         rand = new Random(1);
+        executorService = Executors.newFixedThreadPool(threadCount);
         CQLTester.setUpClass();
         CQLTester.prepareServer();
+        DatabaseDescriptor.setAutoSnapshot(false);
         System.err.println("setupClass done.");
         String memtableSetup = "";
         if (!memtableClass.isEmpty())
             memtableSetup = String.format(" AND memtable = { 'class': '%s' }", memtableClass);
-        keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
-        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid)) with compression = {'enabled': false}" + memtableSetup);
-        execute("use "+keyspace+";");
-        switch (async)
+        keyspace = createKeyspace(
+        "CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
+        table = createTable(keyspace,
+                            "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid)) with compression = {'enabled': false}" +
+                            memtableSetup);
+        execute("use " + keyspace + ";");
+        if (useNet)
         {
-            case SERIAL_NET:
-            case PARALLEL_NET:
-                CQLTester.requireNetwork();
-                executeNet(getDefaultVersion(), "use " + keyspace + ";");
+            CQLTester.requireNetwork();
+            executeNet(getDefaultVersion(), "use " + keyspace + ";");
         }
-        String writeStatement = "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)";
-        System.err.println("Prepared, batch " + BATCH + " flush " + flush);
-        System.err.println("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() + " index " + DatabaseDescriptor.getIndexAccessMode());
+        String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
+        System.err.println("Prepared, batch " + BATCH + " threads " + threadCount + " flush " + flush);
+        System.err.println("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
+                           " index " + DatabaseDescriptor.getIndexAccessMode());
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
@@ -150,17 +154,10 @@ public abstract class ReadTest extends CQLTester
 
     public void performWrite(String writeStatement, long ofs, long count) throws Throwable
     {
-        switch (async)
-        {
-        case SERIAL:
-        case SERIAL_NET:
+        if (threadCount == 1)
             performWriteSerial(writeStatement, ofs, count);
-            break;
-        case PARALLEL:
-        case PARALLEL_NET:
+        else
             performWriteThreads(writeStatement, ofs, count);
-            break;
-        }
     }
 
     public void performWriteSerial(String writeStatement, long ofs, long count) throws Throwable
@@ -171,22 +168,27 @@ public abstract class ReadTest extends CQLTester
 
     public void performWriteThreads(String writeStatement, long ofs, long count) throws Throwable
     {
-        long done = LongStream.range(ofs, ofs + count)
-                              .parallel()
-                              .map(i ->
-                                   {
-                                       try
-                                       {
-                                           execute(writeStatement, writeArguments(i));
-                                           return 1;
-                                       }
-                                       catch (Throwable throwable)
-                                       {
-                                           throw Throwables.propagate(throwable);
-                                       }
-                                   })
-                              .sum();
-        assert done == count;
+        List<Future<Integer>> futures = new ArrayList<>();
+        for (long i = 0; i < count; ++i)
+        {
+            long pos = ofs + i;
+            futures.add(executorService.submit(() ->
+                                               {
+                                                   try
+                                                   {
+                                                       execute(writeStatement, writeArguments(pos));
+                                                       return 1;
+                                                   }
+                                                   catch (Throwable throwable)
+                                                   {
+                                                       throw Throwables.propagate(throwable);
+                                                   }
+                                               }));
+        }
+        long done = 0;
+        for (Future<Integer> f : futures)
+            done += f.get();
+        assert count == done;
     }
 
     @TearDown(Level.Trial)
@@ -194,6 +196,9 @@ public abstract class ReadTest extends CQLTester
     {
         if (flush == Flush.INMEM && !cfs.getLiveSSTables().isEmpty())
             throw new AssertionError("SSTables created for INMEM test.");
+
+        executorService.shutdown();
+        executorService.awaitTermination(15, TimeUnit.SECONDS);
 
         // do a flush to print sizes
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
@@ -213,20 +218,25 @@ public abstract class ReadTest extends CQLTester
 
     public Object performReadThreads(String readStatement, Supplier<Object[]> supplier) throws Throwable
     {
-        return IntStream.range(0, BATCH)
-                        .parallel()
-                        .mapToLong(i ->
-                                   {
-                                       try
-                                       {
-                                           return execute(readStatement, supplier.get()).size();
-                                       }
-                                       catch (Throwable throwable)
-                                       {
-                                           throw Throwables.propagate(throwable);
-                                       }
-                                   })
-                        .sum();
+        List<Future<Integer>> futures = new ArrayList<>();
+        for (long i = 0; i < BATCH; ++i)
+        {
+            futures.add(executorService.submit(() ->
+                                               {
+                                                   try
+                                                   {
+                                                       return execute(readStatement, supplier.get()).size();
+                                                   }
+                                                   catch (Throwable throwable)
+                                                   {
+                                                       throw Throwables.propagate(throwable);
+                                                   }
+                                               }));
+        }
+        long done = 0;
+        for (Future<Integer> f : futures)
+            done += f.get();
+        return done;
     }
 
     public Object performReadSerialNet(String readStatement, Supplier<Object[]> supplier) throws Throwable
@@ -240,37 +250,44 @@ public abstract class ReadTest extends CQLTester
 
     public long performReadThreadsNet(String readStatement, Supplier<Object[]> supplier) throws Throwable
     {
-        return IntStream.range(0, BATCH)
-                        .parallel()
-                        .mapToLong(i ->
-                                   {
-                                       try
-                                       {
-                                           return executeNet(getDefaultVersion(), readStatement, supplier.get())
-                                                          .getAvailableWithoutFetching();
-                                       }
-                                       catch (Throwable throwable)
-                                       {
-                                           throw Throwables.propagate(throwable);
-                                       }
-                                   })
-                        .sum();
+        List<Future<Integer>> futures = new ArrayList<>();
+        for (long i = 0; i < BATCH; ++i)
+        {
+            futures.add(executorService.submit(() ->
+                                               {
+                                                   try
+                                                   {
+                                                       return executeNet(getDefaultVersion(), readStatement, supplier.get())
+                                                              .getAvailableWithoutFetching();
+                                                   }
+                                                   catch (Throwable throwable)
+                                                   {
+                                                       throw Throwables.propagate(throwable);
+                                                   }
+                                               }));
+        }
+        long done = 0;
+        for (Future<Integer> f : futures)
+            done += f.get();
+        return done;
     }
 
 
     public Object performRead(String readStatement, Supplier<Object[]> supplier) throws Throwable
     {
-        switch (async)
+        if (useNet)
         {
-            case SERIAL:
-                return performReadSerial(readStatement, supplier);
-            case SERIAL_NET:
+            if (threadCount == 1)
                 return performReadSerialNet(readStatement, supplier);
-            case PARALLEL:
-                return performReadThreads(readStatement, supplier);
-            case PARALLEL_NET:
+            else
                 return performReadThreadsNet(readStatement, supplier);
         }
-        return null;
+        else
+        {
+            if (threadCount == 1)
+                return performReadSerial(readStatement, supplier);
+            else
+                return performReadThreads(readStatement, supplier);
+        }
     }
 }
