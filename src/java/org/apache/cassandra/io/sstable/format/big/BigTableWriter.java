@@ -207,7 +207,7 @@ public class BigTableWriter extends SSTableWriter
             return null;
 
         long startPosition = beforeAppend(key);
-        observers.forEach((o) -> o.startPartition(key, iwriter.indexFile.position()));
+        observers.forEach((o) -> o.startPartition(key, startPosition));
 
         //Reuse the writer for each row
         columnIndexWriter.reset();

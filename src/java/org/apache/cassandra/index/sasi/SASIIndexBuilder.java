@@ -37,7 +37,6 @@ import org.apache.cassandra.index.sasi.conf.ColumnIndex;
 import org.apache.cassandra.index.sasi.disk.PerSSTableIndexWriter;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.KeyIterator;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -58,7 +57,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     {
         long totalIndexBytes = 0;
         for (SSTableReader sstable : sstables.keySet())
-            totalIndexBytes += getPrimaryIndexLength(sstable);
+            totalIndexBytes += sstable.uncompressedLength();
 
         this.cfs = cfs;
         this.sstables = sstables;
@@ -86,7 +85,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                             throw new CompactionInterruptedException(getCompactionInfo());
 
                         final DecoratedKey key = keys.next();
-                        final long keyPosition = keys.getKeyPosition();
+                        final long keyPosition = keys.getDataPosition();
 
                         indexWriter.startPartition(key, keyPosition);
 
@@ -126,12 +125,6 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                                   totalSizeInBytes,
                                   compactionId,
                                   sstables.keySet());
-    }
-
-    private long getPrimaryIndexLength(SSTable sstable)
-    {
-        File primaryIndex = new File(sstable.getIndexFilename());
-        return primaryIndex.exists() ? primaryIndex.length() : 0;
     }
 
     private void completeSSTable(PerSSTableIndexWriter indexWriter, SSTableReader sstable, Collection<ColumnIndex> indexes)

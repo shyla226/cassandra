@@ -213,7 +213,7 @@ public abstract class SSTableReaderBuilder
                             first = decoratedKey;
                         last = decoratedKey;
 
-                        summaryBuilder.maybeAddEntry(decoratedKey, keyIterator.getKeyPosition());
+                        summaryBuilder.maybeAddEntry(decoratedKey, keyIterator.getIndexPosition());
                     }
 
                     if (recreateBloomFilter)

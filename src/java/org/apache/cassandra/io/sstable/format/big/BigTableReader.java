@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -300,9 +301,9 @@ public class BigTableReader extends SSTableReader
 
 
     @Override
-    public DecoratedKey keyAt(long indexPosition) throws IOException
+    public DecoratedKey keyAt(long dataPosition) throws IOException
     {
-        try (FileDataInput in = ifile.createReader(indexPosition))
+        try (FileDataInput in = dfile.createReader(dataPosition))
         {
             return keyAt(in);
         }
@@ -313,14 +314,6 @@ public class BigTableReader extends SSTableReader
     {
         if (reader.isEOF()) return null;
 
-        DecoratedKey key = decorateKey(ByteBufferUtil.readWithShortLength(reader));
-
-        // hint read path about key location if caching is enabled
-        // this saves index summary lookup and index file iteration which whould be pretty costly
-        // especially in presence of promoted column indexes
-        if (isKeyCacheEnabled())
-            cacheKey(key, rowIndexEntrySerializer.deserialize(reader));
-
-        return key;
+        return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 }

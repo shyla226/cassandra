@@ -27,6 +27,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
+// TODO STAR-247: Implement a unit test
 public class KeyIterator extends AbstractIterator<DecoratedKey> implements CloseableIterator<DecoratedKey>
 {
     private final IPartitioner partitioner;
@@ -81,19 +82,14 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         it.close();
     }
 
-    public long getBytesRead()
-    {
-        return it.indexPosition();
-    }
-
-    public long getTotalBytes()
-    {
-        return it.indexLength();
-    }
-
-    public long getKeyPosition()
+    public long getIndexPosition()
     {
         return keyPosition;
+    }
+
+    public long getDataPosition()
+    {
+        return it.dataPosition();
     }
 
     public void reset()

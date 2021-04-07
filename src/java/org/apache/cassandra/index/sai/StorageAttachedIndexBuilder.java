@@ -172,7 +172,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     }
 
                     final DecoratedKey key = keys.next();
-                    final long keyPosition = keys.getKeyPosition();
+                    final long keyPosition = keys.getDataPosition();
 
                     indexWriter.startPartition(key, keyPosition);
 
@@ -206,8 +206,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                         }
                     }
 
-                    bytesProcessed += keyPosition - previousKeyPosition;
-                    previousKeyPosition = keyPosition;
+                    bytesProcessed += keys.getDataPosition() - previousKeyPosition;
+                    previousKeyPosition = keys.getDataPosition();
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);
