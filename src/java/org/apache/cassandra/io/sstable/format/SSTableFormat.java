@@ -21,15 +21,18 @@ import java.util.Set;
 
 import com.google.common.base.CharMatcher;
 
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.commons.lang3.StringUtils;
+
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 
 /**
  * Provides the accessors to data on disk.
  */
 public interface SSTableFormat
 {
-    static boolean enableSSTableDevelopmentTestMode = Boolean.getBoolean("cassandra.test.sstableformatdevelopment");
+    public final static String FORMAT_DEFAULT_PROP = "cassandra.sstable.format.default";
 
     Type getType();
 
@@ -42,14 +45,17 @@ public interface SSTableFormat
     public enum Type
     {
         //The original sstable format
-        BIG("big", BigFormat.instance);
+        BIG("big", BigFormat.instance),
+
+        //Sstable format with trie indices
+        BTI("bti", TrieIndexFormat.instance);
 
         public final SSTableFormat info;
         public final String name;
 
         public static Type current()
         {
-            return BIG;
+            return Type.valueOf(System.getProperty(FORMAT_DEFAULT_PROP, BTI.name()).toUpperCase());
         }
 
         Type(String name, SSTableFormat info)

@@ -61,7 +61,7 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
 
     public CassandraEntireSSTableStreamReader(StreamMessageHeader messageHeader, CassandraStreamHeader streamHeader, StreamSession session)
     {
-        if (streamHeader.format != SSTableFormat.Type.BIG)
+        if (streamHeader.format != SSTableFormat.Type.BIG && streamHeader.format != SSTableFormat.Type.BTI)
             throw new AssertionError("Unsupported SSTable format " + streamHeader.format);
 
         if (session.getPendingRepair() != null)

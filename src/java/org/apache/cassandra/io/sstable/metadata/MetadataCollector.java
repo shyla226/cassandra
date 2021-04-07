@@ -43,6 +43,7 @@ import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
 public class MetadataCollector implements PartitionStatisticsCollector
 {
     public static final double NO_COMPRESSION_RATIO = -1.0;
+    private static final ByteBuffer[] EMPTY_CLUSTERING = new ByteBuffer[0];
 
     private long currentPartitionCells = 0;
 
@@ -157,6 +158,12 @@ public class MetadataCollector implements PartitionStatisticsCollector
     public MetadataCollector addKey(ByteBuffer key)
     {
         long hashed = MurmurHash.hash2_64(key, key.position(), key.remaining(), 0);
+        cardinality.offerHashed(hashed);
+        return this;
+    }
+
+    public MetadataCollector addKeyHash(long hashed)
+    {
         cardinality.offerHashed(hashed);
         return this;
     }

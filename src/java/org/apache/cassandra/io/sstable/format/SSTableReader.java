@@ -30,6 +30,7 @@ import java.util.stream.Collector;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
@@ -39,13 +40,16 @@ import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
@@ -941,7 +945,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
-    private static class DropPageCache implements Runnable
+    protected static class DropPageCache implements Runnable
     {
         final FileHandle dfile;
         final long dfilePosition;
@@ -949,7 +953,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         final long ifilePosition;
         final Runnable andThen;
 
-        private DropPageCache(FileHandle dfile, long dfilePosition, FileHandle ifile, long ifilePosition, Runnable andThen)
+        public DropPageCache(FileHandle dfile, long dfilePosition, FileHandle ifile, long ifilePosition, Runnable andThen)
         {
             this.dfile = dfile;
             this.dfilePosition = dfilePosition;
@@ -1060,7 +1064,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         assert indexSummary.isCleanedUp();
     }
 
-    private void validate()
+    public void validate()
     {
         if (this.first.compareTo(this.last) > 0)
         {
@@ -2459,6 +2463,21 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         ExecutorUtils.shutdownNowAndWait(timeout, unit, syncExecutor);
         resetTidying();
+    }
+
+    public static void checkRequiredComponents(Descriptor descriptor, Set<Component> components, boolean validate)
+    {
+        if (validate)
+        {
+            Set<Component> requiredComponents = descriptor.formatType.info.requiredComponents();
+            // Minimum components without which we can't do anything
+            assert components.containsAll(requiredComponents) : String.format("Required components %s missing for sstable %s", Sets.difference(requiredComponents, components), descriptor);
+        }
+        else
+        {
+            // Scrub-only case, we just need data file.
+            assert components.contains(Component.DATA);
+        }
     }
 
 }

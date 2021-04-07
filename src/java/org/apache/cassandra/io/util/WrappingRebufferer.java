@@ -22,6 +22,8 @@ import java.util.Deque;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 public class WrappingRebufferer implements Rebufferer
 {
     protected final Rebufferer source;
@@ -117,7 +119,6 @@ public class WrappingRebufferer implements Rebufferer
             return offset;
         }
 
-
         public int limit()
         {
             return buffer.limit();
@@ -143,6 +144,12 @@ public class WrappingRebufferer implements Rebufferer
             offset = 0L;
 
             buffers.offerFirst(this);
+        }
+
+        @VisibleForTesting
+        public void offset(long l)
+        {
+            this.offset = l;
         }
     }
 }

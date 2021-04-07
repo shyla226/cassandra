@@ -18,6 +18,7 @@
  */
 package org.apache.cassandra.tools;
 
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -85,7 +86,8 @@ public class StandaloneVerifier
             {
                 Set<Component> components = entry.getValue();
                 Descriptor descriptor = entry.getKey();
-                if (!components.contains(Component.DATA) || !components.contains(Component.PRIMARY_INDEX))
+                if (!components.contains(Component.DATA) ||
+                    (SSTableFormat.Type.BIG == descriptor.getFormat().getType() && !components.contains(Component.PRIMARY_INDEX)))
                     continue;
 
                 try

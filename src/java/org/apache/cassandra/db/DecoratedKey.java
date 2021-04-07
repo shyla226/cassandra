@@ -158,6 +158,12 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         MurmurHash.hash3_x64_128(key, key.position(), key.remaining(), 0, dest);
     }
 
+    public long hash2_64()
+    {
+        ByteBuffer key = getKey();
+        return MurmurHash.hash2_64(key, key.position(), key.remaining(), 0);
+    }
+
     /**
      * A template factory method for creating decorated keys from their byte-comparable representation.
      */
@@ -185,5 +191,10 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), version);
         // Decode the key bytes from the second component.
         return ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+    }
+
+    public int getKeyLength()
+    {
+        return getKey().remaining();
     }
 }
