@@ -18,17 +18,54 @@
 
 package org.apache.cassandra.io.util;
 
-/**
- * Interface for the classes that can be used to instantiate rebufferers over a given file.
- *
- * These are one of two types:
- *  - chunk sources (e.g. SimpleReadRebufferer) which instantiate a buffer managing rebufferer referencing
- *    themselves.
- *  - thread-safe shared rebufferers (e.g. MmapRebufferer) which directly return themselves.
- */
-public interface RebuffererFactory extends ReaderFileProxy
+public class EmptyRebufferer implements Rebufferer, RebuffererFactory
 {
-    Rebufferer instantiateRebufferer();
+    private final ChannelProxy channel;
 
-    default void invalidateIfCached(long position) {}
+    public EmptyRebufferer(ChannelProxy channel)
+    {
+        this.channel = channel;
+    }
+
+    @Override
+    public void close()
+    {
+
+    }
+
+    @Override
+    public ChannelProxy channel()
+    {
+        return channel;
+    }
+
+    @Override
+    public long fileLength()
+    {
+        return 0;
+    }
+
+    @Override
+    public double getCrcCheckChance()
+    {
+        return 0;
+    }
+
+    @Override
+    public BufferHolder rebuffer(long position)
+    {
+        return EMPTY;
+    }
+
+    @Override
+    public void closeReader()
+    {
+
+    }
+
+    @Override
+    public Rebufferer instantiateRebufferer()
+    {
+        return this;
+    }
 }
