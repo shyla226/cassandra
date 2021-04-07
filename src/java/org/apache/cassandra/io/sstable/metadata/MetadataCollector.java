@@ -44,6 +44,8 @@ public class MetadataCollector implements PartitionStatisticsCollector
 {
     public static final double NO_COMPRESSION_RATIO = -1.0;
 
+    private long currentPartitionCells = 0;
+
     static EstimatedHistogram defaultCellPerPartitionCountHistogram()
     {
         // EH of 118 can track a max value of 4139110981, i.e., > 4B cells
@@ -171,6 +173,13 @@ public class MetadataCollector implements PartitionStatisticsCollector
         return this;
     }
 
+    public MetadataCollector addCellPerPartitionCount()
+    {
+        estimatedCellPerPartitionCount.add(currentPartitionCells);
+        currentPartitionCells = 0;
+        return this;
+    }
+
     /**
      * Ratio is compressed/uncompressed and it is
      * if you have 1.x then compression isn't helping
@@ -193,6 +202,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
 
     public void update(Cell<?> cell)
     {
+        ++currentPartitionCells;
         updateTimestamp(cell.timestamp());
         updateTTL(cell.ttl());
         updateLocalDeletionTime(cell.localDeletionTime());
