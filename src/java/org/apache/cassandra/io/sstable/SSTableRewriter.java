@@ -118,21 +118,21 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         return writer;
     }
 
-    public BigTableRowIndexEntry append(UnfilteredRowIterator partition)
+    public RowIndexEntry<?> append(UnfilteredRowIterator partition)
     {
         // we do this before appending to ensure we can resetAndTruncate() safely if the append fails
         DecoratedKey key = partition.partitionKey();
         maybeReopenEarly(key);
-        BigTableRowIndexEntry index = writer.append(partition);
+        RowIndexEntry<?> index = writer.append(partition);
         if (DatabaseDescriptor.shouldMigrateKeycacheOnCompaction())
         {
-            if (!transaction.isOffline() && index != null)
+            if (!transaction.isOffline() && index instanceof BigTableRowIndexEntry)
             {
                 for (SSTableReader reader : transaction.originals())
                 {
                     if (reader.getCachedPosition(key, false) != null)
                     {
-                        cachedKeys.put(key, index);
+                        cachedKeys.put(key, (BigTableRowIndexEntry) index);
                         break;
                     }
                 }
@@ -142,7 +142,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
     }
 
     // attempts to append the row, if fails resets the writer position
-    public BigTableRowIndexEntry tryAppend(UnfilteredRowIterator partition)
+    public RowIndexEntry<?> tryAppend(UnfilteredRowIterator partition)
     {
         writer.mark();
         try
