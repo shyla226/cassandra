@@ -87,7 +87,7 @@ public class BigTableWriter extends SSTableWriter
 
         if (compression)
         {
-            final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType());
+            final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType(), metadata);
 
             dataFile = new CompressedSequentialWriter(new File(getFilename()),
                                              descriptor.filenameFor(Component.COMPRESSION_INFO),
@@ -115,7 +115,8 @@ public class BigTableWriter extends SSTableWriter
      * @param opType
      * @return {@link org.apache.cassandra.schema.CompressionParams}
      */
-    private CompressionParams compressionFor(final OperationType opType)
+    // TODO STAR-247: this method should be pulled up to SSTable
+    public static CompressionParams compressionFor(final OperationType opType, TableMetadataRef metadata)
     {
         CompressionParams compressionParams = metadata.getLocal().params.compression;
         final ICompressor compressor = compressionParams.getSstableCompressor();

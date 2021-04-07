@@ -96,7 +96,7 @@ public class StandaloneVerifier
                 catch (Exception e)
                 {
                     JVMStabilityInspector.inspectThrowable(e);
-                    System.err.println(String.format("Error Loading %s: %s", entry.getKey(), e.getMessage()));
+                    System.err.println(String.format("Error Loading %s: %s", descriptor, e.getMessage()));
                     if (options.debug)
                         e.printStackTrace(System.err);
                 }

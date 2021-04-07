@@ -53,7 +53,6 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableZeroCopyWriter.class);
 
-    private final TableMetadataRef metadata;
     private volatile SSTableReader finalReader;
     private final Map<Component.Type, SequentialWriter> componentWriters;
 
@@ -72,7 +71,6 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         super(descriptor, ImmutableSet.copyOf(components), metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
 
         lifecycleNewTracker.trackNew(this);
-        this.metadata = metadata;
         this.componentWriters = new EnumMap<>(Component.Type.class);
 
         if (!descriptor.getFormat().streamingComponents().containsAll(components))
