@@ -764,6 +764,12 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
+    public boolean hasIndex()
+    {
+        return delegate.hasIndex();
+    }
+
+    @Override
     public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
     {
         return delegate.scrubPartitionsIterator();

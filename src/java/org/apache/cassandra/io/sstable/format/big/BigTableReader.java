@@ -56,6 +56,12 @@ public class BigTableReader extends SSTableReader
 
     protected final BigTableRowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer;
 
+    @Override
+    public boolean hasIndex()
+    {
+        return new File(descriptor.filenameFor(Component.PRIMARY_INDEX)).exists();
+    }
+
     public BigTableReader(SSTableReaderBuilder builder)
     {
         super(builder);
