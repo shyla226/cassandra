@@ -152,7 +152,7 @@ public final class AtomicBTreePartition extends AbstractBTreePartition
             finally
             {
                 indexer.commit();
-                finish();
+                reportAllocatedMemory();
             }
         }
 

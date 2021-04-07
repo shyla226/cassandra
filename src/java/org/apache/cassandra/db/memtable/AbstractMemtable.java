@@ -127,6 +127,14 @@ public abstract class AbstractMemtable implements Memtable
             }
         }
 
+        /**
+         * Get the current state of the columns set.
+         *
+         * Note: If this is executed while mutations are still being performed on the table (e.g. to prepare
+         * an sstable for streaming when Memtable.Factory.streamFromMemtable() is true), the resulting view may be
+         * in a somewhat inconsistent state (it may include partial updates, as well as miss updates older than
+         * ones it does include).
+         */
         public RegularAndStaticColumns get()
         {
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();

@@ -86,6 +86,11 @@ public class Tracker
         this.reset(memtable);
     }
 
+    public static Tracker newDummyTracker()
+    {
+        return new Tracker(null, null, false);
+    }
+
     public LifecycleTransaction tryModify(SSTableReader sstable, OperationType operationType)
     {
         return tryModify(singleton(sstable), operationType);

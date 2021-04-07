@@ -82,7 +82,7 @@ public class Flushing
         }
     }
 
-    @SuppressWarnings("resource")   // writer owned and to be closed by runnable
+    @SuppressWarnings("resource")   // writer owned by runnable, to be closed or aborted by its caller
     static FlushRunnable flushRunnable(ColumnFamilyStore cfs,
                                        Memtable memtable,
                                        PartitionPosition from,
@@ -178,6 +178,7 @@ public class Flushing
         {
             writeSortedContents();
             return writer;
+            // We don't close the writer on error as the caller aborts all runnables if one happens.
         }
     }
 

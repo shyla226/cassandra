@@ -84,7 +84,7 @@ public class TrackerTest
     public void testTryModify()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = new Tracker(null, null, false);
+        Tracker tracker = Tracker.newDummyTracker();
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, true, cfs), MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         tracker.addInitialSSTables(copyOf(readers));
         Assert.assertNull(tracker.tryModify(ImmutableList.of(MockSchema.sstable(0, cfs)), OperationType.COMPACTION));
@@ -107,7 +107,7 @@ public class TrackerTest
     public void testApply()
     {
         final ColumnFamilyStore cfs = MockSchema.newCFS();
-        final Tracker tracker = new Tracker(null, null, false);
+        final Tracker tracker = Tracker.newDummyTracker();
         final View resultView = ViewTest.fakeView(0, 0, cfs);
         final AtomicInteger count = new AtomicInteger();
         tracker.apply(new Predicate<View>()
@@ -347,7 +347,7 @@ public class TrackerTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         SSTableReader r1 = MockSchema.sstable(0, cfs), r2 = MockSchema.sstable(1, cfs);
-        Tracker tracker = new Tracker(null, null, false);
+        Tracker tracker = Tracker.newDummyTracker();
         MockListener listener = new MockListener(false);
         tracker.subscribe(listener);
         tracker.notifyAdded(singleton(r1), false);

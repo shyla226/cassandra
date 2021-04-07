@@ -35,9 +35,9 @@ public abstract class AbstractMemtableWithCommitlog extends AbstractMemtable
     // has been finalised, and this is enforced in the ColumnFamilyStore.setCommitLogUpperBound
     private final CommitLogPosition approximateCommitLogLowerBound = CommitLog.instance.getCurrentPosition();
     // the precise lower bound of CommitLogPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
-    protected AtomicReference<CommitLogPosition> commitLogLowerBound;
+    private final AtomicReference<CommitLogPosition> commitLogLowerBound;
     // the write barrier for directing writes to this memtable or the next during a switch
-    protected volatile OpOrder.Barrier writeBarrier;
+    private volatile OpOrder.Barrier writeBarrier;
     // the precise upper bound of CommitLogPosition owned by this memtable
     private volatile AtomicReference<CommitLogPosition> commitLogUpperBound;
 

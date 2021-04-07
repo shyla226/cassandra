@@ -73,6 +73,12 @@ extends SkipListMemtable        // to test framework
     public FlushCollection<?> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
         // TODO: implement
+        // FIXME: If the memtable can still be written to, this uses a view of the metadata that may not be up-to-date
+        // with the content. This may cause streaming to fail e.g. if a new column appears and is added to some row in
+        // the memtable between the time that this is constructed and the relevant row is written. Such failures should
+        // be recoverable by redoing the stream.
+        // If an implementation can produce a view/snapshot of the data at a point before the features were collected,
+        // this problem will not occur.
         return super.getFlushSet(from, to);
     }
 

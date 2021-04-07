@@ -200,7 +200,10 @@ public interface Memtable extends Comparable<Memtable>
     /** Size of the data not accounting for any metadata / mapping overheads */
     long getLiveDataSize();
 
-    /** Number of operations (i.e. {@link #put} calls) the memtable has executed */
+    /**
+     * Number of "operations" (in the sense defined in {@link PartitionUpdate#operationCount()}) the memtable has
+     * executed.
+     */
     long getOperations();
 
     /** Minimum timestamp of all stored data */
@@ -225,9 +228,9 @@ public interface Memtable extends Comparable<Memtable>
 
 
     /**
-     * This memtable's used memory.
+     * Creates a holder for memory usage collection.
      *
-     * This tracks on- and off-heap memory, as well as the ratio to the total permitted memtable memory.
+     * This is used to track on- and off-heap memory, as well as the ratio to the total permitted memtable memory.
      */
     static MemoryUsage newMemoryUsage()
     {
@@ -296,6 +299,10 @@ public interface Memtable extends Comparable<Memtable>
 
     /**
      * A collection of partitions for flushing plus some information required for writing an sstable.
+     *
+     * Note that the listed entries must conform with the specified metadata. In particular, if the memtable is still
+     * being written to, care must be taken to not list newer items as they may violate the bounds collected by the
+     * encoding stats or refer to columns that don't exist in the collected columns set.
      */
     interface FlushCollection<P extends Partition> extends Collection<P>, SSTableWriter.SSTableSizeParameters
     {

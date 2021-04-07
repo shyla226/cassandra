@@ -126,7 +126,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
         finally
         {
             indexer.commit();
-            finish();
+            reportAllocatedMemory();
         }
     }
 
@@ -167,7 +167,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
         this.heapSize += heapSize;
     }
 
-    public void finish()
+    public void reportAllocatedMemory()
     {
         allocator.onHeap().adjust(heapSize, writeOp);
     }
