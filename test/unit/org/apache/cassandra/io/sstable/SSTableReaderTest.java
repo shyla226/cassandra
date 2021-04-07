@@ -26,6 +26,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import org.junit.Assume;
 import org.junit.BeforeClass;
@@ -62,6 +63,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.PageAware;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
@@ -148,8 +150,9 @@ public class SSTableReaderTest
     @Test
     public void testSpannedIndexPositions() throws IOException
     {
+        // expect to create many regions - that is, the size of index must exceed the page size multiple times
         int originalMaxSegmentSize = MmappedRegions.MAX_SEGMENT_SIZE;
-        MmappedRegions.MAX_SEGMENT_SIZE = 40; // each index entry is ~11 bytes, so this will generate lots of segments
+        MmappedRegions.MAX_SEGMENT_SIZE = PageAware.PAGE_SIZE;
 
         try
         {
@@ -159,7 +162,7 @@ public class SSTableReaderTest
 
             // insert a bunch of data and compact to a single sstable
             CompactionManager.instance.disableAutoCompaction();
-            for (int j = 0; j < 100; j += 2)
+            for (int j = 0; j < 10000; j += 2)
             {
                 new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
                 .clustering("0")
@@ -172,7 +175,7 @@ public class SSTableReaderTest
 
             // check that all our keys are found correctly
             SSTableReader sstable = store.getLiveSSTables().iterator().next();
-            for (int j = 0; j < 100; j += 2)
+            for (int j = 0; j < 10000; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
                 FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position);
@@ -181,7 +184,7 @@ public class SSTableReaderTest
             }
 
             // check no false positives
-            for (int j = 1; j < 110; j += 2)
+            for (int j = 1; j < 11000; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
                 assert sstable.getPosition(dk, SSTableReader.Operator.EQ) == null;
@@ -341,7 +344,6 @@ public class SSTableReaderTest
 
     }
 
-
     @Test
     public void testOpeningSSTable() throws Exception
     {
@@ -484,7 +486,7 @@ public class SSTableReaderTest
         for(ColumnFamilyStore indexCfs : store.indexManager.getAllIndexColumnFamilyStores())
         {
             assert indexCfs.isIndex();
-            SSTableReader sstable = indexCfs.getLiveSSTables().iterator().next();
+            SSTableReader sstable = (SSTableReader) indexCfs.getLiveSSTables().iterator().next();
             assert sstable.first.getToken() instanceof LocalToken;
 
             SSTableReader.saveSummary(sstable.descriptor, sstable.first, sstable.last, sstable.indexSummary);
@@ -512,10 +514,13 @@ public class SSTableReaderTest
         boolean foundScanner = false;
         for (SSTableReader s : store.getLiveSSTables())
         {
-            try (ISSTableScanner scanner = s.getScanner(new Range<Token>(t(0), t(1))))
+            try (ISSTableScanner scanner = s.getScanner(new Range<>(t(0), t(1))))
             {
-                scanner.next(); // throws exception pre 5407
-                foundScanner = true;
+                if (scanner.hasNext())
+                {
+                    scanner.next(); // throws exception pre 5407
+                    foundScanner = true;
+                }
             }
         }
         assertTrue(foundScanner);
@@ -584,9 +589,9 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
         CompactionManager.instance.performMaximal(store, false);
 
-        Collection<SSTableReader> sstables = store.getLiveSSTables();
+        List<SSTableReader> sstables = ImmutableList.copyOf(store.getLiveSSTables());
         assert sstables.size() == 1;
-        final SSTableReader sstable = sstables.iterator().next();
+        final SSTableReader sstable = sstables.get(0);
 
         ThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(5);
         List<Future> futures = new ArrayList<>(NUM_PARTITIONS * 2);

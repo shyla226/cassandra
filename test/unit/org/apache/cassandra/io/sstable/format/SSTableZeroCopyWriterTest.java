@@ -31,6 +31,9 @@ import com.google.common.collect.ImmutableSet;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.apache.cassandra.SchemaLoader;
@@ -46,9 +49,8 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableZeroCopyWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.net.AsyncStreamingInputPlus;
@@ -65,6 +67,8 @@ import static org.junit.Assert.assertNotEquals;
 
 public class SSTableZeroCopyWriterTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(SSTableZeroCopyWriterTest.class);
+
     public static final String KEYSPACE1 = "BigTableBlockWriterTest";
     public static final String CF_STANDARD = "Standard1";
     public static final String CF_STANDARD2 = "Standard2";
@@ -135,7 +139,9 @@ public class SSTableZeroCopyWriterTest
         {
             writeDataTestCycle(buffer ->
             {
-                input.append(Unpooled.wrappedBuffer(buffer));
+                if (buffer.limit() > 0) { // skip empty files that would cause premature EOF
+                    input.append(Unpooled.wrappedBuffer(buffer));
+                }
                 return input;
             });
 
@@ -157,10 +163,9 @@ public class SSTableZeroCopyWriterTest
 
         for (Component component : componentsToWrite)
         {
-            if (Files.exists(Paths.get(desc.filenameFor(component))))
+            if (desc.fileFor(component).exists())
             {
                 Pair<DataInputPlus, Long> pair = getSSTableComponentData(sstable, component, bufferMapper);
-
                 btzcw.writeComponent(component.type, pair.left, pair.right);
             }
         }

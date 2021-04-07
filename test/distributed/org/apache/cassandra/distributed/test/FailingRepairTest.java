@@ -307,6 +307,12 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         }
 
         @Override
+        public boolean hasIndex()
+        {
+            return false;
+        }
+
+        @Override
         public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
         {
             return null;
