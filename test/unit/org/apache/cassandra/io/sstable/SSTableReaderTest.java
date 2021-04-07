@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
@@ -61,6 +62,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -656,7 +658,7 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
         CompactionManager.instance.performMaximal(store, false);
 
-        Collection<SSTableReader> sstables = store.getLiveSSTables();
+        Collection<SSTableReader> sstables = selectOnlyBigTableReaders(store.getLiveSSTables(), Collectors.toList());
         assert sstables.size() == 1;
         final SSTableReader sstable = sstables.iterator().next();
 

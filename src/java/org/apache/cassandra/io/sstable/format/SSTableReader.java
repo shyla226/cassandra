@@ -25,6 +25,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -232,6 +233,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     private RestorableMeter readMeter;
 
     private volatile double crcCheckChance;
+
+    public static Iterable<SSTableReader> selectOnlyBigTableReaders(Iterable<? extends SSTableReader> readers)
+    {
+        return Iterables.transform(Iterables.filter(readers, tr -> tr.descriptor.formatType == SSTableFormat.Type.BIG), SSTableReader.class::cast);
+    }
+
+    public static <T> T selectOnlyBigTableReaders(Collection<? extends SSTableReader> readers, Collector<? super SSTableReader, ?, T> collector)
+    {
+        return readers.stream().filter(tr -> tr.descriptor.formatType == SSTableFormat.Type.BIG).map(SSTableReader.class::cast).collect(collector);
+    }
 
     /**
      * Calculate approximate key count.

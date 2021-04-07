@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
+import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 import java.nio.ByteBuffer;
@@ -783,7 +784,7 @@ public class TableMetrics
             public Long getValue()
             {
                 long total = 0;
-                for (SSTableReader sst : cfs.getSSTables(SSTableSet.LIVE))
+                for (SSTableReader sst : selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     total += sst.getIndexSummaryOffHeapSize();
                 return total;
             }
@@ -817,7 +818,7 @@ public class TableMetrics
             protected double getNumerator()
             {
                 long hits = 0L;
-                for (SSTableReader sstable : cfs.getSSTables(SSTableSet.LIVE))
+                for (SSTableReader sstable : selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     hits += sstable.getKeyCacheHit();
                 return hits;
             }
@@ -825,7 +826,7 @@ public class TableMetrics
             protected double getDenominator()
             {
                 long requests = 0L;
-                for (SSTableReader sstable : cfs.getSSTables(SSTableSet.LIVE))
+                for (SSTableReader sstable : selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     requests += sstable.getKeyCacheRequest();
                 return Math.max(requests, 1); // to avoid NaN.
             }
