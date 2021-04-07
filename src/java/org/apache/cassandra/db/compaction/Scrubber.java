@@ -175,8 +175,9 @@ public class Scrubber implements Closeable
                 if (scrubInfo.isStopRequested())
                     throw new CompactionInterruptedException(scrubInfo.getCompactionInfo());
 
-                long rowStart = dataFile.getFilePointer();
-                outputHandler.debug("Reading row at " + rowStart);
+                // position in a data file where the partition starts
+                long dataStart = dataFile.getFilePointer();
+                outputHandler.debug("Reading row at " + dataStart);
 
                 DecoratedKey key = null;
                 try
@@ -189,23 +190,42 @@ public class Scrubber implements Closeable
                     // check for null key below
                 }
 
-                long dataStart = dataFile.getFilePointer();
-
+                // position of the partition in a data file, it points to the beginning of the partition key
                 long dataStartFromIndex = -1;
+                // size of the partition (including partition key)
                 long dataSizeFromIndex = -1;
-                ByteBuffer currentIndexKey = indexIterator != null ? indexIterator.key() : null;
-                if (currentIndexKey != null)
+                ByteBuffer currentIndexKey = null;
+                if (indexAvailable())
                 {
-                    dataStartFromIndex = indexIterator.dataPosition() + TypeSizes.SHORT_SIZE + currentIndexKey.remaining();
-                    if (advanceIndexNoThrow())
-                        dataSizeFromIndex = indexIterator.dataPosition() - dataStartFromIndex;
+                    currentIndexKey = indexIterator.key();
+                    dataStartFromIndex = indexIterator.dataPosition();
+                    if (!indexIterator.isExhausted())
+                    {
+                        try
+                        {
+                            indexIterator.advance();
+                            if (!indexIterator.isExhausted())
+                                dataSizeFromIndex = indexIterator.dataPosition() - dataStartFromIndex;
+                        }
+                        catch (Throwable th)
+                        {
+                            throwIfFatal(th);
+                            outputHandler.warn(String.format(
+                                "Failed to advance to the next index position. Index is corrupted. " +
+                                "Continuing without the index. " +
+                                "Last position read is %d.", indexIterator.dataPosition()), th);
+                            indexIterator.close();
+                            indexIterator = null;
+                            currentIndexKey = null;
+                            dataStartFromIndex = -1;
+                            dataSizeFromIndex = -1;
+                        }
+                    }
                 }
 
                 // avoid an NPE if key is null
                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
                 outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(dataSizeFromIndex)));
-
-                assert currentIndexKey != null || !indexAvailable();
 
                 try
                 {
@@ -236,12 +256,14 @@ public class Scrubber implements Closeable
                     if (currentIndexKey != null
                         && (key == null || !key.getKey().equals(currentIndexKey) || dataStart != dataStartFromIndex))
                     {
+                        // position where the row should start in a data file (right after the partition key)
+                        long rowStartFromIndex = dataStartFromIndex + TypeSizes.SHORT_SIZE + currentIndexKey.remaining();
                         outputHandler.output(String.format("Retrying from row index; data is %s bytes starting at %s",
-                                                  dataSizeFromIndex, dataStartFromIndex));
+                                                  dataSizeFromIndex, rowStartFromIndex));
                         key = sstable.decorateKey(currentIndexKey);
                         try
                         {
-                            dataFile.seek(dataStartFromIndex);
+                            dataFile.seek(rowStartFromIndex);
 
                             if (tryAppend(prevKey, key, writer))
                                 prevKey = key;
@@ -260,10 +282,23 @@ public class Scrubber implements Closeable
                     {
                         throwIfCannotContinue(key, th);
 
-                        outputHandler.warn("Row starting at position " + dataStart + " is unreadable; skipping to next");
                         badRows++;
-                        if (currentIndexKey != null)
+                        if (indexIterator != null)
+                        {
+                            outputHandler.warn("Row starting at position " + dataStart + " is unreadable; skipping to next");
                             seekToNextRow();
+                        }
+                        else
+                        {
+                            outputHandler.warn(String.format(
+                                "Unrecoverable error while scrubbing %s." +
+                                "Scrubbing cannot continue. The sstable will be marked for deletion. " +
+                                "You can attempt manual recovery from the pre-scrub snapshot. " +
+                                "You can also run nodetool repair to transfer the data from a healthy replica, if any.",
+                            sstable));
+                            // There's no way to resync and continue. Give up.
+                            break;
+                        }
                     }
                 }
             }
@@ -398,7 +433,6 @@ public class Scrubber implements Closeable
         {
             throwIfFatal(th);
             outputHandler.warn(String.format("Failed to seek to next row position %d", nextRowPositionFromIndex), th);
-            badRows++;
         }
     }
 
