@@ -21,7 +21,9 @@ import java.io.File;
 import java.util.*;
 
 import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -90,12 +92,6 @@ public class SSTableLoader implements StreamEventHandler
                                           if (p == null || !p.right.equals(Component.DATA))
                                               return false;
 
-                                          if (!new File(desc.filenameFor(Component.PRIMARY_INDEX)).exists())
-                                          {
-                                              outputHandler.output(String.format("Skipping file %s because index is missing", name));
-                                              return false;
-                                          }
-
                                           TableMetadataRef metadata = client.getTableMetadata(desc.cfname);
 
                                           if (metadata == null && // we did not find metadata
@@ -126,15 +122,7 @@ public class SSTableLoader implements StreamEventHandler
                                               return false;
                                           }
 
-                                          Set<Component> components = new HashSet<>();
-                                          components.add(Component.DATA);
-                                          components.add(Component.PRIMARY_INDEX);
-                                          if (new File(desc.filenameFor(Component.SUMMARY)).exists())
-                                              components.add(Component.SUMMARY);
-                                          if (new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists())
-                                              components.add(Component.COMPRESSION_INFO);
-                                          if (new File(desc.filenameFor(Component.STATS)).exists())
-                                              components.add(Component.STATS);
+                                          Set<Component> components = mainComponentsPresent(desc);
 
                                           try
                                           {
@@ -171,6 +159,20 @@ public class SSTableLoader implements StreamEventHandler
                                       Directories.OnTxnErr.IGNORE);
 
         return sstables;
+    }
+
+    public static Set<Component> mainComponentsPresent(Descriptor desc)
+    {
+        Set<Component> lookFor = Sets.union(desc.getFormat().requiredComponents(),
+                                            ImmutableSet.of(Component.COMPRESSION_INFO));
+
+        Set<Component> components = new HashSet<>();
+        for (Component component : lookFor)
+        {
+            if (new File(desc.filenameFor(component)).exists())
+                components.add(component);
+        }
+        return components;
     }
 
     public StreamResultFuture stream()

@@ -64,16 +64,6 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
                               .bufferType(BufferType.OFF_HEAP)
                               .build();
 
-    private static final ImmutableSet<Component> SUPPORTED_COMPONENTS =
-        ImmutableSet.of(Component.DATA,
-                        Component.PRIMARY_INDEX,
-                        Component.SUMMARY,
-                        Component.STATS,
-                        Component.COMPRESSION_INFO,
-                        Component.FILTER,
-                        Component.DIGEST,
-                        Component.CRC);
-
     public SSTableZeroCopyWriter(Descriptor descriptor,
                                  TableMetadataRef metadata,
                                  LifecycleNewTracker lifecycleNewTracker,
@@ -85,9 +75,9 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         this.metadata = metadata;
         this.componentWriters = new EnumMap<>(Component.Type.class);
 
-        if (!SUPPORTED_COMPONENTS.containsAll(components))
+        if (!descriptor.getFormat().streamingComponents().containsAll(components))
             throw new AssertionError(format("Unsupported streaming component detected %s",
-                                            Sets.difference(ImmutableSet.copyOf(components), SUPPORTED_COMPONENTS)));
+                                            Sets.difference(ImmutableSet.copyOf(components), descriptor.getFormat().streamingComponents())));
 
         for (Component c : components)
             componentWriters.put(c.type, makeWriter(descriptor, c));

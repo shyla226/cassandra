@@ -51,15 +51,18 @@ public final class ComponentManifest implements Iterable<Component>
     @VisibleForTesting
     public static ComponentManifest create(Descriptor descriptor)
     {
-        LinkedHashMap<Component, Long> components = new LinkedHashMap<>(STREAM_COMPONENTS.size());
+        LinkedHashMap<Component, Long> components = new LinkedHashMap<>(descriptor.getFormat().supportedComponents().size());
 
         for (Component component : STREAM_COMPONENTS)
         {
-            File file = new File(descriptor.filenameFor(component));
-            if (!file.exists())
-                continue;
+            if (descriptor.getFormat().supportedComponents().contains(component))
+            {
+                File file = new File(descriptor.filenameFor(component));
+                if (!file.exists())
+                    continue;
 
-            components.put(component, file.length());
+                components.put(component, file.length());
+            }
         }
 
         return new ComponentManifest(components);

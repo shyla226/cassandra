@@ -81,7 +81,7 @@ public class BigTableWriter extends SSTableWriter
                           LifecycleNewTracker lifecycleNewTracker,
                           Set<Component> indexComponents)
     {
-        super(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers, indexComponents);
+        super(descriptor, bigTableComponents(metadata.getLocal(), indexComponents), keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         if (compression)

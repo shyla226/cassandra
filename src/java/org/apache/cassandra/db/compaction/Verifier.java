@@ -149,16 +149,19 @@ public class Verifier implements Closeable
             markAndThrow();
         }
 
-        try
+        if (sstable.descriptor.getFormat().supportedComponents().contains(Component.SUMMARY))
         {
-            outputHandler.debug("Deserializing index summary for "+sstable);
-            deserializeIndexSummary(sstable);
-        }
-        catch (Throwable t)
-        {
-            outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup "+sstable.descriptor.filenameFor(Component.SUMMARY));
-            outputHandler.warn(t.getMessage());
-            markAndThrow(false);
+            try
+            {
+                outputHandler.debug("Deserializing index summary for " + sstable);
+                deserializeIndexSummary(sstable);
+            }
+            catch (Throwable t)
+            {
+                outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup " + sstable.descriptor.filenameFor(Component.SUMMARY));
+                outputHandler.warn(t.getMessage());
+                markAndThrow(false);
+            }
         }
 
         try

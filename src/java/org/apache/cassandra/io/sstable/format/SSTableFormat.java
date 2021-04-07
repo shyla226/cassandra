@@ -17,9 +17,12 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
+import java.util.Set;
+
 import com.google.common.base.CharMatcher;
 
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.Component;
 
 /**
  * Provides the accessors to data on disk.
@@ -70,4 +73,11 @@ public interface SSTableFormat
             throw new IllegalArgumentException("No Type constant " + name);
         }
     }
+
+    Set<Component> requiredComponents();
+
+    Set<Component> supportedComponents();
+
+    Set<Component> streamingComponents();
+
 }

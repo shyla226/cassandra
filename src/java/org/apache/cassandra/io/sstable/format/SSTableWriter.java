@@ -74,6 +74,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     }
 
     protected SSTableWriter(Descriptor descriptor,
+                            Set<Component> components,
                             long keyCount,
                             long repairedAt,
                             UUID pendingRepair,
@@ -81,10 +82,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                             TableMetadataRef metadata,
                             MetadataCollector metadataCollector,
                             SerializationHeader header,
-                            Collection<SSTableFlushObserver> observers,
-                            Set<Component> indexComponents)
+                            Collection<SSTableFlushObserver> observers)
     {
-        super(descriptor, components(metadata.getLocal(), indexComponents), metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        super(descriptor, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
         this.keyCount = keyCount;
         this.repairedAt = repairedAt;
         this.pendingRepair = pendingRepair;
@@ -166,7 +166,10 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, 0, header, indexGroups, lifecycleNewTracker);
     }
 
-    private static Set<Component> components(TableMetadata metadata, Collection<Component> indexComponents)
+    /**
+     * BigTable SSTable components. Should be moved to BigTableWriter but is left here for painless upstream merges.
+     */
+    public static Set<Component> bigTableComponents(TableMetadata metadata, Collection<Component> indexComponents)
     {
         Set<Component> components = new HashSet<Component>(Arrays.asList(Component.DATA,
                 Component.PRIMARY_INDEX,
@@ -373,7 +376,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         FileUtils.renameWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
 
         // rename it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.renameWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
+        if (components.contains(Component.SUMMARY))
+            FileUtils.renameWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
     }
 
     public static void copy(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
@@ -387,7 +391,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         FileUtils.copyWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
 
         // copy it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.copyWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
+        if (components.contains(Component.SUMMARY))
+            FileUtils.copyWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
     }
 
     public static void hardlink(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
@@ -401,7 +406,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         FileUtils.createHardLinkWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
 
         // copy it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.createHardLinkWithoutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
+        if (components.contains(Component.SUMMARY))
+            FileUtils.createHardLinkWithoutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
     }
 
     public static abstract class Factory

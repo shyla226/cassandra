@@ -151,8 +151,7 @@ public class SSTableZeroCopyWriterTest
         TableMetadataRef metadata = Schema.instance.getTableMetadataRef(desc);
 
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
-        Set<Component> componentsToWrite = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX,
-                                                           Component.STATS);
+        Set<Component> componentsToWrite = desc.getFormat().requiredComponents();
 
         SSTableZeroCopyWriter btzcw = new SSTableZeroCopyWriter(desc, metadata, txn, componentsToWrite);
 
