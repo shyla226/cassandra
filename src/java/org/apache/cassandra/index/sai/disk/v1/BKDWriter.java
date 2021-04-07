@@ -294,7 +294,6 @@ public class BKDWriter implements Closeable
 
     private class OneDimensionBKDWriter
     {
-
         final IndexOutput out;
         final List<Long> leafBlockFPs = new ArrayList<>();
         final List<byte[]> leafBlockStartValues = new ArrayList<>();

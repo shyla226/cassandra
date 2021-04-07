@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.index.sai.utils;
 
 import com.google.common.base.MoreObjects;
@@ -22,15 +23,32 @@ import com.google.common.base.MoreObjects;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.v1.OrdinalPostingList;
 
-//TODO Change this whole lot to use longs
 public class ArrayPostingList implements OrdinalPostingList
 {
-    private final int[] postings;
+    private final long[] postings;
+    private final int length;
     private int idx = 0;
+
+    public ArrayPostingList(long[] postings)
+    {
+        this.postings = postings;
+        length = postings.length;
+    }
+
+    public ArrayPostingList(long[] postings, int length)
+    {
+        this.postings = postings;
+        this.length = length;
+    }
 
     public ArrayPostingList(int[] postings)
     {
-        this.postings = postings;
+        this.postings = new long[postings.length];
+        length = postings.length;
+        for (int x=0; x < postings.length; x++)
+        {
+            this.postings[x] = postings[x];
+        }
     }
 
     @Override
@@ -42,7 +60,7 @@ public class ArrayPostingList implements OrdinalPostingList
     @Override
     public long nextPosting()
     {
-        if (idx >= postings.length)
+        if (idx >= length)
         {
             return PostingList.END_OF_STREAM;
         }
@@ -52,15 +70,15 @@ public class ArrayPostingList implements OrdinalPostingList
     @Override
     public long size()
     {
-        return postings.length;
+        return length;
     }
 
     @Override
     public long advance(long targetRowID)
     {
-        for (int i = idx; i < postings.length; ++i)
+        for (int i = idx; i < length; ++i)
         {
-            final int segmentRowId = getPostingAt(i);
+            final long segmentRowId = getPostingAt(i);
 
             idx++;
 
@@ -86,7 +104,7 @@ public class ArrayPostingList implements OrdinalPostingList
         idx = 0;
     }
 
-    public int getPostingAt(int i)
+    public long getPostingAt(int i)
     {
         return postings[i];
     }
