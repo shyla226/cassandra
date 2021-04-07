@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.PointValues.Relation;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
 import org.assertj.core.util.Lists;
@@ -95,6 +96,20 @@ public class BKDReaderTest extends NdiRandomizedTest
             return CELL_CROSSES_QUERY;
         }
     };
+
+    @Test
+    public void testRowPointOrdinalMap() throws Exception
+    {
+        final BKDReader reader = createReader(10);
+
+        final IndexOutput metaOutput = reader.indexComponents.createOutput(reader.indexComponents.meta, true);
+        MetadataWriter metaWriter = new MetadataWriter(metaOutput);
+        BKDRowOrdinalsWriter writer = new BKDRowOrdinalsWriter(reader,
+                                                               reader.indexComponents,
+                                                               metaWriter,
+                                                               10);
+        reader.close();
+    }
 
     @Test
     public void testInts1D() throws IOException
@@ -307,7 +322,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         return MergePostingList.merge(queue, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
-    private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
+    public static BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
     {
         return new BKDReader.IntersectVisitor()
         {
@@ -343,7 +358,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         };
     }
 
-    private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, BKDTreeRamBuffer buffer, IndexComponents indexComponents) throws IOException
+    public static BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, BKDTreeRamBuffer buffer, IndexComponents indexComponents) throws IOException
     {
         final NumericIndexWriter writer = new NumericIndexWriter(indexComponents,
                                                                  maxPointsPerLeaf,
@@ -369,7 +384,7 @@ public class BKDReaderTest extends NdiRandomizedTest
                              PrimaryKeyMap.IDENTITY);
     }
 
-    private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, MutableOneDimPointValues values, int numRows, IndexComponents indexComponents) throws IOException
+    public static BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, MutableOneDimPointValues values, int numRows, IndexComponents indexComponents) throws IOException
     {
         final NumericIndexWriter writer = new NumericIndexWriter(indexComponents,
                                                                  maxPointsPerLeaf,

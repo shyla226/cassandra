@@ -82,6 +82,18 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         this.components = indexComponents;
     }
 
+    public static class NodeEntry
+    {
+        public final long postingsFilePointer;
+        public final Collection<Integer> leafNodes;
+
+        public NodeEntry(long postingsFilePointer, Collection<Integer> leafNodes)
+        {
+            this.postingsFilePointer = postingsFilePointer;
+            this.leafNodes = leafNodes;
+        }
+    }
+
     @Override
     public void onLeaf(int leafNodeID, long leafBlockFP, IntArrayList pathToRoot)
     {
@@ -100,19 +112,35 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         }
     }
 
-    public static class NodeEntry
-    {
-        public final long numPoints;
-        public final long postingsFilePointer;
-
-        public NodeEntry(long numPoints, long postingsFilePointer)
-        {
-            this.numPoints = numPoints;
-            this.postingsFilePointer = postingsFilePointer;
-        }
-    }
-
-    @SuppressWarnings("resource")
+//<<<<<<< HEAD
+//    public static class NodeEntry
+//    {
+//        public final long numPoints;
+//        public final long postingsFilePointer;
+//
+//        public NodeEntry(long numPoints, long postingsFilePointer)
+//        {
+//            this.numPoints = numPoints;
+//            this.postingsFilePointer = postingsFilePointer;
+//        }
+//    }
+//
+//    @SuppressWarnings("resource")
+//||||||| parent of 0fbf5e5a33... first cut at port to ds-trunk
+//    public static class NodeEntry
+//    {
+//        public final long numPoints;
+//        public final long postingsFilePointer;
+//
+//        public NodeEntry(long numPoints, long postingsFilePointer)
+//        {
+//            this.numPoints = numPoints;
+//            this.postingsFilePointer = postingsFilePointer;
+//        }
+//    }
+//
+//=======
+//>>>>>>> 0fbf5e5a33... first cut at port to ds-trunk
     public long finish(IndexOutput out) throws IOException
     {
         checkState(postings.size() == leafOffsetToNodeID.size(),
@@ -163,14 +191,12 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 
             final PostingList mergedPostingList = MergePostingList.merge(postingLists);
 
-            final long numPoints = mergedPostingList.size();
-
             final long postingFilePosition = postingsWriter.write(mergedPostingList);
             // During compaction we could end up with an empty postings due to deletions.
             // The writer will return a fp of -1 if no postings were written.
             if (postingFilePosition >= 0)
             {
-                NodeEntry nodeEntry = new NodeEntry(numPoints, postingFilePosition);
+                NodeEntry nodeEntry = new NodeEntry(postingFilePosition, leaves);
                 nodeIDToPostingsFilePointer.put(nodeID, nodeEntry);
             }
         }
@@ -199,7 +225,11 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         {
             out.writeVInt(e.getKey());
             out.writeVLong(e.getValue().postingsFilePointer);
-            out.writeVLong(e.getValue().numPoints);
+            out.writeVInt(e.getValue().leafNodes.size());
+            for (int leafNodeID : e.getValue().leafNodes)
+            {
+                out.writeVInt(leafNodeID);
+            }
         }
     }
 }
