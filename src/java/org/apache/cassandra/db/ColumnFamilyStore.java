@@ -2170,13 +2170,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (memtableContent != null)
         {
             Collection<SSTableReader> sstables = memtableContent.finish(true);
-            refs = refs.ref(sstables);
+            refs = refs.addAll(Refs.ref(sstables));
 
             // Release the reference any written sstables start with.
             for (SSTableReader rdr : sstables)
             {
                 rdr.selfRef().release();
-                logger.info("Memtable ranges (keys {} size {}) written in {}", rdr.estimatedKeys(), rdr.getDataChannel().size(), rdr);
+                try
+                {
+                    logger.info("Memtable ranges (keys {} size {}) written in {}",
+                                rdr.estimatedKeys(),
+                                rdr.getDataChannel().size(),
+                                rdr);
+                }
+                catch (Throwable t)
+                {
+                    // ignore logging error
+                }
             }
         }
         return refs;
@@ -2288,7 +2298,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         final long truncatedAt;
         final CommitLogPosition replayAfter;
 
-        if (keyspace.getMetadata().params.durableWrites && !memtableWritesAreDurable()  // need to clear dirty regions
+        if ((keyspace.getMetadata().params.durableWrites && !memtableWritesAreDurable())  // need to clear dirty regions
             || DatabaseDescriptor.isAutoSnapshot()) // need sstable for snapshot
         {
             replayAfter = forceBlockingFlush(FlushReason.TRUNCATE);
@@ -2346,17 +2356,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      */
     public Future<CommitLogPosition> dumpMemtable(FlushReason reason)
     {
-        Memtable current = getTracker().getView().getCurrentMemtable();
-        if (current.shouldSwitch(reason))
-            synchronized (data)
-            {
-                final Flush flush = new Flush(true);
-                flushExecutor.execute(flush);
-                postFlushExecutor.execute(flush.postFlushTask);
-                return flush.postFlushTask;
-            }
+        synchronized (data)
+        {
+            final Flush flush = new Flush(true);
+            flushExecutor.execute(flush);
+            postFlushExecutor.execute(flush.postFlushTask);
+            return flush.postFlushTask;
+        }
+    }
+
+    public void unloadCf()
+    {
+        if (keyspace.getMetadata().params.durableWrites && !memtableWritesAreDurable())  // need to clear dirty regions
+            forceBlockingFlush(ColumnFamilyStore.FlushReason.DROP);
         else
-            return waitForFlushes();
+            FBUtilities.waitOnFuture(dumpMemtable(ColumnFamilyStore.FlushReason.DROP));
     }
 
     public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews)

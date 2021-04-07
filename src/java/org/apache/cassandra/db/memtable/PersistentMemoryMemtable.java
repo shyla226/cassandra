@@ -125,7 +125,7 @@ extends SkipListMemtable        // to test framework
         case DROP: // Called when a table is dropped. This memtable is no longer necessary.
         case TRUNCATE: // The data is being deleted, but the table remains.
             // Returning true asks the ColumnFamilyStore to replace this memtable object without flushing.
-            // This will call setDiscarded() below to delete all held data.
+            // This will call discard() below to delete all held data.
             return true;
 
         case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.

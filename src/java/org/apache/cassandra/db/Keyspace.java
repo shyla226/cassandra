@@ -413,11 +413,7 @@ public class Keyspace
     // disassociate a cfs from this keyspace instance.
     private void unloadCf(ColumnFamilyStore cfs)
     {
-        if (getMetadata().params.durableWrites && !cfs.memtableWritesAreDurable())  // need to clear dirty regions
-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.DROP);
-        else
-            FBUtilities.waitOnFuture(cfs.dumpMemtable(ColumnFamilyStore.FlushReason.DROP));
-
+        cfs.unloadCf();
         cfs.invalidate();
     }
 

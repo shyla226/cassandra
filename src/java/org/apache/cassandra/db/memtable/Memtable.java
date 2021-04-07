@@ -395,6 +395,7 @@ public interface Memtable extends Comparable<Memtable>
      * - SNAPSHOT will be followed by performSnapshot().
      * - STREAMING/REPAIR will be followed by creating a FlushSet for the streamed/repaired ranges. This data will be
      *   used to create sstables, which will be streamed and then deleted.
+     * This will not be called if the sstable is switched because of truncation or drop.
      */
     boolean shouldSwitch(ColumnFamilyStore.FlushReason reason);
 
