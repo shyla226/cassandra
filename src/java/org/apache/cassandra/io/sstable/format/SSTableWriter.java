@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -272,7 +273,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     /**
      * Open the resultant SSTableReader before it has been fully written
      */
-    public abstract SSTableReader openEarly();
+    public abstract boolean openEarly(Consumer<SSTableReader> callWhenReady);
 
     /**
      * Open the resultant SSTableReader once it has been fully written, but before the

@@ -21,6 +21,7 @@ import java.io.*;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -304,12 +305,12 @@ public class BigTableWriter extends SSTableWriter
     }
 
     @SuppressWarnings("resource")
-    public SSTableReader openEarly()
+    public boolean openEarly(Consumer<SSTableReader> callWhenReady)
     {
         // find the max (exclusive) readable key
         IndexSummaryBuilder.ReadableBoundary boundary = iwriter.getMaxReadable();
         if (boundary == null)
-            return null;
+            return false;
 
         StatsMetadata stats = statsMetadata();
         assert boundary.indexLength > 0 && boundary.dataLength > 0;
@@ -336,7 +337,8 @@ public class BigTableWriter extends SSTableWriter
         // now it's open, find the ACTUAL last readable key (i.e. for which the data file has also been flushed)
         sstable.first = getMinimalKey(first);
         sstable.last = getMinimalKey(boundary.lastKey);
-        return sstable;
+        callWhenReady.accept(sstable);
+        return true;
     }
 
     void invalidateCacheAtBoundary(FileHandle dfile)
