@@ -332,7 +332,7 @@ public class BigTableWriter extends SSTableWriter
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(boundary.dataLength);
         invalidateCacheAtBoundary(dfile);
-        SSTableReader sstable = SSTableReader.internalOpen(descriptor,
+        SSTableReader sstable = BigTableReader.internalOpen(descriptor,
                                                            components, metadata,
                                                            ifile, dfile,
                                                            indexSummary,

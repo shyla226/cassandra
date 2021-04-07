@@ -54,7 +54,7 @@ public class BigTableReader extends SSTableReader
 
     protected final BigTableRowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer;
 
-    BigTableReader(SSTableReaderBuilder builder)
+    public BigTableReader(SSTableReaderBuilder builder)
     {
         super(builder);
         this.rowIndexEntrySerializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);

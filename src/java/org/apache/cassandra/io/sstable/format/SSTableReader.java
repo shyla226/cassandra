@@ -363,24 +363,24 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return open(descriptor, metadata);
     }
 
-    public static SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+    private static SSTableReader open(Descriptor desc, TableMetadataRef metadata)
     {
         return open(desc, componentsFor(desc), metadata);
     }
 
-    public static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         return open(descriptor, components, metadata, true, false);
     }
 
     // use only for offline or "Standalone" operations
-    public static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
+    private static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
     {
         return open(descriptor, components, cfs.metadata, false, true);
     }
 
     // use only for offline or "Standalone" operations
-    public static SSTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
+    private static SSTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
     {
         return open(descriptor, componentsFor(descriptor), metadata, false, true);
     }
@@ -394,7 +394,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return opened SSTableReader
      * @throws IOException
      */
-    public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
@@ -448,11 +448,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return {@link SSTableReader}
      * @throws IOException
      */
-    public static SSTableReader open(Descriptor descriptor,
-                                     Set<Component> components,
-                                     TableMetadataRef metadata,
-                                     boolean validate,
-                                     boolean isOffline)
+    private static SSTableReader open(Descriptor descriptor,
+                                      Set<Component> components,
+                                      TableMetadataRef metadata,
+                                      boolean validate,
+                                      boolean isOffline)
     {
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
@@ -538,7 +538,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     SSTableReader sstable;
                     try
                     {
-                        sstable = open(entry.getKey(), entry.getValue(), metadata);
+                        sstable = entry.getKey().getFormat().getReaderFactory().open(entry.getKey(), entry.getValue(), metadata);
                     }
                     catch (CorruptSSTableException ex)
                     {
@@ -2248,12 +2248,96 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         GlobalTidy.lookup.clear();
     }
 
+    /**
+     * Main entry point for opening (creating a new instance of) a Reader. The desired usage is obtaining the
+     * factory instance from SSTable descriptor and invoking one of the open methods. This usage makes
+     * static @{link SSTableReader} open* methods obsolete (all of them are private now).
+     * {@link SSTableReader} subclasses are exepected to provide an implementation of this interface.
+     */
     public interface Factory
     {
-        SSTableReader open(SSTableReaderBuilder builder);
-
         PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata);
+
+        // TODO in the implementation of those methods we will refer the current static methods which are implemented in AbstractdBigTableReader
+        // TODO make those static openXXX methods private
+
+        SSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata);
+
+        SSTableReader open(Descriptor desc);
+
+        SSTableReader open(Descriptor desc, TableMetadataRef metadata);
+
+        SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata);
+
+        SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline);
+
+        SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef);
+
+        SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs);
+
+        SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData);
+
     }
+
+    /**
+     * Opens BigTable format readers. Proxies open calls to (private) static methods of @{link SSTableReader}.
+     * This class servers as a proxy to legacy private static methods that should be refactored out of
+     * SSTableReader (as they are specific to BigTable format) but are left in the Reader for painless
+     * upstream merges.
+     * Implementations of this abstract class is provided by BigTable format reader.
+     */
+    public abstract static class AbstractBigTableReaderFactory implements SSTableReader.Factory
+    {
+        @Override
+        public SSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return SSTableReader.openForBatch(desc, components, metadata);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc)
+        {
+            return SSTableReader.open(desc);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+        {
+            return SSTableReader.open(desc, metadata);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return SSTableReader.open(desc, components, metadata);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
+        {
+            return SSTableReader.open(desc, components, metadata, validate, isOffline);
+        }
+
+        @Override
+        public SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
+        {
+            return SSTableReader.openNoValidation(desc, tableMetadataRef);
+        }
+
+        @Override
+        public SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
+        {
+            return SSTableReader.openNoValidation(desc, components, cfs);
+        }
+
+        @Override
+        public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+        {
+            return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
+        }
+
+    }
+
 
     public static class PartitionPositionBounds
     {
@@ -2359,7 +2443,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         SSTableReader reader;
         try
         {
-            reader = SSTableReader.open(newDescriptor, components, cfs.metadata);
+            reader = newDescriptor.formatType.info.getReaderFactory().open(newDescriptor, components, cfs.metadata);
         }
         catch (Throwable t)
         {

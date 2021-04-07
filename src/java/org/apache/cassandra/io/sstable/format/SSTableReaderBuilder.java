@@ -24,7 +24,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.io.sstable.*;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
@@ -261,7 +261,7 @@ public abstract class SSTableReaderBuilder
         @Override
         public SSTableReader build()
         {
-            SSTableReader reader = readerFactory.open(this);
+            SSTableReader reader = new BigTableReader(this);
 
             reader.setup(true);
             return reader;
@@ -300,7 +300,7 @@ public abstract class SSTableReaderBuilder
                 dfile = dbuilder.bufferSize(dataBufferSize).complete();
                 bf = FilterFactory.AlwaysPresent;
 
-                SSTableReader sstable = readerFactory.open(this);
+                SSTableReader sstable = new BigTableReader(this);
 
                 sstable.first = first;
                 sstable.last = last;
@@ -364,7 +364,7 @@ public abstract class SSTableReaderBuilder
                 throw new CorruptSSTableException(t, dataFilePath);
             }
 
-            SSTableReader sstable = readerFactory.open(this);
+            SSTableReader sstable = new BigTableReader(this);
 
             sstable.first = first;
             sstable.last = last;

@@ -384,7 +384,7 @@ public class ScrubTest
 
             try
             {
-                SSTableReader.open(desc, cfs.metadata);
+                desc.getFormat().getReaderFactory().open(desc, cfs.metadata);
                 fail("SSTR validation should have caught the out-of-order rows");
             }
             catch (CorruptSSTableException ise)
@@ -401,7 +401,7 @@ public class ScrubTest
             components.add(Component.SUMMARY);
             components.add(Component.TOC);
 
-            SSTableReader sstable = SSTableReader.openNoValidation(desc, components, cfs);
+            SSTableReader sstable = desc.getFormat().getReaderFactory().openNoValidation(desc, components, cfs);
             if (sstable.last.compareTo(sstable.first) < 0)
                 sstable.last = sstable.first;
 

@@ -84,12 +84,13 @@ public class StandaloneVerifier
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
             {
                 Set<Component> components = entry.getValue();
+                Descriptor descriptor = entry.getKey();
                 if (!components.contains(Component.DATA) || !components.contains(Component.PRIMARY_INDEX))
                     continue;
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    SSTableReader sstable = descriptor.getFormat().getReaderFactory().openNoValidation(descriptor, components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)

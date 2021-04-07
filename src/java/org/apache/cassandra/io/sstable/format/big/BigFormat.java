@@ -24,6 +24,7 @@ import java.util.UUID;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -143,14 +144,8 @@ public class BigFormat implements SSTableFormat
         }
     }
 
-    static class ReaderFactory implements SSTableReader.Factory
+    static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
-        @Override
-        public SSTableReader open(SSTableReaderBuilder builder)
-        {
-            return new BigTableReader(builder);
-        }
-
         @Override
         public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
         {
