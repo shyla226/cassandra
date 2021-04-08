@@ -19,14 +19,24 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nonnull;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,18 +60,27 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
@@ -77,6 +96,9 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     protected FileHandle rowIndexFile;
     protected PartitionIndex partitionIndex;
+
+    @VisibleForTesting
+    public static final double fpChanceTolerance = Double.parseDouble(System.getProperty(Config.PROPERTY_PREFIX + "bloom_filter_fp_chance_tolerance", "0.000001"));
 
     TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, FileHandle rowIndexFile, PartitionIndex partitionIndex, IFilter bf)
     {
@@ -375,6 +397,11 @@ public class TrieIndexSSTableReader extends SSTableReader
             }
             return new RowIndexEntry<>(pos);
         }
+    }
+
+    protected boolean inBloomFilter(DecoratedKey dk)
+    {
+        return first.compareTo(dk) <= 0 && last.compareTo(dk) >= 0 && bf.isPresent(dk);
     }
 
     public boolean contains(DecoratedKey dk)
@@ -710,4 +737,133 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
         return (long) (selectedDataSize / sstableMetadata.estimatedPartitionSize.rawMean());
     }
+
+    private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
+    {
+        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER))))))
+        {
+            return BloomFilterSerializer.deserialize(stream, oldBfFormat);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to deserialize bloom filter: {}", t.getMessage());
+            return null;
+        }
+    }
+
+    private static IFilter recreateBloomFilter(Descriptor descriptor, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
+    {
+        if (estimatedKeysCount <= 0)
+        {
+            logger.warn("Cannot recreate bloom filter, cannot estimate number of keys");
+            return null;
+        }
+
+        IFilter bf = null;
+        try
+        {
+            bf = FilterFactory.getFilter(estimatedKeysCount, fpChance);
+
+            Factory readerFactory = descriptor.getFormat().getReaderFactory();
+            try (PartitionIterator iter = (PartitionIterator) readerFactory.indexIterator(descriptor, metadata))
+            {
+                while (true)
+                {
+                    DecoratedKey key = iter.decoratedKey();
+                    if (key == null)
+                        break;
+                    bf.add(key);
+                    iter.advance();
+                }
+            }
+
+            File path = descriptor.fileFor(Component.FILTER);
+            try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                 DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
+            {
+                BloomFilterSerializer.serialize((BloomFilter) bf, stream);
+                stream.flush();
+                SyncUtil.sync((FileChannel) fos);
+            }
+
+            // Update the sstable metadata to contain the current FP chance
+            ValidationMetadata validation = new ValidationMetadata(metadata.partitioner.getClass().getCanonicalName(), fpChance);
+            sstableMetadata.put(MetadataType.VALIDATION, validation);
+            descriptor.getMetadataSerializer().rewriteSSTableMetadata(descriptor, sstableMetadata);
+            return bf;
+        }
+        catch (Throwable t)
+        {
+            if (bf != null)
+            {
+                bf.close();
+            }
+
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to recreate bloom filter: {}", t.getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Load the bloom filter from Filter.db file, if it exists and if the FP chance has not changed.
+     * Otherwise recreate the bloom filter using the current FP chance.
+     *
+     * @param sstableMetadata the sstable metadata, for extracting and changing the FP chance
+     * @param fpChance the current FP chance taken from the table metadata
+     */
+    @VisibleForTesting
+    static @Nonnull
+    IFilter getBloomFilter(Descriptor descriptor, boolean loadIfNeeded, boolean recreateIfNeeded, TableMetadata metadata, long estimatedKeysCount, Map<MetadataType, MetadataComponent> sstableMetadata, double fpChance)
+    {
+        if (Math.abs(1 - fpChance) <= fpChanceTolerance)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Returning pass-through bloom filter, FP chance is equal to 1: {}", fpChance);
+
+            return FilterFactory.AlwaysPresent;
+        }
+
+        ValidationMetadata validation = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
+        boolean fpChanged = Math.abs(fpChance - validation.bloomFilterFPChance) > fpChanceTolerance;
+
+        if (loadIfNeeded && descriptor.fileFor(Component.FILTER).exists())
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Deserializing bloom filter");
+
+            IFilter bf = deserializeBloomFilter(descriptor, descriptor.version.hasOldBfFormat());
+            if (bf != null)
+                return bf;
+        }
+
+        String reason = fpChanged
+                        ? String.format("false positive chance changed from %f to %f", validation.bloomFilterFPChance, fpChance)
+                        : (!descriptor.fileFor(Component.FILTER).exists()
+                           ? "there is no bloom filter file"
+                           : "deserialization failed");
+
+        if (logger.isDebugEnabled())
+            logger.debug("Recreating bloom filter because {}", reason);
+
+        IFilter bf = recreateIfNeeded
+                     ? recreateBloomFilter(descriptor, metadata, estimatedKeysCount, sstableMetadata, fpChance)
+                     : FilterFactory.AlwaysPresent;
+        if (bf != null)
+            return bf;
+
+        logger.warn("Could not recreate or deserialize existing bloom filter, continuing with a pass-through " +
+                    "bloom filter but this will significantly impact reads performance");
+
+        return FilterFactory.AlwaysPresent;
+    }
+
+    public static boolean hasBloomFilter(double fpChance)
+    {
+        Preconditions.checkArgument(fpChance <= 1, "FP chance should be less or equal to 1: " + fpChance);
+        return Math.abs(1 - fpChance) > fpChanceTolerance;
+    }
+
 }
