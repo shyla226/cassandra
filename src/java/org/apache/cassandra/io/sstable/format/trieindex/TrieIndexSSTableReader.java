@@ -471,6 +471,49 @@ public class TrieIndexSSTableReader extends SSTableReader
         return new FileHandle[] { partitionIndex.getFileHandle(), rowIndexFile, dfile };
     }
 
+    /**
+     * @param bounds Must not be wrapped around ranges
+     * @return PartitionIndexIterator within the given bounds
+     */
+    public PartitionIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds) throws IOException
+    {
+        return new KeysRange(bounds).iterator();
+    }
+
+    private final class KeysRange
+    {
+        PartitionPosition left;
+        boolean inclusiveLeft;
+        PartitionPosition right;
+        boolean inclusiveRight;
+
+        KeysRange(AbstractBounds<PartitionPosition> bounds)
+        {
+            assert !AbstractBounds.strictlyWrapsAround(bounds.left, bounds.right) : String.format("[%s,%s]", bounds.left, bounds.right);
+
+            left = bounds.left;
+            inclusiveLeft = bounds.inclusiveLeft();
+            if (filterFirst() && first.compareTo(left) > 0)
+            {
+                left = first;
+                inclusiveLeft = true;
+            }
+
+            right = bounds.right;
+            inclusiveRight = bounds.inclusiveRight();
+            if (filterLast() && last.compareTo(right) < 0)
+            {
+                right = last;
+                inclusiveRight = true;
+            }
+        }
+
+        PartitionIterator iterator() throws IOException
+        {
+            return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight);
+        }
+    }
+
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
     {
         AbstractBounds<PartitionPosition> cover = Bounds.bounds(left, inclusiveLeft, right, inclusiveRight);
