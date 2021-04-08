@@ -89,6 +89,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
@@ -130,39 +131,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, null, dfile, null, bf);
         this.rowIndexFile = rowIndexFile;
         this.partitionIndex = partitionIndex;
-    }
-
-    protected void loadIndex(boolean preload) throws IOException
-    {
-        if (components.contains(Component.PARTITION_INDEX))
-        {
-            try (
-                    FileHandle.Builder rowIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
-                    FileHandle.Builder partitionIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-            )
-            {
-                rowIndexFile = rowIndexBuilder.complete();
-                // only preload if memmapped
-                partitionIndex = PartitionIndex.load(partitionIndexBuilder, metadata().partitioner, preload);
-                first = partitionIndex.firstKey();
-                last = partitionIndex.lastKey();
-            }
-        }
-    }
-
-    protected void releaseIndex()
-    {
-        if (rowIndexFile != null)
-        {
-            rowIndexFile.close();
-            rowIndexFile = null;
-        }
-
-        if (partitionIndex != null)
-        {
-            partitionIndex.close();
-            partitionIndex = null;
-        }
     }
 
     /**
@@ -464,11 +432,6 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
         return entry;
-    }
-
-    protected FileHandle[] getFilesToBeLocked()
-    {
-        return new FileHandle[] { partitionIndex.getFileHandle(), rowIndexFile, dfile };
     }
 
     /**
@@ -835,6 +798,14 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
+    public void setupOnline()
+    {
+        final ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata().id);
+        if (cfs != null)
+            setCrcCheckChance(cfs.getCrcCheckChance());
+    }
+
+    @Override
     public SSTableReader cloneAndReplace(IFilter newBloomFilter)
     {
         return cloneInternal(first, openReason, newBloomFilter);
@@ -947,6 +918,28 @@ public class TrieIndexSSTableReader extends SSTableReader
     public boolean isKeyCacheEnabled()
     {
         return false; // tries do not have index summaries
+    }
+
+    @Override
+    public DecoratedKey firstKeyBeyond(PartitionPosition token)
+    {
+        try
+        {
+            RowIndexEntry<?> pos = getPosition(token, Operator.GT);
+            if (pos == null)
+                return null;
+
+            try (FileDataInput in = dfile.createReader(pos.position))
+            {
+                ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
+                return decorateKey(indexKey);
+            }
+        }
+        catch (IOException e)
+        {
+            markSuspect();
+            throw new CorruptSSTableException(e, dfile.path());
+        }
     }
 
     @Override
