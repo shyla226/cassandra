@@ -56,7 +56,7 @@ public final class TrieIndexEntry extends RowIndexEntry<RowIndexReader.IndexInfo
     }
 
     @Override
-    public int rowIndexCount()
+    public int columnsIndexCount()
     {
         return rowIndexCount;
     }
