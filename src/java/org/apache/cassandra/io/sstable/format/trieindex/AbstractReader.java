@@ -181,17 +181,6 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
         }
     }
 
-    /**
-     * Resets the state to the last known finished item
-     * This is needed to handle async retries - due to missing data in the chunk cache.
-     * Classes that override this must call the base class too.
-     */
-    public void resetReaderState() throws IOException
-    {
-        if (filePos != -1)
-            seekToPosition(filePos);
-    }
-
     public void seekToPosition(long position) throws IOException
     {
         file.seek(position);

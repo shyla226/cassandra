@@ -83,4 +83,10 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
             dataPosition = -1;
         }
     }
+
+    @Override
+    public boolean isExhausted()
+    {
+        return dataPosition == -1;
+    }
 }

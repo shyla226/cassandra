@@ -396,26 +396,4 @@ public class PartitionIndex implements Closeable
         }
     }
 
-    /**
-     * debug/test code
-     */
-    private void dumpTrie(String fileName)
-    {
-        try(PrintStream ps = new PrintStream(new File(fileName)))
-        {
-            dumpTrie(ps);
-        }
-        catch (Throwable t)
-        {
-            logger.warn("Failed to dump trie to {} due to exception {}", fileName, t);
-        }
-    }
-
-    private void dumpTrie(PrintStream out)
-    {
-        try (Reader rdr = openReader())
-        {
-            rdr.dumpTrie(out, (buf, ppos, pbits) -> Long.toString(getIndexPos(buf, ppos, pbits)));
-        }
-    }
 }
