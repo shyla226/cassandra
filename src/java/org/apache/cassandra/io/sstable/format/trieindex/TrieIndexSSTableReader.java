@@ -119,29 +119,32 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     /**
-     * Clone this reader with the new open reason and set the clone as replacement.
+     * Clone this reader with the new start, open reason, bloom filter, and set the clone as replacement.
      *
-     * @param reason the {@code OpenReason} for the replacement.
+     * @param first new start for the replacement
+     * @param openReason the {@code OpenReason} for the replacement.
+     * @param bf Bloom filter for the replacement
      *
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
-    protected SSTableReader clone(OpenReason reason)
-    {
-        TrieIndexSSTableReader replacement = internalOpen(descriptor,
-                                                          components,
-                                                          metadata,
-                                                          rowIndexFile.sharedCopy(),
-                                                          dfile.sharedCopy(),
-                                                          partitionIndex.sharedCopy(),
-                                                          bf.sharedCopy(),
-                                                          maxDataAge,
-                                                          sstableMetadata,
-                                                          reason,
-                                                          header);
-        replacement.first = first;
-        replacement.last = last;
-        replacement.isSuspect.set(isSuspect.get());
-        return replacement;
+    private TrieIndexSSTableReader cloneInternal(DecoratedKey first, OpenReason openReason, IFilter bf) {
+        TrieIndexSSTableReader clone = new TrieIndexSSTableReader(descriptor,
+                                                                  components,
+                                                                  metadata,
+                                                                  maxDataAge,
+                                                                  sstableMetadata,
+                                                                  openReason,
+                                                                  header,
+                                                                  dfile.sharedCopy(),
+                                                                  rowIndexFile.sharedCopy(),
+                                                                  partitionIndex.sharedCopy(),
+                                                                  bf);
+        clone.first = first;
+        clone.last = last;
+        clone.isSuspect.set(isSuspect.get());
+        clone.setup(true);
+
+        return clone;
     }
 
     /**
@@ -150,7 +153,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     static TrieIndexSSTableReader internalOpen(Descriptor desc,
                                                Set<Component> components,
                                                TableMetadataRef metadata,
-                                               FileHandle ifile,
+                                               FileHandle rowIndexFile,
                                                FileHandle dfile,
                                                PartitionIndex partitionIndex,
                                                IFilter bf,
@@ -159,19 +162,32 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                OpenReason openReason,
                                                SerializationHeader header)
     {
-        assert desc != null && ifile != null && dfile != null && partitionIndex != null && bf != null && sstableMetadata != null;
+        assert desc != null && rowIndexFile != null && dfile != null && partitionIndex != null && bf != null && sstableMetadata != null;
 
         // Make sure the SSTableReader internalOpen part does the same.
         assert desc.getFormat() == TrieIndexFormat.instance;
-        TrieIndexSSTableReader reader = TrieIndexFormat.readerFactory.open(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
-
-        reader.bf = bf;
-        reader.rowIndexFile = ifile;
-        reader.dfile = dfile;
-        reader.partitionIndex = partitionIndex;
-        reader.setup(true);
+        TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
+        reader.first = partitionIndex.firstKey();
+        reader.last = partitionIndex.lastKey();
 
         return reader;
+    }
+
+    static TrieIndexSSTableReader internalOpen(Descriptor desc,
+                                               Set<Component> components,
+                                               TableMetadataRef metadata,
+                                               FileHandle dfile,
+                                               IFilter bf,
+                                               long maxDataAge,
+                                               StatsMetadata sstableMetadata,
+                                               OpenReason openReason,
+                                               SerializationHeader header)
+    {
+        assert desc != null && dfile != null && bf != null && sstableMetadata != null;
+
+        // Make sure the SSTableReader internalOpen part does the same.
+        assert desc.getFormat() == TrieIndexFormat.instance;
+        return new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, null, null, bf);
     }
 
     @Override
