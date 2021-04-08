@@ -212,9 +212,8 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "bb";
+        public static final String current_version = "ca";
         public static final String earliest_supported_version = "aa";
-        public static final EncodingVersion latestVersion = EncodingVersion.last();
 
         // aa (DSE 6.0): trie index format
         // ab (DSE pre-6.8): ILLEGAL - handled as 'b' (predates 'ba'). Pre-GA "LABS" releases of DSE 6.8 used this
@@ -228,9 +227,11 @@ public class TrieIndexFormat implements SSTableFormat
         //               improved min/max clustering representation
         //               presence marker for partition level deletions
         // bb (DSE 6.8.5): added hostId of the node from which the sstable originated (DB-4629)
+        // ca (DSE-DB aka Stargazer based on OSS 4.0): all bb fields  + all OSS fields
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
         private final boolean isLatestVersion;
+
         /**
          * DB-2648/CASSANDRA-9067: DSE 6.8/OSS 4.0 bloom filter representation changed (bitset data is no longer stored
          * as BIG_ENDIAN longs, which avoids some redundant bit twiddling).
@@ -238,6 +239,9 @@ public class TrieIndexFormat implements SSTableFormat
         private final boolean hasOldBfFormat;
         private final boolean hasAccurateLegacyMinMax;
         private final boolean hasOriginatingHostId;
+        private final boolean hasMaxColumnValueLengths;
+
+        private final int correspondingMessagingVersion;
 
         TrieIndexVersion(String version)
         {
@@ -246,12 +250,15 @@ public class TrieIndexFormat implements SSTableFormat
             isLatestVersion = version.compareTo(current_version) == 0;
             hasOldBfFormat = version.compareTo("b") < 0;
             hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
-            hasOriginatingHostId = (version.compareTo("ad") >= 0 && version.compareTo("ba") < 0) || (version.compareTo("bb") >= 0);
+            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])"); // TODO TBD
+            hasMaxColumnValueLengths = version.matches("b[a-z]"); // TODO TBD
+            correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_40 : MessagingService.VERSION_3014;
         }
 
+        // this is for the ab version which was used in the LABS, and then has been renamed to ba
         private static String mapAb(String version)
         {
-            return "ab".equals(version) ? "b" : version;
+            return "ab".equals(version) ? "ba" : version;
         }
 
         @Override
@@ -272,47 +279,38 @@ public class TrieIndexFormat implements SSTableFormat
             return true;
         }
 
+        @Override
         public boolean hasMaxCompressedLength()
         {
             return true;
         }
 
+        @Override
         public boolean hasPendingRepair()
         {
             return true;
         }
 
+        @Override
         public boolean hasMetadataChecksum()
         {
             return true;
         }
 
         @Override
-        public boolean indicesAreEncrypted()
+        public boolean hasZeroCopyMetadata()
         {
-            return version.compareTo("b") >= 0;
-        }
-
-        @Override
-        public boolean metadataAreEncrypted()
-        {
-            return version.compareTo("ba") >= 0;
-        }
-
-        @Override
-        public boolean supportsZeroCopy()
-        {
-            return version.compareTo("b") >= 0;
+            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
         }
 
         @Override
         public boolean hasIncrementalNodeSyncMetadata()
         {
-            return version.compareTo("b") >= 0;
+            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
         }
 
         @Override
-        public boolean hasAccurateLegacyMinMax()
+        public boolean hasAccurateMinMax()
         {
             return hasAccurateLegacyMinMax;
         }
@@ -326,26 +324,21 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public boolean hasImprovedMinMax()
         {
-            // Note that this was not in early 6.8 "LABS" releases
             return version.compareTo("ba") >= 0;
         }
 
+        // TODO TBD
         @Override
         public boolean hasMaxColumnValueLengths()
         {
-            return version.compareTo("ba") >= 0;
+            return hasMaxColumnValueLengths;
         }
 
+        // TODO TBD
         @Override
         public boolean hasOriginatingHostId()
         {
             return hasOriginatingHostId;
-        }
-
-        @Override
-        public EncodingVersion encodingVersion()
-        {
-            return latestVersion;
         }
 
         @Override
@@ -358,6 +351,27 @@ public class TrieIndexFormat implements SSTableFormat
         public boolean hasOldBfFormat()
         {
             return hasOldBfFormat;
+        }
+
+        // this field is not present in DSE
+        @Override
+        public int correspondingMessagingVersion()
+        {
+            return correspondingMessagingVersion;
+        }
+
+        // this field is not present in DSE
+        @Override
+        public boolean isCompatibleForStreaming()
+        {
+            return isCompatible() && version.charAt(0) == current_version.charAt(0);
+        }
+
+        // this field is not present in DSE
+        @Override
+        public boolean hasIsTransient()
+        {
+            return version.compareTo("ca") >= 0;
         }
     }
 }
