@@ -29,6 +29,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -77,10 +78,12 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.SyncUtil;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
@@ -864,6 +867,106 @@ public class TrieIndexSSTableReader extends SSTableReader
     {
         Preconditions.checkArgument(fpChance <= 1, "FP chance should be less or equal to 1: " + fpChance);
         return Math.abs(1 - fpChance) > fpChanceTolerance;
+    }
+
+    public static TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
+    {
+        checkRequiredComponents(descriptor, components, validate);
+
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        Map<MetadataType, MetadataComponent> sstableMetadata;
+        try
+        {
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+        }
+        catch (IOException e)
+        {
+            throw new CorruptSSTableException(e, descriptor.filenameFor(Component.STATS));
+        }
+
+        ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
+        StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
+        SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
+
+        // Check if sstable is created using same partitioner.
+        // Partitioner can be null, which indicates older version of sstable or no stats available.
+        // In that case, we skip the check.
+        String partitionerName = metadata.get().partitioner.getClass().getCanonicalName();
+        if (validationMetadata != null && !partitionerName.equals(validationMetadata.partitioner))
+        {
+            String msg = String.format("Cannot open %s; partitioner %s does not match system partitioner %s. " +
+                                       "Note that the default partitioner starting with Cassandra 1.2 is Murmur3Partitioner, " +
+                                       "so you will need to edit that to match your old partitioner if upgrading.",
+                                       descriptor, validationMetadata.partitioner, partitionerName);
+            logger.error("{}", msg);
+            System.exit(1);
+        }
+
+        long fileLength = descriptor.filenameFor(Component.DATA).length();
+        logger.debug("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));
+
+        double fpChance = metadata.get().params.bloomFilterFpChance;
+
+        FileHandle dataFH = null;
+        FileHandle rowIdxFH = null;
+        PartitionIndex partitionIndex = null;
+        IFilter bloomFilter = null;
+        boolean compressedData = descriptor.fileFor(Component.COMPRESSION_INFO).exists();
+
+        boolean loadBFIfNeeded = components.contains(Component.FILTER);
+        boolean recreatedBFIfNeeded = !isOffline;
+
+        try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor).compressed(compressedData);
+             @Nonnull IFilter bf = getBloomFilter(descriptor, loadBFIfNeeded, recreatedBFIfNeeded, metadata.get(), statsMetadata.totalRows, sstableMetadata, fpChance))
+        {
+            TrieIndexSSTableReader sstable;
+            dataFH = dataFHBuilder.complete();
+            bloomFilter = bf.sharedCopy();
+
+            if (components.contains(Component.PARTITION_INDEX)) {
+                try (FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+                     FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
+                {
+                    rowIdxFH = rowIdxFHBuilder.complete();
+                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, loadBFIfNeeded && !hasBloomFilter(fpChance));
+                    sstable = TrieIndexSSTableReader.internalOpen(descriptor,
+                                                                  components,
+                                                                  metadata,
+                                                                  rowIdxFH,
+                                                                  dataFH,
+                                                                  partitionIndex,
+                                                                  bloomFilter,
+                                                                  System.currentTimeMillis(),
+                                                                  statsMetadata,
+                                                                  OpenReason.NORMAL,
+                                                                  header.toHeader(metadata.get()));
+                }
+            }
+            else
+            {
+                sstable = TrieIndexSSTableReader.internalOpen(descriptor,
+                                                              components,
+                                                              metadata,
+                                                              dataFH,
+                                                              bloomFilter,
+                                                              System.currentTimeMillis(),
+                                                              statsMetadata,
+                                                              OpenReason.NORMAL,
+                                                              header.toHeader(metadata.get()));
+            }
+            if (validate)
+                sstable.validate();
+            sstable.setup(!isOffline); // this should come last, right before returning sstable
+            return sstable;
+        }
+        catch (RuntimeException e)
+        {
+            throw Throwables.cleaned(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH));
+        }
+        catch (IOException e)
+        {
+            throw new CorruptSSTableException(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH), descriptor.filenameFor(Component.DATA));
+        }
     }
 
 }

@@ -20,11 +20,14 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -41,11 +44,14 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
+import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
+import static org.apache.cassandra.io.sstable.SSTable.componentsFor;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
@@ -182,6 +188,66 @@ public class TrieIndexFormat implements SSTableFormat
             }
         }
 
+        @Override
+        public SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+        {
+            return TrieIndexSSTableReader.open(descriptor, Sets.difference(components, Collections.singleton(Component.FILTER)), metadata, true, true);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor descriptor)
+        {
+            TableMetadataRef metadata;
+            if (descriptor.cfname.contains(SECONDARY_INDEX_NAME_SEPARATOR))
+            {
+                int i = descriptor.cfname.indexOf(SECONDARY_INDEX_NAME_SEPARATOR);
+                String indexName = descriptor.cfname.substring(i + 1);
+                metadata = Schema.instance.getIndexTableMetadataRef(descriptor.ksname, indexName);
+                if (metadata == null)
+                    throw new AssertionError("Could not find index metadata for index cf " + i);
+            }
+            else
+            {
+                metadata = Schema.instance.getTableMetadataRef(descriptor.ksname, descriptor.cfname);
+            }
+            return open(descriptor, metadata);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, TableMetadataRef metadata)
+        {
+            return open(desc, componentsFor(desc), metadata);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return open(desc, components, metadata, true, false);
+        }
+
+        @Override
+        public SSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
+        {
+            return TrieIndexSSTableReader.open(desc, components, metadata, validate, isOffline);
+        }
+
+        @Override
+        public SSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
+        {
+            return TrieIndexSSTableReader.open(desc, componentsFor(desc), tableMetadataRef, false, true);
+        }
+
+        @Override
+        public SSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
+        {
+            return TrieIndexSSTableReader.open(desc, components, cfs.metadata, false, true);
+        }
+
+        @Override
+        public SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+        {
+            return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
+        }
     }
 
     // versions are denoted as [major][minor].  Minor versions must be forward-compatible:
