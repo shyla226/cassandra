@@ -22,6 +22,7 @@ import java.io.IOException;
 
 import com.carrotsearch.hppc.LongStack;
 import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
@@ -53,9 +54,10 @@ class ReverseReader extends AbstractReader
                   Slices slices,
                   FileDataInput file,
                   boolean shouldCloseFile,
-                  DeserializationHelper helper)
+                  DeserializationHelper helper,
+                  DecoratedKey key)
     {
-        super(sstable, slices, file, shouldCloseFile, helper, true);
+        super(sstable, slices, file, shouldCloseFile, helper, true, key);
     }
 
     // Prepare for the given slice. This does not throw, and isn't restartable
@@ -87,6 +89,7 @@ class ReverseReader extends AbstractReader
             boolean hasNext = deserializer.hasNext();
             assert hasNext;
             toReturn = deserializer.readNext();
+            UnfilteredValidation.maybeValidateUnfiltered(toReturn, metadata, key, sstable);
             rowOffsets.pop();
             // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
             if (!toReturn.isEmpty())

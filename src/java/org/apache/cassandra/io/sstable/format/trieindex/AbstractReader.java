@@ -38,6 +38,8 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
 {
     protected final TableMetadata metadata;
 
+    protected final SSTableReader sstable;
+
     protected final Slices slices;
 
     private final boolean shouldCloseFile;
@@ -65,21 +67,26 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
 
     private int currentSlice;
 
+    protected final DecoratedKey key;
+
     protected AbstractReader(SSTableReader sstable,
                              Slices slices,
                              FileDataInput file,
                              boolean shouldCloseFile,
                              DeserializationHelper helper,
-                             boolean reversed)
+                             boolean reversed,
+                             DecoratedKey key)
     {
         assert file != null;
         this.metadata = sstable.metadata();
+        this.sstable = sstable;
         this.slices = slices;
         this.file = file;
         this.shouldCloseFile = shouldCloseFile;
         this.direction = reversed ? -1 : +1;
         this.deserializer = UnfilteredDeserializer.create(metadata, file, sstable.header, helper);
         this.currentSlice = reversed ? slices.size() : -1;
+        this.key = key;
     }
 
     public Unfiltered next()
@@ -227,7 +234,11 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
         if (deserializer.nextIsRow())
             deserializer.skipNext();
         else
-            updateOpenMarker((RangeTombstoneMarker)deserializer.readNext());
+        {
+            Unfiltered next = deserializer.readNext();
+            UnfilteredValidation.maybeValidateUnfiltered(next, metadata, key, sstable);
+            updateOpenMarker((RangeTombstoneMarker) next);
+        }
         return false;
     }
 
@@ -257,6 +268,8 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
             }
 
             Unfiltered next = deserializer.readNext();
+            UnfilteredValidation.maybeValidateUnfiltered(next, metadata, key, sstable);
+
             // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
             // This should be rare (i.e. does not warrant saving state).
             if (next.isEmpty())

@@ -250,58 +250,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         partitionIndex.addTo(identities);
     }
 
-    @Override
-    public void verifyComponent(Component component) throws IOException
-    {
-        switch (component.type)
-        {
-            case PARTITION_INDEX:
-                verifyPartitionIndex();
-                break;
-            case ROW_INDEX:
-                verifyRowIndex();
-                break;
-            case FILTER:
-                verifyBloomFilter();
-                break;
-            default:
-                // just ignore anything else
-                break;
-        }
-    }
-
-    private void verifyBloomFilter() throws IOException
-    {
-        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(descriptor.filenameFor(Component.FILTER).toPath())));
-             IFilter bf = BloomFilterSerializer.deserialize(stream, descriptor.version.hasOldBfFormat()))
-        {}
-    }
-
-    private void verifyRowIndex() throws IOException
-    {
-        try (PartitionIndexIterator keyIter = TrieIndexFormat.readerFactory.keyIterator(descriptor, metadata()))
-        {
-            while (true) {
-                keyIter.advance();
-                DecoratedKey key = keyIter.key();
-                if (key == null)
-                    break;
-            }
-        }
-    }
-
-    private void verifyPartitionIndex() throws IOException
-    {
-        StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-        try (FileHandle.Builder builder = forVerify(defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
-             PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
-             IndexPosIterator iter = index.allKeysIterator())
-        {
-            while (iter.nextIndexPos() != PartitionIndex.NOT_FOUND)
-            {}
-        }
-    }
-
     public long estimatedKeys()
     {
         return partitionIndex == null ? 0 : partitionIndex.size();
@@ -312,16 +260,16 @@ public class TrieIndexSSTableReader extends SSTableReader
                                   RowIndexEntry<?> indexEntry,
                                   DeserializationHelper helper,
                                   Slices slices,
-                                  boolean reversed)
-    throws IOException
+                                  boolean reversed,
+                                  DecoratedKey key)
     {
         return indexEntry.isIndexed()
                ? reversed
-                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper)
-                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper)
+                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, key)
+                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, key)
                : reversed
-                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper)
-                 : new ForwardReader(this, slices, file, shouldCloseFile, helper);
+                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper, key)
+                 : new ForwardReader(this, slices, file, shouldCloseFile, helper, key);
     }
 
     @Override

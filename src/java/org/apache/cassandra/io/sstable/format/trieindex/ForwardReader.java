@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
@@ -34,9 +35,10 @@ class ForwardReader extends AbstractReader
                   Slices slices,
                   FileDataInput file,
                   boolean shouldCloseFile,
-                  DeserializationHelper helper)
+                  DeserializationHelper helper,
+                  DecoratedKey key)
     {
-        super(sstable, slices, file, shouldCloseFile, helper, false);
+        super(sstable, slices, file, shouldCloseFile, helper, false, key);
     }
 
     protected RangeTombstoneMarker sliceStartMarker()
