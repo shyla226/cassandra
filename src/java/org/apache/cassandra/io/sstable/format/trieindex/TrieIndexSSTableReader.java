@@ -78,9 +78,11 @@ public class TrieIndexSSTableReader extends SSTableReader
     protected FileHandle rowIndexFile;
     protected PartitionIndex partitionIndex;
 
-    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
+    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, FileHandle rowIndexFile, PartitionIndex partitionIndex, IFilter bf)
     {
-        super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
+        super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, null, dfile, null, bf);
+        this.rowIndexFile = rowIndexFile;
+        this.partitionIndex = partitionIndex;
     }
 
     protected void loadIndex(boolean preload) throws IOException

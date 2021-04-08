@@ -27,6 +27,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -39,6 +40,8 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
@@ -59,6 +62,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.IndexInfo;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -72,6 +76,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
@@ -112,12 +117,18 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                                                                       .build();
 
     public TrieIndexSSTableWriter(Descriptor descriptor,
-                                  SSTableWriterCreationHelper helper,
+                                  long keyCount,
+                                  long repairedAt,
+                                  UUID pendingRepair,
+                                  boolean isTransient,
+                                  TableMetadataRef metadata,
+                                  MetadataCollector metadataCollector,
+                                  SerializationHeader header,
                                   Collection<SSTableFlushObserver> observers,
-                                  Set<Component> indexComponents,
-                                  SSTableTracker sstableTracker)
+                                  LifecycleNewTracker lifecycleNewTracker,
+                                  Set<Component> indexComponents)
     {
-        super(descriptor, components(helper.table(), indexComponents), helper, observers, sstableTracker);
+        super(descriptor, components(metadata.getLocal(), indexComponents),keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
 
         if (compression)
         {
