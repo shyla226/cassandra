@@ -42,6 +42,8 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.InstrumentingCache;
+import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -74,12 +76,14 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
@@ -422,41 +426,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         return first.compareTo(dk) <= 0 && last.compareTo(dk) >= 0 && bf.isPresent(dk);
     }
 
-    public boolean contains(DecoratedKey dk)
-    {
-        if (!inBloomFilter(dk))
-            return false;
-        if (filterFirst() && first.compareTo(dk) > 0)
-            return false;
-        if (filterLast() && last.compareTo(dk) < 0)
-            return false;
-
-        try (PartitionIndex.Reader reader = partitionIndex.openReader())
-        {
-            long indexPos = reader.exactCandidate(dk);
-            if (indexPos == PartitionIndex.NOT_FOUND)
-                return false;
-
-            try (FileDataInput in = createIndexOrDataReader(indexPos))
-            {
-                return ByteBufferUtil.equalsWithShortLength(in, dk.getKey());
-            }
-        }
-        catch (IOException e)
-        {
-            markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
-        }
-    }
-    
-    FileDataInput createIndexOrDataReader(long indexPos)
-    {
-        if (indexPos >= 0)
-            return rowIndexFile.createReader(indexPos);
-        else
-            return dfile.createReader(~indexPos);
-    }
-
     @Override
     public DecoratedKey keyAt(RandomAccessReader reader, long dataPosition) throws IOException
     {
@@ -473,6 +442,14 @@ public class TrieIndexSSTableReader extends SSTableReader
             if (in.isEOF()) return null;
             return decorateKey(ByteBufferUtil.readWithShortLength(in));
         }
+    }
+
+    @Override
+    public DecoratedKey keyAt(FileDataInput reader) throws IOException
+    {
+        if (reader.isEOF()) return null;
+
+        return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 
     @Override
@@ -600,28 +577,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         if (partitionIndex == null)
             return null;
         return new ScrubIterator(partitionIndex, rowIndexFile);
-    }
-
-    @Override
-    public Flow<IndexFileEntry> coveredKeysFlow(RandomAccessReader dfileReader,
-                                                PartitionPosition left,
-                                                boolean inclusiveLeft,
-                                                PartitionPosition right,
-                                                boolean inclusiveRight)
-    {
-        boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0 && last.compareTo(left) >= 0;
-        boolean isRightInSStableRange = !filterLast() || first.compareTo(right) <= 0 && last.compareTo(right) >= 0;
-        if (isLeftInSStableRange || isRightInSStableRange)
-        {
-            inclusiveLeft = isLeftInSStableRange ? inclusiveLeft : true;
-            inclusiveRight = isRightInSStableRange ? inclusiveRight : true;
-            return new TrieIndexFileFlow(dfileReader,
-                                         this,
-                                         isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
-                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
-        }
-        else
-            return Flow.empty();
     }
 
     @Override
@@ -858,6 +813,14 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
+    public interface PartitionReader extends Closeable
+    {
+        /**
+         * Returns next item or null if exhausted.
+         */
+        Unfiltered next() throws IOException;
+    }
+
     @Override
     public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
     {
@@ -900,6 +863,12 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
+    public boolean hasIndex()
+    {
+        return descriptor.fileFor(Component.PARTITION_INDEX).exists();
+    }
+
+    @Override
     public SSTableReader cloneAndReplace(IFilter newBloomFilter)
     {
         return cloneInternal(first, openReason, newBloomFilter);
@@ -932,6 +901,122 @@ public class TrieIndexSSTableReader extends SSTableReader
     {
         // nothing to do here, the method updates something in index summary which is missing in trie index impl
         return cloneInternal(first, openReason, bf.sharedCopy());
+    }
+
+    @Override
+    public int getIndexSummarySamplingLevel()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public long getIndexSummaryOffHeapSize()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public int getMinIndexInterval()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public double getEffectiveIndexInterval()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public void releaseSummary()
+    {
+        // no-op - tries do not have index summaries
+    }
+
+    @Override
+    public long getIndexScanPosition(PartitionPosition key)
+    {
+        // TODO check this
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int getIndexSummarySize()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public int getMaxIndexSummarySize()
+    {
+        return 0; // tries do not have index summaries
+    }
+
+    @Override
+    public byte[] getIndexSummaryKey(int index)
+    {
+        // TODO check this
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void cacheKey(DecoratedKey key, BigTableRowIndexEntry info)
+    {
+        // no-op - tries do not have index summaries
+    }
+
+    @Override
+    public BigTableRowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
+    {
+        return null; // tries do not have index summaries
+    }
+
+    @Override
+    protected BigTableRowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    {
+        return null; // tries do not have index summaries
+    }
+
+    @Override
+    public boolean isKeyCacheEnabled()
+    {
+        return false; // tries do not have index summaries
+    }
+
+    @Override
+    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
+    {
+        return null; // tries do not have key cache
+    }
+
+    @Override
+    public long getKeyCacheHit()
+    {
+        return 0L; // tries do not have key cache
+    }
+
+    @Override
+    public long getKeyCacheRequest()
+    {
+        return 0L;  // tries do not have key cache
+    }
+
+    @Override
+    public ChannelProxy getIndexChannel()
+    {
+        throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
+    @Override
+    public RandomAccessReader openIndexReader()
+    {
+        throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
+    @Override
+    public FileHandle getIndexFile()
+    {
+        throw new UnsupportedOperationException("tries do not have primary index");
     }
 
     private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
