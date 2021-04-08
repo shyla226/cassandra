@@ -154,13 +154,7 @@ public class TrieIndexFormat implements SSTableFormat
     static class ReaderFactory implements SSTableReader.Factory
     {
         @Override
-        public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
-        {
-            return new TrieIndexSSTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header);
-        }
-
-        @Override
-        public PartitionIndexIterator keyIterator(Descriptor desc, TableMetadata metadata)
+        public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata)
         {
             IPartitioner partitioner = metadata.partitioner;
             boolean compressedData = desc.fileFor(Component.COMPRESSION_INFO).exists();
@@ -185,24 +179,6 @@ public class TrieIndexFormat implements SSTableFormat
             catch (IOException e)
             {
                 throw Throwables.cleaned(e);
-            }
-        }
-
-        @Override
-        public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
-        {
-            File indexFile = descriptor.fileFor(Component.PARTITION_INDEX);
-            if (!indexFile.exists())
-                return null;
-            boolean compressedData = descriptor.fileFor(Component.COMPRESSION_INFO).exists();
-
-            StatsMetadata stats = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-
-
-            try (FileHandle.Builder fhBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-                 PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
-            {
-                return Pair.create(pIndex.firstKey(), pIndex.lastKey());
             }
         }
 
