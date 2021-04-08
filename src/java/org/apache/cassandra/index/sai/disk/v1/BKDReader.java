@@ -25,7 +25,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.TreeMap;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -782,7 +781,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
         protected void closeAll()
         {
-            FileUtils.closeQuietly(sharedInput);
+            FileUtils.closeQuietly(sharedInput, bkdInput);
             //FileUtils.closeQuietly(postingsInput, postingsSummaryInput);
         }
 
@@ -793,7 +792,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 List<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
                 executeInternal(postingLists, postingIndexName);
 
-                FileUtils.closeQuietly(bkdInput);
+                //FileUtils.closeQuietly(bkdInput);
+                closeAll();
 
                 return postingLists;
             }

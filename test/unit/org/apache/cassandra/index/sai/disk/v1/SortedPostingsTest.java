@@ -252,9 +252,16 @@ public class SortedPostingsTest extends NdiRandomizedTest
         }
         iterator.close();
 
-        pointIDList.close();
+        //pointIDList.close();
 
         LongArrayList checkRowIDs = find(min, max, 0, 1, rows);
+
+        reader2.close();
+
+        for (PostingList.PeekablePostingList list : pointIDLists)
+        {
+            list.close();
+        }
 
         checkRowIDs.sort(Comparator.naturalOrder());
         rowIDs.sort(Comparator.naturalOrder());

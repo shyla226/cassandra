@@ -8,10 +8,12 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -167,6 +169,8 @@ public class SortedPostingsWriter
 
             final PriorityQueue<PostingList.PeekablePostingList> leafPostingsReaders = new PriorityQueue<>(100, Comparator.comparingLong(PostingList.PeekablePostingList::peek));
 
+            List<PostingsReader> readers = new ArrayList();
+
             long minPointID = Integer.MAX_VALUE;
 
             for (int leafNodeID : nodeEntry.leafNodes)
@@ -178,15 +182,17 @@ public class SortedPostingsWriter
 
                 final PostingsReader postingsReader = new PostingsReader(postingsInput.sharedCopy(), leafNode.postingsFilePointer, NO_OP_POSTINGS_LISTENER);
                 leafPostingsReaders.add(postingsReader.peekable());
+                readers.add(postingsReader);
             }
 
             final PostingList nonLeafNodePointIDs = MergePostingList.merge(leafPostingsReaders);
 
             final long writePostingsFilePointer = postingsWriter2.write(nonLeafNodePointIDs);
 
-            for (PostingList.PeekablePostingList list : leafPostingsReaders)
+            //for (PostingList.PeekablePostingList list : leafPostingsReaders)
+            for (PostingsReader postingsReader : readers)
             {
-                list.close();
+                postingsReader.close();
             }
 
             final SortedNode sortedNode = new SortedNode(writePostingsFilePointer, -1, minPointID);
@@ -199,14 +205,14 @@ public class SortedPostingsWriter
             sortedNodes.put(nonLeafNodeID, sortedNode);
         }
 
-        postingsInput.close();
-
         if (reader.pointCount != total)
         {
             throw new IllegalStateException();
         }
 
         iterator.close();
+
+        postingsInput.close();
 
         final Stopwatch flushTime = Stopwatch.createStarted();
 
