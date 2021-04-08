@@ -41,6 +41,7 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
@@ -739,6 +740,41 @@ public class TrieIndexSSTableReader extends SSTableReader
             selectedDataSize += endPos - startPos;
         }
         return (long) (selectedDataSize / sstableMetadata.estimatedPartitionSize.rawMean());
+    }
+
+    @Override
+    public SSTableReader cloneAndReplace(IFilter newBloomFilter)
+    {
+        return cloneInternal(first, openReason, newBloomFilter);
+    }
+
+    @Override
+    public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
+    {
+        return runWithLock(d -> cloneInternal(restoredStart, OpenReason.NORMAL, bf.sharedCopy()));
+    }
+
+    @Override
+    public SSTableReader cloneWithNewStart(DecoratedKey newStart, Runnable runOnClose)
+    {
+        return runWithLock(d -> {
+            assert openReason != OpenReason.EARLY;
+            // TODO: merge with caller's firstKeyBeyond() work,to save time
+            if (newStart.compareTo(first) > 0)
+            {
+                final long dataStart = getPosition(newStart, Operator.EQ).position;
+                runOnClose(new DropPageCache(dfile, dataStart, null, -1, runOnClose));
+            }
+
+            return cloneInternal(newStart, OpenReason.MOVED_START, bf.sharedCopy());
+        });
+    }
+
+    @Override
+    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel)
+    {
+        // nothing to do here, the method updates something in index summary which is missing in trie index impl
+        return cloneInternal(first, openReason, bf.sharedCopy());
     }
 
     private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
