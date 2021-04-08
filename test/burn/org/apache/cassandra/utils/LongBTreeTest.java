@@ -40,6 +40,9 @@ import com.google.common.util.concurrent.ListenableFutureTask;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Snapshot;
 import com.codahale.metrics.Timer;
@@ -56,6 +59,7 @@ import static org.junit.Assert.assertTrue;
 
 public class LongBTreeTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(LongBTreeTest.class);
 
     private static final boolean DEBUG = false;
     private static int perThreadTrees = 100;
@@ -755,7 +759,7 @@ public class LongBTreeTest
 
             final List<ListenableFuture<?>> inner = new ArrayList<>();
             long complete = 0;
-            int reportInterval = Math.max(1000, (int) (totalCount / 10000));
+            int reportInterval = Math.max(1000, (int) (totalCount / 100));
             long lastReportAt = 0;
             for (ListenableFutureTask<List<ListenableFuture<?>>> f : outer)
             {
@@ -1071,9 +1075,6 @@ public class LongBTreeTest
 
     private static void log(String formatstr, Object ... args)
     {
-        args = Arrays.copyOf(args, args.length + 1);
-        System.arraycopy(args, 0, args, 1, args.length - 1);
-        args[0] = System.currentTimeMillis();
-        System.out.printf("%tT: " + formatstr + "\n", args);
+        logger.info(String.format(formatstr, args));
     }
 }
