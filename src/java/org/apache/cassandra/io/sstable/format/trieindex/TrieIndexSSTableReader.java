@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.BufferedInputStream;
+import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -27,6 +28,7 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -34,7 +36,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
-
 import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -44,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -57,7 +59,6 @@ import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
@@ -68,14 +69,15 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.Downsampling;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -88,7 +90,6 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -295,6 +296,7 @@ public class TrieIndexSSTableReader extends SSTableReader
      */
     private RowIndexEntry<?> retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
     {
+        // todo should we update bf here?
         if (pos >= 0)
         {
             try (FileDataInput in = rowIndexFile.createReader(pos))
@@ -513,25 +515,20 @@ public class TrieIndexSSTableReader extends SSTableReader
         Iterator<IndexPosIterator> partitionKeyIterators = TrieIndexScanner.makeBounds(this,
                                                                                        Collections.singleton(range))
                                                                            .stream()
-                                                                           .map(bound -> indexPosIteratorForRange(bound))
+                                                                           .map(this::indexPosIteratorForRange)
                                                                            .iterator();
 
         if (!partitionKeyIterators.hasNext())
             return Collections.emptyList();
 
-        return new Iterable<DecoratedKey>()
-        {
-            @Override
-            public Iterator<DecoratedKey> iterator()
-            {
-                return new AbstractIterator<DecoratedKey>()
+        return () -> new AbstractIterator<DecoratedKey>()
                 {
                     IndexPosIterator currentItr = partitionKeyIterators.next();
                     long count = -1;
 
                     private long getNextPos() throws IOException
                     {
-                        long pos = PartitionIndex.NOT_FOUND;
+                long pos;
                         while ((pos = currentItr.nextIndexPos()) == PartitionIndex.NOT_FOUND
                                 && partitionKeyIterators.hasNext())
                         {
@@ -580,8 +577,6 @@ public class TrieIndexSSTableReader extends SSTableReader
                     }
                 };
             }
-        };
-    }
 
     private DecoratedKey getKeyByPos(long pos) throws IOException
     {

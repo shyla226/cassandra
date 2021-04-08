@@ -29,7 +29,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 class ForwardIndexedReader extends ForwardReader
 {
     private final RowIndexReader indexReader;
-    long basePosition;
+    final long basePosition;
 
     ForwardIndexedReader(TrieIndexSSTableReader sstable,
                          TrieIndexEntry indexEntry,

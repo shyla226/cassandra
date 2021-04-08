@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
@@ -28,7 +27,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.dht.IPartitioner;
@@ -45,11 +43,10 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
@@ -168,6 +165,7 @@ public class TrieIndexFormat implements SSTableFormat
 
     static class ReaderFactory implements SSTableReader.Factory
     {
+        @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
         @Override
         public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata)
         {
@@ -175,7 +173,7 @@ public class TrieIndexFormat implements SSTableFormat
             boolean compressedData = desc.fileFor(Component.COMPRESSION_INFO).exists();
             try
             {
-                StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
+                @SuppressWarnings("unused") StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
 
                 try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
                      FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);

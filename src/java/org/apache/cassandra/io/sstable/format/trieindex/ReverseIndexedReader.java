@@ -34,7 +34,7 @@ class ReverseIndexedReader extends ReverseReader
     private RowIndexReverseIterator indexReader;
     final TrieIndexEntry indexEntry;
     final FileHandle rowIndexFile;
-    long basePosition;
+    final long basePosition;
     long currentBlockStart;
     long currentBlockEnd;
     RowIndexReader.IndexInfo currentIndexInfo;
@@ -92,10 +92,11 @@ class ReverseIndexedReader extends ReverseReader
         }
 
         // this can throw; we save currentIndexInfo so we don't redo index seek if that happens
-        return gotoIndexBlock();
+        gotoIndexBlock();
+        return true;
     }
 
-    boolean gotoIndexBlock() throws IOException
+    void gotoIndexBlock() throws IOException
     {
         assert rowOffsets.isEmpty();
 
@@ -103,7 +104,6 @@ class ReverseIndexedReader extends ReverseReader
         currentBlockStart = basePosition + currentIndexInfo.offset;
         seekToPosition(currentBlockStart);
         currentIndexInfo = null;    // completed successfully
-        return true;
     }
 
     @Override
@@ -120,7 +120,8 @@ class ReverseIndexedReader extends ReverseReader
                 return false; // no content
         }
 
-        return gotoIndexBlock();
+        gotoIndexBlock();
+        return true;
     }
 
     @Override

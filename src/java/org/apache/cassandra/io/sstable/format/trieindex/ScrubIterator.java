@@ -25,6 +25,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+// TODO STAR-247: implement unit test
 public class ScrubIterator extends PartitionIndex.IndexPosIterator implements ScrubPartitionIterator
 {
     ByteBuffer key;
@@ -63,7 +64,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
         long pos = nextIndexPos();
         if (pos != PartitionIndex.NOT_FOUND)
         {
-            if (pos >= 0)
+            if (pos >= 0) // row index position
             {
                 try (FileDataInput in = rowIndexFile.createReader(pos))
                 {

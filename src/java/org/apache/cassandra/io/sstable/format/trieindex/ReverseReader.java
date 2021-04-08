@@ -26,8 +26,9 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.UnfilteredValidation;
 import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -45,7 +46,7 @@ import org.apache.cassandra.io.util.FileDataInput;
  */
 class ReverseReader extends AbstractReader
 {
-    LongStack rowOffsets = new LongStack();
+    final LongStack rowOffsets = new LongStack();
     DeletionTime sliceOpenMarker, sliceCloseMarker;
     boolean foundLessThan;
     long startPos = -1;

@@ -19,9 +19,7 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.Closeable;
 import java.io.DataOutput;
-import java.io.File;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.ByteBuffer;
 
 import org.slf4j.Logger;
@@ -30,7 +28,11 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.tries.*;
+import org.apache.cassandra.io.tries.SerializationNode;
+import org.apache.cassandra.io.tries.TrieNode;
+import org.apache.cassandra.io.tries.TrieSerializer;
+import org.apache.cassandra.io.tries.ValueIterator;
+import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
@@ -124,7 +126,7 @@ public class PartitionIndex implements Closeable
             Payload payload = node.payload();
             if (payload != null)
             {
-                int payloadBits = 0;
+                int payloadBits;
                 int size = SizedInts.nonZeroSize(payload.position);
                 payloadBits = 7 + size;
                 type.serialize(dest, node, payloadBits, nodePosition);
@@ -165,8 +167,15 @@ public class PartitionIndex implements Closeable
                                       IPartitioner partitioner,
                                       boolean preload) throws IOException
     {
-        try (FileHandle fh = fhBuilder.complete();
-             FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
+        try (FileHandle fh = fhBuilder.complete())
+        {
+            return load(fh, partitioner, preload);
+        }
+    }
+
+    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload) throws IOException
+    {
+        try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {
             long firstPos = rdr.readLong();
             long keyCount = rdr.readLong();
@@ -343,6 +352,7 @@ public class PartitionIndex implements Closeable
         /**
          * To be used only in analysis.
          */
+        @SuppressWarnings("unused")
         protected int payloadSize()
         {
             int bytes = payloadFlags();
@@ -378,7 +388,7 @@ public class PartitionIndex implements Closeable
         /**
          * Returns the position in the row index or data file.
          */
-        protected long nextIndexPos() throws IOException
+        protected long nextIndexPos()
         {
             // The IndexInfo read below may trigger a NotInCacheException. To be able to resume from that
             // without missing positions, we save and reuse the unreturned position.

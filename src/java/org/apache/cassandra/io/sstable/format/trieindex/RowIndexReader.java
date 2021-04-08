@@ -28,7 +28,6 @@ import org.apache.cassandra.io.tries.TrieSerializer;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.SizedInts;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -50,8 +49,8 @@ class RowIndexReader extends Walker<RowIndexReader>
 
     static class IndexInfo
     {
-        long offset;
-        DeletionTime openDeletion;
+        final long offset;
+        final DeletionTime openDeletion;
 
         IndexInfo(long offset, DeletionTime openDeletion)
         {
@@ -73,7 +72,7 @@ class RowIndexReader extends Walker<RowIndexReader>
     /**
      * Computes the floor for a given key.
      */
-    public IndexInfo separatorFloor(ByteComparable key) throws IOException
+    public IndexInfo separatorFloor(ByteComparable key)
     {
         // Check for a prefix and find closest smaller branch.
         IndexInfo res = prefixAndNeighbours(key, RowIndexReader::readPayload);
@@ -173,11 +172,15 @@ class RowIndexReader extends Walker<RowIndexReader>
 
     };
 
+    @SuppressWarnings("unused")
     public void dumpTrie(PrintStream out)
     {
         dumpTrie(out, (buf, ppos, bits) -> {
             IndexInfo ii = readPayload(buf, ppos, bits);
-            return String.format("pos %x %s", ii.offset, ii.openDeletion == null ? "" : ii.openDeletion);
+
+            return ii != null
+                   ? String.format("pos %x %s", ii.offset, ii.openDeletion == null ? "" : ii.openDeletion)
+                   : "pos null";
         });
     }
 }

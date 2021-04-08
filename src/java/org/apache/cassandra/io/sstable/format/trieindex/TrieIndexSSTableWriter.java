@@ -24,6 +24,8 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -48,12 +50,11 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
-import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -61,7 +62,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.io.sstable.format.big.IndexInfo;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -74,17 +75,15 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -152,8 +151,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         dbuilder = defaultDataHandleBuilder(descriptor).compressed(compression);
         chunkCache.ifPresent(dbuilder::withChunkCache);
-        iwriter = new IndexWriter(helper.table());
-
+        iwriter = new IndexWriter(metadata.get());
         partitionWriter = new PartitionWriter(this.header, metadata().comparator, dataFile, iwriter.rowIndexFile, descriptor.version, this.observers);
     }
 
@@ -207,6 +205,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             throw new RuntimeException("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getFile());
     }
 
+    @Override
     public boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
     {
         if (key.getKeyLength() > FBUtilities.MAX_UNSIGNED_SHORT)
@@ -231,6 +230,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         return true;
     }
 
+    @Override
     public void addUnfiltered(Unfiltered unfiltered) throws IOException
     {
         if (unfiltered.isRow())
@@ -258,6 +258,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         partitionWriter.addUnfiltered(unfiltered);
     }
 
+    @Override
     public RowIndexEntry<?> endPartition() throws IOException
     {
         metadataCollector.addCellPerPartitionCount();
@@ -421,7 +422,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         File file = desc.fileFor(Component.STATS);
         try (SequentialWriter out = new SequentialWriter(file, WRITER_OPTION))
         {
-            desc.getMetadataSerializer().serialize(components, out, desc);
+            desc.getMetadataSerializer().serialize(components, out, desc.version);
             out.finish();
         }
         catch (IOException e)
@@ -563,7 +564,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                      DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
                 {
                     // bloom filter
-                    BloomFilterSerializer.serialize((BloomFilter) bf, stream, descriptor.version.hasOldBfFormat());
+                    BloomFilterSerializer.serialize((BloomFilter) bf, stream);
                     stream.flush();
                     SyncUtil.sync((FileChannel) fos);
                 }
