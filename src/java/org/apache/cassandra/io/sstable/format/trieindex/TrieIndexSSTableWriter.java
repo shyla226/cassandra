@@ -473,25 +473,10 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         IndexWriter(TableMetadata table)
         {
-            CompressionParams params = table.params.get(TableParams.COMPRESSION);
-            ICompressor encryptor = compression ? params.getSstableCompressor().encryptionOnly() : null;
-            if (encryptor != null)
-            {
-                CompressionMetadata compressionMetadata = CompressionMetadata.encryptedOnly(params);
-                rowIndexFile = new EncryptedSequentialWriter(descriptor.filenameFor(Component.ROW_INDEX), WRITER_OPTION, encryptor);
-                rowIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, table, Component.ROW_INDEX, true);
-                rowIndexFHBuilder.withCompressionMetadata(compressionMetadata);
-                partitionIndexFile = new EncryptedSequentialWriter(descriptor.filenameFor(Component.PARTITION_INDEX), WRITER_OPTION, encryptor);
-                partitionIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, table, Component.PARTITION_INDEX, true);
-                partitionIndexFHBuilder.withCompressionMetadata(compressionMetadata);
-            }
-            else
-            {
-                rowIndexFile = new SequentialWriter(descriptor.filenameFor(Component.ROW_INDEX), WRITER_OPTION);
-                rowIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, table, Component.ROW_INDEX, false);
-                partitionIndexFile = new SequentialWriter(descriptor.filenameFor(Component.PARTITION_INDEX), WRITER_OPTION);
-                partitionIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, table, Component.PARTITION_INDEX, false);
-            }
+            rowIndexFile = new SequentialWriter(descriptor.filenameFor(Component.ROW_INDEX), WRITER_OPTION);
+            rowIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, table, Component.ROW_INDEX, false);
+            partitionIndexFile = new SequentialWriter(descriptor.filenameFor(Component.PARTITION_INDEX), WRITER_OPTION);
+            partitionIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, table, Component.PARTITION_INDEX, false);
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
             bf = FilterFactory.getFilter(keyCount, table.params.getDouble(TableParams.BLOOM_FILTER_FP_CHANCE));
             // register listeners to be alerted when the data files are flushed
