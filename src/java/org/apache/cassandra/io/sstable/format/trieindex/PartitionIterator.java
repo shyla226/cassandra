@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -26,10 +27,10 @@ import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 
+// TODO STAR-247: implement unit test
 class PartitionIterator extends PartitionIndex.IndexPosIterator implements PartitionIndexIterator
 {
     private final PartitionIndex partitionIndex;
@@ -51,7 +52,6 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     /**
      * Note: For performance reasons this class does not request a reference of the files it uses.
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
-     * See {@link TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
      */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile,
                       PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight) throws IOException
@@ -76,7 +76,6 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     /**
      * Note: For performance reasons this class does not request a reference of the files it uses.
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
-     * See {@link TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
      */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile) throws IOException
     {
@@ -123,11 +122,17 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         Throwables.maybeFail(accum);
     }
 
-    public DecoratedKey key()
+    public DecoratedKey decoratedKey()
     {
         return currentKey;
     }
 
+    public ByteBuffer key()
+    {
+        return currentKey.getKey();
+    }
+
+    @Override
     public long dataPosition()
     {
         return currentEntry != null ? currentEntry.position : -1;
@@ -138,7 +143,8 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         return currentEntry;
     }
 
-    public void advance() throws IOException
+    @Override
+    public boolean advance() throws IOException
     {
         currentKey = nextKey;
         currentEntry = nextEntry;
@@ -151,8 +157,11 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
             {   // exclude last partition outside range
                 currentKey = null;
                 currentEntry = null;
+                return false;
             }
+            return true;
         }
+        return false;
     }
 
     private void readNext() throws IOException
@@ -199,5 +208,41 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         else
             in.seek(pos);
         return in;
+    }
+
+    @Override
+    public boolean isExhausted()
+    {
+        return currentKey == null;
+    }
+
+    @Override
+    public long indexPosition()
+    {
+        return 0;
+    }
+
+    @Override
+    public void indexPosition(long position)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long indexLength()
+    {
+        return 0;
+    }
+
+    @Override
+    public void reset()
+    {
+        go(root);
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("TrieIndex-PartitionIndexIterator(%s)", partitionIndex.getFileHandle().path());
     }
 }
