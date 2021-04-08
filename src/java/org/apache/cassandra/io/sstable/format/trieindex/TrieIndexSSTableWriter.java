@@ -83,6 +83,10 @@ import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.big.BigTableWriter.compressionFor;
+
 @VisibleForTesting
 public class TrieIndexSSTableWriter extends SSTableWriter
 {
@@ -116,7 +120,8 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         if (compression)
         {
-            CompressionParams compressionParams = helper.table().params.get(TableParams.COMPRESSION);
+            final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType(), metadata);
+
             dataFile = new CompressedSequentialWriter(getFile(),
                                                       descriptor.filenameFor(Component.COMPRESSION_INFO),
                                                       descriptor.filenameFor(Component.DIGEST),
@@ -304,13 +309,11 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             //partitionIndex.dumpTrie(descriptor.filenameFor(Component.PARTITION_INDEX) + ".txt");
 
             StatsMetadata stats = statsMetadata();
-            iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
-            FileHandle ifile = iwriter.rowIndexFHBuilder.complete();
-            // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
-            // get updated length / compression metadata.
-            dataFile.updateFileHandle(dbuilder);
+            FileHandle ifile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
+            if (compression)
+                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
+            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
             invalidateCacheAtBoundary(dfile);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                components, metadata,
@@ -355,10 +358,10 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         StatsMetadata stats = statsMetadata();
         // finalize in-memory state for the reader
         PartitionIndex partitionIndex = iwriter.completedPartitionIndex();
-        iwriter.rowIndexFile.updateFileHandle(iwriter.rowIndexFHBuilder);
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
-        dataFile.updateFileHandle(dbuilder);
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
+        if (compression)
+            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
@@ -576,7 +579,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
             // truncate index file
             rowIndexFile.prepareToCommit();
-            rowIndexFile.updateFileHandle(rowIndexFHBuilder);
+            rowIndexFHBuilder.withLength(rowIndexFile.getLastFlushOffset());
 
             complete();
         }

@@ -110,8 +110,7 @@ public class PartitionIndexBuilder implements AutoCloseable
         if (partitionIndexSyncPosition < partialIndexPartitionEnd)
             return;
 
-        writer.updateFileHandle(fhBuilder);
-        try (FileHandle fh = fhBuilder.complete())
+        try (FileHandle fh = fhBuilder.complete(writer.getLastFlushOffset()))
         {
             @SuppressWarnings("resource")   // consumer to close
             PartitionIndex pi = new PartitionIndexEarly(fh, partialIndexTail.root(), partialIndexTail.count(), firstKey, partialIndexLastKey, partialIndexTail.cutoff(), partialIndexTail.tail());
@@ -177,7 +176,7 @@ public class PartitionIndexBuilder implements AutoCloseable
         writer.writeLong(root);
 
         writer.sync();
-        writer.updateFileHandle(fhBuilder);
+        fhBuilder.withLength(writer.getLastFlushOffset());
 
         return root;
     }
