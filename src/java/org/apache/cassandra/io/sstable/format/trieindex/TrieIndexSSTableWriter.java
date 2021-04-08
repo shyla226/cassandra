@@ -446,6 +446,49 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     }
 
     /**
+     * Appends partition data to this writer.
+     *
+     * @param partition the partition to write
+     * @return the created index entry if something was written, that is if {@code partition}
+     * wasn't empty, {@code null} otherwise.
+     *
+     * @throws FSWriteError if a write to the dataFile fails
+     */
+    public RowIndexEntry<?> append(UnfilteredRowIterator partition)
+    {
+        assert dataFile.isOpen() : "update is being called after releaseBuffers";
+
+        if (partition.isEmpty())
+            return null;
+
+        try
+        {
+            if (!startPartition(partition.partitionKey(), partition.partitionLevelDeletion()))
+                return null;
+
+            if (!partition.staticRow().isEmpty())
+                addUnfiltered(partition.staticRow());
+
+            while (partition.hasNext())
+            {
+                Unfiltered unfiltered = partition.next();
+                addUnfiltered(unfiltered);
+            }
+
+            return endPartition();
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e, getFile());
+        }
+    }
+
+    private File getFile()
+    {
+        return descriptor.fileFor(Component.DATA);
+    }
+
+    /**
      * Encapsulates writing the index and filter for an SSTable. The state of this object is not valid until it has been closed.
      */
     class IndexWriter extends AbstractTransactional implements Transactional
