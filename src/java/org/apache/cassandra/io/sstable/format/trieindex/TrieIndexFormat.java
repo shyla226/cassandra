@@ -50,12 +50,36 @@ import org.apache.cassandra.utils.Pair;
  */
 public class TrieIndexFormat implements SSTableFormat
 {
+    // Data, primary index and row index (which may be 0-length) are required.
+    // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
+    private static final Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                Component.PARTITION_INDEX,
+                                                                Component.ROW_INDEX,
+                                                                Component.STATS);
+
+    private final static Set<Component> SUPPORTED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PARTITION_INDEX,
+                                                                               Component.ROW_INDEX,
+                                                                               Component.FILTER,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.STATS,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC,
+                                                                               Component.TOC);
+
+    private final static Set<Component> STREAMING_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PARTITION_INDEX,
+                                                                               Component.ROW_INDEX,
+                                                                               Component.STATS,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.FILTER,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC);
     public static final TrieIndexFormat instance = new TrieIndexFormat();
     public static final Version latestVersion = new TrieIndexVersion(TrieIndexVersion.current_version);
     static final ReaderFactory readerFactory = new ReaderFactory();
     static final WriterFactory writerFactory = new WriterFactory();
 
-    private static final Pattern VALIDATION = Pattern.compile("[a-z]+");
 
     private TrieIndexFormat()
     {
@@ -80,11 +104,6 @@ public class TrieIndexFormat implements SSTableFormat
         return new TrieIndexVersion(version);
     }
 
-    @Override
-    public boolean validateVersion(String ver)
-    {
-        return ver != null && VALIDATION.matcher(ver).matches();
-    }
 
     @Override
     public SSTableWriter.Factory getWriterFactory()
@@ -98,6 +117,23 @@ public class TrieIndexFormat implements SSTableFormat
         return readerFactory;
     }
 
+    @Override
+    public Set<Component> requiredComponents()
+    {
+        return REQUIRED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> supportedComponents()
+    {
+        return SUPPORTED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> streamingComponents()
+    {
+        return STREAMING_COMPONENTS;
+    }
     static class WriterFactory extends SSTableWriter.Factory
     {
         @Override
@@ -110,10 +146,6 @@ public class TrieIndexFormat implements SSTableFormat
             return new TrieIndexSSTableWriter(descriptor, helper, observers, indexComponents, sstableTracker);
         }
     }
-
-    // Data, primary index and row index (which may be 0-length) are required.
-    // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
-    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.STATS);
 
     static class ReaderFactory extends SSTableReader.Factory
     {
@@ -172,11 +204,6 @@ public class TrieIndexFormat implements SSTableFormat
             }
         }
 
-        @Override
-        public Set<Component> requiredComponents()
-        {
-            return REQUIRED_COMPONENTS;
-        }
     }
 
     // versions are denoted as [major][minor].  Minor versions must be forward-compatible:
