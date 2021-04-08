@@ -147,7 +147,7 @@ public class TrieIndexFormat implements SSTableFormat
         }
     }
 
-    static class ReaderFactory extends SSTableReader.Factory
+    static class ReaderFactory implements SSTableReader.Factory
     {
         @Override
         public TrieIndexSSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)

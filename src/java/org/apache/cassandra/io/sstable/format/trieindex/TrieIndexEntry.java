@@ -31,7 +31,7 @@ import org.apache.cassandra.utils.ObjectSizes;
  *
  * Not to be used outside of package. Public only for IndexRewriter tool.
  */
-public final class TrieIndexEntry extends RowIndexEntry<Object>
+public final class TrieIndexEntry extends RowIndexEntry<RowIndexReader.IndexInfo>
 {
     private static final long BASE_SIZE;
 
@@ -85,13 +85,13 @@ public final class TrieIndexEntry extends RowIndexEntry<Object>
      * Create an index entry. The row index trie must already have been written (by RowIndexWriter) to the row index
      * file and its root position must be specified in trieRoot.
      */
-    public static RowIndexEntry<Object> create(long dataStartPosition,
+    public static RowIndexEntry<RowIndexReader.IndexInfo> create(long dataStartPosition,
                                        long trieRoot,
                                        DeletionTime partitionLevelDeletion,
                                        int rowIndexCount)
     {
         if (trieRoot == -1)
-            return new RowIndexEntry<Object>(dataStartPosition) {};
+            return new RowIndexEntry<RowIndexReader.IndexInfo>(dataStartPosition) {};
         return new TrieIndexEntry(dataStartPosition, trieRoot, rowIndexCount, partitionLevelDeletion);
     }
 

@@ -34,7 +34,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.schema.TableMetadata;
 
-public abstract class AbstractReader implements SSTableReader.PartitionReader
+public abstract class AbstractReader implements TrieIndexSSTableReader.PartitionReader
 {
     protected final TableMetadata metadata;
 

@@ -497,7 +497,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             dataFile.setFileSyncListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
         }
 
-        public long append(DecoratedKey key, RowIndexEntry<IndexInfo> indexEntry) throws IOException
+        public long append(DecoratedKey key, RowIndexEntry<?> indexEntry) throws IOException
         {
             bf.add(key);
             long position;
@@ -507,7 +507,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                 try
                 {
                     ByteBufferUtil.writeWithShortLength(key.getKey(), rowIndexFile);
-                    indexEntry.serialize(rowIndexFile, rowIndexFile.position());
+                    ((TrieIndexEntry) indexEntry).serialize(rowIndexFile, rowIndexFile.position());
                 }
                 catch (IOException e)
                 {

@@ -60,7 +60,7 @@ public class TrieIndexScanner implements ISSTableScanner
 {
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
     protected final RandomAccessReader dfile;
-    public final SSTableReader sstable;
+    public final TrieIndexSSTableReader sstable;
 
     private final Iterator<AbstractBounds<PartitionPosition>> rangeIterator;
 
@@ -73,12 +73,12 @@ public class TrieIndexScanner implements ISSTableScanner
     protected CloseableIterator<UnfilteredRowIterator> iterator;
 
     // Full scan of the sstables
-    public static ISSTableScanner getScanner(SSTableReader sstable)
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable)
     {
         return getScanner(sstable, Iterators.singletonIterator(fullRange(sstable)));
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable,
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable,
                                              ColumnFilter columns,
                                              DataRange dataRange,
                                              SSTableReadsListener listener)
@@ -86,7 +86,7 @@ public class TrieIndexScanner implements ISSTableScanner
         return new TrieIndexScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
         List<PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
@@ -96,12 +96,12 @@ public class TrieIndexScanner implements ISSTableScanner
         return getScanner(sstable, makeBounds(sstable, tokenRanges).iterator());
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
+    public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
     {
         return new TrieIndexScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator, SSTableReadsListener.NOOP_LISTENER);
     }
 
-    private TrieIndexScanner(SSTableReader sstable,
+    private TrieIndexScanner(TrieIndexSSTableReader sstable,
                              ColumnFilter columns,
                              DataRange dataRange,
                              Iterator<AbstractBounds<PartitionPosition>> rangeIterator,
@@ -259,7 +259,7 @@ public class TrieIndexScanner implements ISSTableScanner
     {
         private DecoratedKey currentKey;
         private RowIndexEntry<?> currentEntry;
-        private PartitionIndexIterator iterator;
+        private PartitionIterator iterator;
         private LazilyInitializedUnfilteredRowIterator currentRowIterator;
 
         protected UnfilteredRowIterator computeNext()

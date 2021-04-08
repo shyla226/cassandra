@@ -68,7 +68,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
  * Do not re-call open() on existing SSTable files; use the references kept by ColumnFamilyStore post-start instead.
  */
-class TrieIndexSSTableReader extends SSTableReader
+public class TrieIndexSSTableReader extends SSTableReader
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieIndexSSTableReader.class);
 
