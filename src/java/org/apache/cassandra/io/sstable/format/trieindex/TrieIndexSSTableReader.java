@@ -105,6 +105,9 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import static org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.readStaticRow;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
@@ -250,6 +253,16 @@ public class TrieIndexSSTableReader extends SSTableReader
         partitionIndex.addTo(identities);
     }
 
+    protected boolean filterFirst()
+    {
+        return openReason == OpenReason.MOVED_START;
+    }
+
+    protected boolean filterLast()
+    {
+        return false;
+    }
+
     public long estimatedKeys()
     {
         return partitionIndex == null ? 0 : partitionIndex.size();
@@ -273,23 +286,23 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener)
+    protected RowIndexEntry<?> getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
+        // TODO handle permitMatchPastLast (this is probably always false)
 
         PartitionPosition searchKey;
         Operator searchOp;
 
-        switch (op)
+        if (op == EQ)
+            return getExactPosition((DecoratedKey) key, listener, updateCacheAndStats);
+
+        if (op == GT || op == GE)
         {
-            case EQ:
-                return getExactPosition((DecoratedKey) key, listener);
-            case GT:
-            case GE:
                 if (filterLast() && last.compareTo(key) < 0)
                     return null;
                 boolean filteredLeft = (filterFirst() && first.compareTo(key) > 0);
                 searchKey = filteredLeft ? first : key;
-                searchOp = filteredLeft ? Operator.GE : op;
+            searchOp = filteredLeft ? GE : op;
 
                 try (PartitionIndex.Reader reader = partitionIndex.openReader())
                 {
@@ -301,30 +314,9 @@ public class TrieIndexSSTableReader extends SSTableReader
                     markSuspect();
                     throw new CorruptSSTableException(e, rowIndexFile.path());
                 }
-
-            case LT:
-                if (filterFirst() && first.compareTo(key) >= 0)
-                    return null;
-                boolean filteredRight = filterLast() && last.compareTo(key) < 0;
-                searchKey = filteredRight ? last : key;
-                searchOp = Operator.LT;
-
-                try (PartitionIndex.Reader reader = partitionIndex.openReader())
-                {
-                    return reader.floor(searchKey,
-                            (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
-                }
-                catch (IOException e)
-                {
-                    markSuspect();
-                    throw new CorruptSSTableException(e, rowIndexFile.path());
-                }
-
-            default:
-                throw new UnsupportedOperationException("Unsupported op: " + op);
         }
 
-
+        throw new UnsupportedOperationException("Unsupported op: " + op);
     }
 
     /**
@@ -400,22 +392,20 @@ public class TrieIndexSSTableReader extends SSTableReader
         return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 
-    @Override
-    public RowIndexEntry getExactPosition(DecoratedKey dk,
-                                          SSTableReadsListener listener,
-                                          FileDataInput rowIndexInput,
-                                          FileDataInput dataInput)
+    public RowIndexEntry<?> getExactPosition(DecoratedKey dk,
+                                             SSTableReadsListener listener,
+                                             boolean updateStats)
     {
         if (!inBloomFilter(dk))
         {
             listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
             Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.generation);
-            bloomFilterTracker.addTrueNegative();
             return null;
         }
 
         if ((filterFirst() && first.compareTo(dk) > 0) || (filterLast() && last.compareTo(dk) < 0))
         {
+            if (updateStats)
             bloomFilterTracker.addFalsePositive();
             listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             return null;
@@ -426,56 +416,30 @@ public class TrieIndexSSTableReader extends SSTableReader
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
             {
+                if (updateStats)
                 bloomFilterTracker.addFalsePositive();
                 listener.onSSTableSkipped(this, SkippingReason.PARTITION_INDEX_LOOKUP);
                 return null;
             }
 
-            FileDataInput toClose = null;
-            try
+            FileHandle fh;
+            long seekPosition;
+            if (indexPos >= 0)
             {
-                FileDataInput in;
-                if (indexPos >= 0)
-                {
-                    in = rowIndexInput;
-                    if (in == null)
-                    {
-                        in = rowIndexFile.createReader(indexPos);
-                        toClose = in;
-                    }
-                    else
-                        in.seek(indexPos);
-                }
-                else
-                {
-                    in = dataInput;
-                    if (in == null)
-                    {
-                        in = dfile.createReader(~indexPos);
-                        toClose = in;
-                    }
-                    else
-                        in.seek(~indexPos);
-                }
-
-                if (!ByteBufferUtil.equalsWithShortLength(in, dk.getKey()))
-                {
-                    bloomFilterTracker.addFalsePositive();
-                    listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
-                    return null;
-                }
-
-                bloomFilterTracker.addTruePositive();
-                RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
-                                                    : new RowIndexEntry(~indexPos);
-
-                listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
-                return entry;
+                fh = rowIndexFile;
+                seekPosition = indexPos;
             }
-            finally
+            else
             {
-                if (toClose != null)
-                    toClose.close();
+                fh = dfile;
+                seekPosition = ~indexPos;
+            }
+
+            try (FileDataInput in = fh.createReader(seekPosition))
+            {
+                return ByteBufferUtil.equalsWithShortLength(in, dk.getKey())
+                       ? handleKeyFound(updateStats, listener, in, indexPos)
+                       : handleKeyNotFound(updateStats, listener);
             }
         }
         catch (IOException e)
@@ -485,10 +449,21 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
-    @Override
-    public RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener)
-    {
-        return getExactPosition(dk, listener, null, null);
+    private RowIndexEntry<?> handleKeyNotFound(boolean updateStats, SSTableReadsListener listener) {
+        if (updateStats)
+            bloomFilterTracker.addFalsePositive();
+        listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
+        return null;
+    }
+
+    private RowIndexEntry<?> handleKeyFound(boolean updateStats, SSTableReadsListener listener, FileDataInput in, long indexPos) throws IOException {
+        if (updateStats)
+            bloomFilterTracker.addTruePositive();
+        RowIndexEntry<?> entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
+                                               : new RowIndexEntry<>(~indexPos);
+
+        listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
+        return entry;
     }
 
     protected FileHandle[] getFilesToBeLocked()
@@ -652,8 +627,8 @@ public class TrieIndexSSTableReader extends SSTableReader
             if (right == null && filterLast())
                 right = last;
 
-            long startPos = left != null ? getPosition(left, Operator.GE).position : 0;
-            long endPos = right != null ? getPosition(right, Operator.GE).position : uncompressedLength();
+            long startPos = left != null ? getPosition(left, GE).position : 0;
+            long endPos = right != null ? getPosition(right, GE).position : uncompressedLength();
             selectedDataSize += endPos - startPos;
         }
         return (long) (selectedDataSize / sstableMetadata.estimatedPartitionSize.rawMean());
