@@ -270,31 +270,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         return entry;
     }
 
-    private void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
-    {
-        if (SchemaConstants.isInternalKeyspace(metadata().keyspace))
-            return;
-
-        if (Guardrails.partitionSize.triggersOn(rowSize, null))
-        {
-            String keyString = metadata().partitionKeyAsCQLLiteral(key.getTempKey());
-            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true, null);
-
-            for (SSTableWriteWarning listener : warningListeners)
-            {
-                try
-                {
-                    listener.largePartitionWarning(metadata.keyspace, metadata.name, key, rowSize);
-                }
-                catch (Throwable t)
-                {
-                    JVMStabilityInspector.inspectThrowable(t);
-                    logger.warn("Problem notifying listeners about wide row threshold", t);
-                }
-            }
-        }
-    }
-
     @SuppressWarnings("resource")
     public boolean openEarly(Consumer<SSTableReader> callWhenReady)
     {
