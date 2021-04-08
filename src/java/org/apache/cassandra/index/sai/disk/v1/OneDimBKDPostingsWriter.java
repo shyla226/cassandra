@@ -112,35 +112,6 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         }
     }
 
-//<<<<<<< HEAD
-//    public static class NodeEntry
-//    {
-//        public final long numPoints;
-//        public final long postingsFilePointer;
-//
-//        public NodeEntry(long numPoints, long postingsFilePointer)
-//        {
-//            this.numPoints = numPoints;
-//            this.postingsFilePointer = postingsFilePointer;
-//        }
-//    }
-//
-//    @SuppressWarnings("resource")
-//||||||| parent of 0fbf5e5a33... first cut at port to ds-trunk
-//    public static class NodeEntry
-//    {
-//        public final long numPoints;
-//        public final long postingsFilePointer;
-//
-//        public NodeEntry(long numPoints, long postingsFilePointer)
-//        {
-//            this.numPoints = numPoints;
-//            this.postingsFilePointer = postingsFilePointer;
-//        }
-//    }
-//
-//=======
-//>>>>>>> 0fbf5e5a33... first cut at port to ds-trunk
     public long finish(IndexOutput out) throws IOException
     {
         checkState(postings.size() == leafOffsetToNodeID.size(),
