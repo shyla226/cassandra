@@ -206,11 +206,10 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    protected void setup(boolean trackHotness)
+    public void setup(boolean trackHotness)
     {
+        tidy.setup(this, trackHotness, Arrays.asList(bf, dfile, partitionIndex, rowIndexFile));
         super.setup(trackHotness);
-        tidy.addCloseable(partitionIndex);
-        tidy.addCloseable(rowIndexFile);
     }
 
     @Override

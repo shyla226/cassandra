@@ -129,6 +129,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                   Set<Component> indexComponents)
     {
         super(descriptor, components(metadata.getLocal(), indexComponents),keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
+        lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         if (compression)
         {
@@ -309,6 +310,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
             sstable.first = getMinimalKey(partitionIndex.firstKey());
             sstable.last = getMinimalKey(partitionIndex.lastKey());
+            sstable.setup(true);
             callWhenReady.accept(sstable);
         });
     }
@@ -364,6 +366,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                                                             header);
         sstable.first = getMinimalKey(first);
         sstable.last = getMinimalKey(last);
+        sstable.setup(true);
         return sstable;
     }
 
@@ -392,7 +395,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         protected Throwable doCommit(Throwable accumulate)
         {
-            accumulate = writerTidier.commit(accumulate);
             accumulate = dataFile.commit(accumulate);
             accumulate = iwriter.commit(accumulate);
             return accumulate;
@@ -408,7 +410,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
 
         protected Throwable doAbort(Throwable accumulate)
         {
-            accumulate = writerTidier.abort(accumulate);
             accumulate = iwriter.abort(accumulate);
             accumulate = dataFile.abort(accumulate);
             return accumulate;
