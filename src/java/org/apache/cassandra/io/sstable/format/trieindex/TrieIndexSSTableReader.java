@@ -64,6 +64,9 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
+
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
  * Do not re-call open() on existing SSTable files; use the references kept by ColumnFamilyStore post-start instead.
@@ -85,8 +88,8 @@ public class TrieIndexSSTableReader extends SSTableReader
         if (components.contains(Component.PARTITION_INDEX))
         {
             try (
-                    FileHandle.Builder rowIndexBuilder = indexFileHandleBuilder(Component.ROW_INDEX);
-                    FileHandle.Builder partitionIndexBuilder = indexFileHandleBuilder(Component.PARTITION_INDEX);
+                    FileHandle.Builder rowIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
+                    FileHandle.Builder partitionIndexBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
             )
             {
                 rowIndexFile = rowIndexBuilder.complete();
@@ -228,7 +231,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     private void verifyPartitionIndex() throws IOException
     {
         StatsMetadata statsMetadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
-        try (FileHandle.Builder builder = forVerify(indexFileHandleBuilder(Component.PARTITION_INDEX));
+        try (FileHandle.Builder builder = forVerify(defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX));
              PartitionIndex index = PartitionIndex.load(builder, metadata().partitioner, false);
              IndexPosIterator iter = index.allKeysIterator())
         {
@@ -419,13 +422,13 @@ public class TrieIndexSSTableReader extends SSTableReader
         {
             listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
             Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.generation);
-            getBloomFilterTracker().addTrueNegative();
+            bloomFilterTracker.addTrueNegative();
             return null;
         }
 
         if ((filterFirst() && first.compareTo(dk) > 0) || (filterLast() && last.compareTo(dk) < 0))
         {
-            getBloomFilterTracker().addFalsePositive();
+            bloomFilterTracker.addFalsePositive();
             listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             return null;
         }
@@ -435,7 +438,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
             {
-                getBloomFilterTracker().addFalsePositive();
+                bloomFilterTracker.addFalsePositive();
                 listener.onSSTableSkipped(this, SkippingReason.PARTITION_INDEX_LOOKUP);
                 return null;
             }
@@ -469,12 +472,12 @@ public class TrieIndexSSTableReader extends SSTableReader
 
                 if (!ByteBufferUtil.equalsWithShortLength(in, dk.getKey()))
                 {
-                    getBloomFilterTracker().addFalsePositive();
+                    bloomFilterTracker.addFalsePositive();
                     listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
                     return null;
                 }
 
-                getBloomFilterTracker().addTruePositive();
+                bloomFilterTracker.addTruePositive();
                 RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
                                                     : new RowIndexEntry(~indexPos);
 
@@ -568,7 +571,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                                            .iterator();
 
         if (!partitionKeyIterators.hasNext())
-            return UnmodifiableArrayList.emptyList();
+            return Collections.emptyList();
 
         return new Iterable<DecoratedKey>()
         {

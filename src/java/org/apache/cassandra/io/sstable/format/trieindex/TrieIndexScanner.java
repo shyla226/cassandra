@@ -278,7 +278,7 @@ public class TrieIndexScanner implements ISSTableScanner
                     if (iterator != null)
                     {
                         currentEntry = iterator.entry();
-                        currentKey = iterator.key();
+                        currentKey = iterator.decoratedKey();
                         if (currentEntry != null)
                         {
                             iterator.advance();

@@ -44,6 +44,10 @@ import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
+
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultDataHandleBuilder;
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
  * Bigtable format with trie indices
@@ -159,14 +163,14 @@ public class TrieIndexFormat implements SSTableFormat
         public PartitionIndexIterator keyIterator(Descriptor desc, TableMetadata metadata)
         {
             IPartitioner partitioner = metadata.partitioner;
-            boolean compressedData = desc.filenameFor(Component.COMPRESSION_INFO).exists();
+            boolean compressedData = desc.fileFor(Component.COMPRESSION_INFO).exists();
             try
             {
                 StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
 
-                try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.PARTITION_INDEX, compressedData);
-                     FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.ROW_INDEX, compressedData);
-                     FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, compressedData);
+                try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
+                     FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
+                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc).compressed(compressedData);
                      PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
@@ -180,24 +184,22 @@ public class TrieIndexFormat implements SSTableFormat
             }
             catch (IOException e)
             {
-                throw new RuntimeException(e);
+                throw Throwables.cleaned(e);
             }
         }
 
         @Override
         public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
-            File indexFile = descriptor.filenameFor(Component.PARTITION_INDEX);
+            File indexFile = descriptor.fileFor(Component.PARTITION_INDEX);
             if (!indexFile.exists())
                 return null;
-            boolean compressedData = descriptor.filenameFor(Component.COMPRESSION_INFO).exists();
+            boolean compressedData = descriptor.fileFor(Component.COMPRESSION_INFO).exists();
 
             StatsMetadata stats = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
 
 
-            try (FileHandle.Builder fhBuilder = SSTableReader.indexFileHandleBuilder(descriptor,
-                                                                                     TableMetadata.minimal(descriptor.ksname, descriptor.cfname),
-                                                                                     Component.PARTITION_INDEX, compressedData);
+            try (FileHandle.Builder fhBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
                  PartitionIndex pIndex = PartitionIndex.load(fhBuilder, partitioner, false))
             {
                 return Pair.create(pIndex.firstKey(), pIndex.lastKey());
