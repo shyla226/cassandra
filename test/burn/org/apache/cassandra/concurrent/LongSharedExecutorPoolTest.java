@@ -29,9 +29,12 @@ import java.util.concurrent.locks.LockSupport;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.math3.distribution.WeibullDistribution;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class LongSharedExecutorPoolTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(LongSharedExecutorPoolTest.class);
 
     private static final class WaitTask implements Runnable
     {
@@ -104,6 +107,7 @@ public class LongSharedExecutorPoolTest
 
     private void testPromptnessOfExecution(long intervalNanos, float loadIncrement) throws InterruptedException, ExecutionException
     {
+        logger.info("Starting promptness of execution test with interval={} ms and loadIncrement={}", TimeUnit.NANOSECONDS.toMillis(intervalNanos), loadIncrement);
         final int executorCount = 4;
         int threadCount = 8;
         int scale = 1024;
@@ -135,19 +139,27 @@ public class LongSharedExecutorPoolTest
         {
             if (System.nanoTime() > until)
             {
-                System.out.println(String.format("Completed %.0fK batches with %.1fM events", runs * 0.001f, events * 0.000001f));
+                logger.info(String.format("Completed %.0fK batches with %.1fM events", runs * 0.001f, events * 0.000001f));
                 events = 0;
                 until = System.nanoTime() + intervalNanos;
                 multiplier += loadIncrement;
-                System.out.println(String.format("Running for %ds with load multiplier %.1f", TimeUnit.NANOSECONDS.toSeconds(intervalNanos), multiplier));
+                logger.info(String.format("Running for %ds with load multiplier %.1f", TimeUnit.NANOSECONDS.toSeconds(intervalNanos), multiplier));
             }
 
             // wait a random amount of time so we submit new tasks in various stages of
             long timeout;
+            boolean timeoutIsMax = false;
             if (pending.isEmpty()) timeout = 0;
-            else if (Math.random() > 0.98) timeout = Long.MAX_VALUE;
+            else if (Math.random() > 0.98)
+            {
+                timeout = System.nanoTime() + TimeUnit.HOURS.toNanos(1);
+                timeoutIsMax = true;
+            }
             else if (pending.size() == executorCount) timeout = pending.first().timeout;
-            else timeout = (long) (Math.random() * pending.last().timeout);
+            else timeout = System.nanoTime() + (long) (Math.random() * (pending.last().timeout - System.nanoTime()));
+
+            if ((timeout - System.nanoTime()) < 0)
+                logger.warn("Timeout set to a negative value {}ms", TimeUnit.NANOSECONDS.toMillis(timeout - System.nanoTime()));
 
             while (!pending.isEmpty() && timeout > System.nanoTime())
             {
@@ -161,6 +173,7 @@ public class LongSharedExecutorPoolTest
                 }
                 catch (TimeoutException e)
                 {
+                    logger.info("Timeout");
                 }
                 if (!complete && System.nanoTime() > first.timeout)
                 {
@@ -177,7 +190,7 @@ public class LongSharedExecutorPoolTest
             }
 
             // if we've emptied the executors, give all our threads an opportunity to spin down
-            if (timeout == Long.MAX_VALUE)
+            if (timeoutIsMax)
                 Uninterruptibles.sleepUninterruptibly(10, TimeUnit.MILLISECONDS);
 
             // submit a random batch to the first free executor service
@@ -213,7 +226,7 @@ public class LongSharedExecutorPoolTest
                 throw new AssertionError();
             events += results.size();
             pending.add(new Batch(results, end, executorIndex));
-//            System.out.println(String.format("Submitted batch to executor %d with %d items and %d permitted millis", executorIndex, count, TimeUnit.NANOSECONDS.toMillis(end - start)));
+            // logger.info(String.format("Submitted batch to executor %d with %d items and %d permitted millis", executorIndex, count, TimeUnit.NANOSECONDS.toMillis(end - start)));
         }
     }
 
