@@ -77,19 +77,19 @@ public class LongSharedExecutorPoolTest
     private static final class Batch implements Comparable<Batch>
     {
         final TreeSet<Result> results;
-        final long timeout;
+        final long deadline;
         final int executorIndex;
 
-        private Batch(TreeSet<Result> results, long timeout, int executorIndex)
+        private Batch(TreeSet<Result> results, long deadline, int executorIndex)
         {
             this.results = results;
-            this.timeout = timeout;
+            this.deadline = deadline;
             this.executorIndex = executorIndex;
         }
 
         public int compareTo(Batch that)
         {
-            int c = Long.compare(this.timeout, that.timeout);
+            int c = Long.compare(this.deadline, that.deadline);
             if (c != 0)
                 return c;
             c = Integer.compare(this.results.size(), that.results.size());
@@ -147,35 +147,33 @@ public class LongSharedExecutorPoolTest
             }
 
             // wait a random amount of time so we submit new tasks in various stages of
-            long timeout;
+            long deadline;
             boolean timeoutIsMax = false;
-            if (pending.isEmpty()) timeout = 0;
+            long curTime = System.nanoTime();
+            if (pending.isEmpty()) deadline = 0;
             else if (Math.random() > 0.98)
             {
-                timeout = System.nanoTime() + TimeUnit.HOURS.toNanos(1);
+                deadline = curTime + TimeUnit.HOURS.toNanos(1);
                 timeoutIsMax = true;
             }
-            else if (pending.size() == executorCount) timeout = pending.first().timeout;
-            else timeout = System.nanoTime() + (long) (Math.random() * (pending.last().timeout - System.nanoTime()));
+            else if (pending.size() == executorCount) deadline = pending.first().deadline;
+            else deadline = curTime + (long) (Math.random() * (pending.last().deadline - curTime));
 
-            if ((timeout - System.nanoTime()) < 0)
-                logger.warn("Timeout set to a negative value {}ms", TimeUnit.NANOSECONDS.toMillis(timeout - System.nanoTime()));
-
-            while (!pending.isEmpty() && timeout > System.nanoTime())
+            while (!pending.isEmpty() && deadline > System.nanoTime())
             {
                 Batch first = pending.first();
                 boolean complete = false;
                 try
                 {
                     for (Result result : first.results.descendingSet())
-                        result.future.get(timeout - System.nanoTime(), TimeUnit.NANOSECONDS);
+                        result.future.get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
                     complete = true;
                 }
                 catch (TimeoutException e)
                 {
                     logger.info("Timeout");
                 }
-                if (!complete && System.nanoTime() > first.timeout)
+                if (!complete && System.nanoTime() > first.deadline)
                 {
                     for (Result result : first.results)
                         if (!result.future.isDone())
