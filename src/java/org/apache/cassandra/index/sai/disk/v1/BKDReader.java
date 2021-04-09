@@ -1089,50 +1089,6 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
-//        @SuppressWarnings("resource")
-//        void filterLeaf(List<PostingList.PeekablePostingList> postingLists) throws IOException
-//        {
-//            bkdInput.seek(index.getLeafBlockFP());
-//
-//            final int count = bkdInput.readVInt();
-//
-//            // loading doc ids occurred here prior
-//
-//            final FixedBitSet[] holder = new FixedBitSet[1];
-//
-//            final int orderMapLength = bkdInput.readVInt();
-//
-//            final long orderMapPointer = bkdInput.getFilePointer();
-//
-//            final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
-//            for (int x = 0; x < count; x++)
-//            {
-//                origIndex[x] = (short) LeafOrderMap.getValue(randoInput, orderMapPointer, x, leafOrderMapReader);
-//            }
-//
-//            // seek beyond the ordermap
-//            bkdInput.seek(orderMapPointer + orderMapLength);
-//
-//            IndexInput leafInput = bkdInput;
-//
-//            if (compressor != null)
-//            {
-//                // This should not throw WouldBlockException, even though we're on a TPC thread, because the
-//                // secret key used by the underlying encryptor should be loaded at reader construction time.
-//                leafInput = CryptoUtils.uncompress(bkdInput, compressor, compBytes, uncompBytes);
-//            }
-//
-//            visitDocValues(commonPrefixLengths, scratchPackedValue1, leafInput, count, visitor, holder, origIndex);
-//
-//            final int nodeID = index.getNodeID();
-//
-//            if (postingsIndex.exists(nodeID) && holder[0].cardinality() > 0)
-//            {
-//                final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
-//                postingLists.add(initFilteringPostingReader(pointer, holder[0]).peekable());
-//            }
-//        }
-
         void visitNode(List<PostingList.PeekablePostingList> postingLists,
                        byte[] cellMinPacked,
                        byte[] cellMaxPacked,
