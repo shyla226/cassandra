@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.primitives.UnsignedBytes;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -52,6 +53,19 @@ import static org.hamcrest.Matchers.is;
 
 public class BKDReaderTest extends NdiRandomizedTest
 {
+    @Test
+    public void testMissingValue()
+    {
+        byte[] bytes = new byte[16];
+        BKDWriter.genMissingValue( 16, bytes);
+        assertEquals(16, bytes.length);
+        for (int x=0; x < bytes.length; x++)
+        {
+            int i = UnsignedBytes.toInt(bytes[x]);
+            assertEquals(255, i);
+        }
+    }
+
     private final BKDReader.IntersectVisitor NONE_MATCH = new BKDReader.IntersectVisitor()
     {
         @Override

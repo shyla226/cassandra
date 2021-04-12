@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.function.IntFunction;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.primitives.UnsignedBytes;
 
 import org.apache.cassandra.index.sai.disk.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
@@ -43,7 +44,6 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.RAMOutputStream;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.FutureArrays;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.LongBitSet;
@@ -195,6 +195,14 @@ public class BKDWriter implements Closeable
         {
             throw new IllegalArgumentException("maxMBSortInHeap=" + maxMBSortInHeap + " only allows for maxPointsSortInHeap=" + maxPointsSortInHeap + ", but this is less than maxPointsInLeafNode=" + maxPointsInLeafNode + "; either increase maxMBSortInHeap or decrease maxPointsInLeafNode");
         }
+    }
+
+    public static byte[] genMissingValue(int maxBytes, byte[] bytes)
+    {
+        assert maxBytes == bytes.length;
+        //byte[] bytes = new byte[maxBytes];
+        Arrays.fill(bytes, UnsignedBytes.MAX_VALUE);
+        return bytes;
     }
 
     public static void verifyParams(int numDims, int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount)
@@ -902,33 +910,6 @@ public class BKDWriter implements Closeable
                 assert i <= count;
             }
         }
-    }
-
-    /**
-     * Return an array that contains the min and max values for the [offset, offset+length] interval
-     * of the given {@link BytesRef}s.
-     */
-    private static BytesRef[] computeMinMax(int count, IntFunction<BytesRef> packedValues, int offset, int length)
-    {
-        assert length > 0;
-        BytesRefBuilder min = new BytesRefBuilder();
-        BytesRefBuilder max = new BytesRefBuilder();
-        BytesRef first = packedValues.apply(0);
-        min.copyBytes(first.bytes, first.offset + offset, length);
-        max.copyBytes(first.bytes, first.offset + offset, length);
-        for (int i = 1; i < count; ++i)
-        {
-            BytesRef candidate = packedValues.apply(i);
-            if (FutureArrays.compareUnsigned(min.bytes(), 0, length, candidate.bytes, candidate.offset + offset, candidate.offset + offset + length) > 0)
-            {
-                min.copyBytes(candidate.bytes, candidate.offset + offset, length);
-            }
-            else if (FutureArrays.compareUnsigned(max.bytes(), 0, length, candidate.bytes, candidate.offset + offset, candidate.offset + offset + length) < 0)
-            {
-                max.copyBytes(candidate.bytes, candidate.offset + offset, length);
-            }
-        }
-        return new BytesRef[]{ min.get(), max.get() };
     }
 
     private void writeLeafBlockPackedValuesRange(DataOutput out, int[] commonPrefixLengths, int start, int end, IntFunction<BytesRef> packedValues) throws IOException

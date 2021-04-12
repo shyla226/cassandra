@@ -85,7 +85,12 @@ public class SortedPostingsTest extends NdiRandomizedTest
         for (Row row : rowsCopy)
         {
             //               value, rowid
-            NumericUtils.intToSortableBytes(((Number) row.array[col]).intValue(), scratch, 0);
+            int intVal = ((Number) row.array[col]).intValue();
+            NumericUtils.intToSortableBytes(intVal, scratch, 0);
+            if (intVal == Integer.MAX_VALUE)
+            {
+                BKDWriter.genMissingValue(4, scratch);
+            }
             buffer.addPackedValue((int) row.rowID, new BytesRef(scratch));
         }
 
@@ -117,6 +122,10 @@ public class SortedPostingsTest extends NdiRandomizedTest
         for (long docID = numRows; docID >= 0; docID--)
         {
             int i = nextInt(0, 1000);
+            if (nextInt(0, 10) == 0)
+            {
+                i = Integer.MAX_VALUE;
+            }
             rows.add(new Row(docID, i, docID));
             fileWriter.write(docID + "," + i + "," + docID+"\n");
         }
@@ -251,8 +260,6 @@ public class SortedPostingsTest extends NdiRandomizedTest
             rowIDs.add(rowID);
         }
         iterator.close();
-
-        //pointIDList.close();
 
         LongArrayList checkRowIDs = find(min, max, 0, 1, rows);
 
