@@ -53,9 +53,9 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -162,17 +162,17 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             long previousKeyPosition = 0;
             indexWriter.begin();
 
-            try (KeyIterator keys = KeyIterator.forSSTable(sstable))
+            try (PartitionIndexIterator keys = sstable.allKeysIterator())
             {
-                while (keys.hasNext())
+                while (!keys.isExhausted())
                 {
                     if (isStopRequested())
                     {
                         throw new CompactionInterruptedException(getCompactionInfo());
                     }
 
-                    final DecoratedKey key = keys.next();
-                    final long keyPosition = keys.getDataPosition();
+                    final DecoratedKey key = sstable.decorateKey(keys.key());
+                    final long keyPosition = keys.keyPosition();
 
                     indexWriter.startPartition(key, keyPosition);
 
@@ -206,8 +206,9 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                         }
                     }
 
-                    bytesProcessed += keys.getDataPosition() - previousKeyPosition;
-                    previousKeyPosition = keys.getDataPosition();
+                    long dataPosition = keys.advance() ? keys.dataPosition() : sstable.uncompressedLength();
+                    bytesProcessed += dataPosition - previousKeyPosition;
+                    previousKeyPosition = dataPosition;
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);

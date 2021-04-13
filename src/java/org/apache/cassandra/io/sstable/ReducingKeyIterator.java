@@ -46,8 +46,9 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         {
             for (SSTableReader sstable : sstables)
             {
-                iters.add(KeyIterator.forSSTable(sstable));
-                len += sstable.uncompressedLength();
+                KeyIterator iter = KeyIterator.forSSTable(sstable);
+                iters.add(iter);
+                len += iter.getTotalBytes();
             }
         }
         catch (IOException | RuntimeException ex)
@@ -103,7 +104,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         long m = 0;
         for (Iterator<DecoratedKey> iter : mi.iterators())
         {
-            m += ((KeyIterator) iter).getDataPosition();
+            m += ((KeyIterator) iter).getBytesRead();
         }
         return m;
     }

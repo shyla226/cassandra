@@ -35,6 +35,11 @@ public interface PartitionIndexIterator extends Closeable
     public ByteBuffer key();
 
     /**
+     * Position in the component preferred for reading keys. This is specific to SSTable implementation
+     */
+    long keyPosition();
+
+    /**
      * Position in the data file where the associated content resides
      */
     public long dataPosition();
@@ -55,8 +60,7 @@ public interface PartitionIndexIterator extends Closeable
     boolean isExhausted();
 
     /**
-     * Returns the current position in index file (which along with {@link #indexLength()}
-     * can be used to track iteration progress
+     * Returns the current position in index file
      */
     long indexPosition();
 

@@ -138,6 +138,12 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         return currentEntry != null ? currentEntry.position : -1;
     }
 
+    @Override
+    public long keyPosition()
+    {
+        return dataPosition();
+    }
+
     public RowIndexEntry<?> entry()
     {
         return currentEntry;

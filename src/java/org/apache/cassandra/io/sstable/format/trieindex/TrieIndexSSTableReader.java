@@ -344,9 +344,9 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long dataPosition) throws IOException
+    public DecoratedKey keyAt(long position) throws IOException
     {
-        try (FileDataInput in = dfile.createReader(dataPosition))
+        try (FileDataInput in = dfile.createReader(position))
         {
             if (in.isEOF()) return null;
             return decorateKey(ByteBufferUtil.readWithShortLength(in));

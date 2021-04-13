@@ -20,10 +20,9 @@ package org.apache.cassandra.io.sstable;
 import java.io.IOException;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -34,38 +33,35 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
 
     private final PartitionIndexIterator it;
 
-    private long keyPosition = -1;
+    private final long totalBytes;
 
-    public KeyIterator(PartitionIndexIterator it, IPartitioner partitioner)
+    private boolean initialized = false;
+
+    public KeyIterator(PartitionIndexIterator it, IPartitioner partitioner, long totalBytes)
     {
         this.it = it;
         this.partitioner = partitioner;
+        this.totalBytes = totalBytes;
     }
 
     public static KeyIterator forSSTable(SSTableReader ssTableReader) throws IOException
     {
-        return new KeyIterator(ssTableReader.allKeysIterator(), ssTableReader.getPartitioner());
-    }
-
-    public static KeyIterator create(SSTableReader.Factory factory, Descriptor descriptor, TableMetadata metadata)
-    {
-        return new KeyIterator(factory.indexIterator(descriptor, metadata), metadata.partitioner);
+        return new KeyIterator(ssTableReader.allKeysIterator(), ssTableReader.getPartitioner(), ssTableReader.uncompressedLength());
     }
 
     protected DecoratedKey computeNext()
     {
         try
         {
-            if (keyPosition < 0)
+            if (!initialized)
             {
-                keyPosition = 0;
+                initialized = true;
                 return it.isExhausted()
                        ? endOfData()
                        : partitioner.decorateKey(it.key());
             }
             else
             {
-                keyPosition = it.indexPosition();
                 return it.advance()
                        ? partitioner.decorateKey(it.key())
                        : endOfData();
@@ -82,26 +78,14 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         it.close();
     }
 
-    public long getIndexPosition()
+    public long getBytesRead()
     {
-        return keyPosition;
+        return it.isExhausted() ? totalBytes : it.dataPosition();
     }
 
-    public long getDataPosition()
+    public long getTotalBytes()
     {
-        return it.dataPosition();
+        return totalBytes;
     }
 
-    public void reset()
-    {
-        try
-        {
-            it.reset();
-            keyPosition = -1;
-        }
-        catch (IOException ex)
-        {
-            throw new RuntimeException(ex);
-        }
-    }
 }

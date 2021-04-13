@@ -416,9 +416,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long indexPosition) throws IOException
+    public DecoratedKey keyAt(long position) throws IOException
     {
-        return delegate.keyAt(indexPosition);
+        return delegate.keyAt(position);
     }
 
     @Override

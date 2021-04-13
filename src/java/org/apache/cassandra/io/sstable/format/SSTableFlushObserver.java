@@ -38,7 +38,7 @@ public interface SSTableFlushObserver
      * but before any cells are processed (see {@link #nextUnfilteredCluster(Unfiltered)}).
      *
      * @param key The key being appended to SSTable.
-     * @param position The position of the key in the data file.
+     * @param position The position of the key in the component preferred for reading keys
      */
     void startPartition(DecoratedKey key, long position);
 

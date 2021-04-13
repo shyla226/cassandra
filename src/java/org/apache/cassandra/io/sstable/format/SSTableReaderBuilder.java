@@ -18,34 +18,43 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.Downsampling;
+import org.apache.cassandra.io.sstable.IndexSummary;
+import org.apache.cassandra.io.sstable.IndexSummaryBuilder;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import org.apache.cassandra.utils.BloomFilterSerializer;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.IFilter;
 
 public abstract class SSTableReaderBuilder
 {
@@ -200,12 +209,11 @@ public abstract class SSTableReaderBuilder
                 bf = FilterFactory.getFilter(estimatedKeys, metadata.params.bloomFilterFpChance);
 
             // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
-            try (KeyIterator keyIterator = new KeyIterator(indexIterator, metadata.partitioner);
-                 IndexSummaryBuilder summaryBuilder = summaryLoaded ? null : new IndexSummaryBuilder(estimatedKeys, metadata.params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL))
+            try (IndexSummaryBuilder summaryBuilder = summaryLoaded ? null : new IndexSummaryBuilder(estimatedKeys, metadata.params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL))
             {
-                while (keyIterator.hasNext())
+                while (!indexIterator.isExhausted())
                 {
-                    DecoratedKey decoratedKey = keyIterator.next();
+                    DecoratedKey decoratedKey = metadata.partitioner.decorateKey(indexIterator.key());
 
                     if (!summaryLoaded)
                     {
@@ -213,11 +221,13 @@ public abstract class SSTableReaderBuilder
                             first = decoratedKey;
                         last = decoratedKey;
 
-                        summaryBuilder.maybeAddEntry(decoratedKey, keyIterator.getIndexPosition());
+                        summaryBuilder.maybeAddEntry(decoratedKey, indexIterator.keyPosition());
                     }
 
                     if (recreateBloomFilter)
                         bf.add(decoratedKey);
+
+                    indexIterator.advance();
                 }
 
                 if (!summaryLoaded)
