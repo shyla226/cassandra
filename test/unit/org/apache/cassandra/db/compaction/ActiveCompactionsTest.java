@@ -38,6 +38,7 @@ import org.junit.Test;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.db.view.ViewBuilderTask;
@@ -67,7 +68,7 @@ public class ActiveCompactionsTest extends CQLTester
         for (int i = 0; i < 5; i++)
         {
             execute("INSERT INTO %s (pk, ck, a, b) VALUES (" + i + ", 2, 3, 4)");
-            getCurrentColumnFamilyStore().forceBlockingFlush();
+            getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
 
         Index idx = getCurrentColumnFamilyStore().indexManager.getIndexByName(idxName);
@@ -79,7 +80,7 @@ public class ActiveCompactionsTest extends CQLTester
         for (int ii = 0; ii < loopCount; ii++)
         {
             CountDownLatch trigger = new CountDownLatch(1);
-            SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables);
+            SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, true);
             Future<?> f1 = es.submit(() -> {
                 Uninterruptibles.awaitUninterruptibly(trigger);
                 try

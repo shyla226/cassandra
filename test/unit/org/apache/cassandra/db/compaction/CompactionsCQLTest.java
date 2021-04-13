@@ -39,7 +39,6 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RangeTombstone;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
@@ -472,14 +471,14 @@ public class CompactionsCQLTest extends CQLTester
             r.nextBytes(b);
             execute("insert into %s (id, x) values (?, ?)", i, ByteBuffer.wrap(b));
         }
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         getCurrentColumnFamilyStore().disableAutoCompaction();
         for (int i = 0; i < 1000; i++)
         {
             r.nextBytes(b);
             execute("insert into %s (id, x) values (?, ?)", i, ByteBuffer.wrap(b));
         }
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) getCurrentColumnFamilyStore().getCompactionStrategyManager().getUnrepairedUnsafe().first();
         LeveledCompactionTask lcsTask;
@@ -506,7 +505,7 @@ public class CompactionsCQLTest extends CQLTester
             r.nextBytes(b);
             execute("insert into %s (id, x) values (?, ?)", i, ByteBuffer.wrap(b));
         }
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         // now we have a bunch of sstables in L2 and one in L0 - bump the L0 one to L1:
         for (SSTableReader sstable : getCurrentColumnFamilyStore().getLiveSSTables())
         {
