@@ -18,6 +18,8 @@
 package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
@@ -29,7 +31,65 @@ import org.apache.cassandra.utils.CloseableIterator;
 
 public class KeyIterator extends AbstractIterator<DecoratedKey> implements CloseableIterator<DecoratedKey>
 {
+    private final static class In
+    {
+        private final File path;
+        private volatile RandomAccessReader in;
+
+        public In(File path)
+        {
+            this.path = path;
+        }
+
+        private void maybeInit()
+        {
+            if (in != null)
+                return;
+
+            synchronized (this)
+            {
+                if (in == null)
+                {
+                    in = RandomAccessReader.open(path);
+                }
+            }
+        }
+
+        public DataInputPlus get()
+        {
+            maybeInit();
+            return in;
+        }
+
+        public boolean isEOF()
+        {
+            maybeInit();
+            return in.isEOF();
+        }
+
+        public void close()
+        {
+            if (in != null)
+                in.close();
+        }
+
+        public long getFilePointer()
+        {
+            maybeInit();
+            return in.getFilePointer();
+        }
+
+        public long length()
+        {
+            maybeInit();
+            return in.length();
+        }
+    }
+
+    private final Descriptor desc;
+    private final In in;
     private final IPartitioner partitioner;
+    private final ReadWriteLock fileAccessLock;
 
     private final PartitionIndexIterator it;
 
@@ -49,10 +109,12 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
     public static KeyIterator create(SSTableReader.Factory factory, Descriptor descriptor, TableMetadata metadata)
     {
         return new KeyIterator(factory.indexIterator(descriptor, metadata), metadata.partitioner);
+        fileAccessLock = new ReentrantReadWriteLock();
     }
 
     protected DecoratedKey computeNext()
     {
+        fileAccessLock.readLock().lock();
         try
         {
             if (keyPosition < 0)
@@ -74,20 +136,42 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         {
             throw new RuntimeException(e);
         }
+        finally
+        {
+            fileAccessLock.readLock().unlock();
+        }
     }
 
     public void close()
     {
-        it.close();
+        fileAccessLock.writeLock().lock();
+        try
+        {
+            in.close();
+        }
+        finally
+        {
+            fileAccessLock.writeLock().unlock();
+        }
     }
 
     public long getBytesRead()
     {
-        return it.indexPosition();
+        fileAccessLock.readLock().lock();
+        try
+        {
+            return it.indexPosition();
+        }
+        finally
+        {
+            fileAccessLock.readLock().unlock();
+        }
     }
 
     public long getTotalBytes()
     {
+        // length is final in the referenced object.
+        // no need to acquire the lock
         return it.indexLength();
     }
 

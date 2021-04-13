@@ -20,6 +20,9 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
@@ -55,6 +58,7 @@ public class Scrubber implements Closeable
     private final boolean checkData;
     private final long expectedBloomFilterSize;
 
+    private final ReadWriteLock fileAccessLock;
     private final RandomAccessReader dataFile;
     private final PartitionIndexIterator indexIterator;
     private final ScrubInfo scrubInfo;
@@ -119,6 +123,7 @@ public class Scrubber implements Closeable
             cfs.metadata().params.minIndexInterval,
             hasIndexFile ? SSTableReader.getApproximateKeyCount(toScrub) : 0);
 
+        this.fileAccessLock = new ReentrantReadWriteLock();
         // loop through each row, deserializing to check for damage.
         // we'll also loop through the index at the same time, using the position from the index to recover if the
         // row header (key or data size) is corrupt. (This means our position in the index file will be one row
@@ -131,7 +136,7 @@ public class Scrubber implements Closeable
                              ? openIndexIterator()
                              : null;
 
-        this.scrubInfo = new ScrubInfo(dataFile, sstable);
+        this.scrubInfo = new ScrubInfo(dataFile, sstable, fileAccessLock.readLock());
 
         if (reinsertOverflowedTTLRows)
             outputHandler.output("Starting scrub with reinsert overflowed TTL option");
@@ -429,8 +434,16 @@ public class Scrubber implements Closeable
 
     public void close()
     {
-        FileUtils.closeQuietly(dataFile);
+        fileAccessLock.writeLock().lock();
+        try
+        {
+            FileUtils.closeQuietly(dataFile);
         FileUtils.closeQuietly(indexIterator);
+        }
+        finally
+        {
+            fileAccessLock.writeLock().unlock();
+        }
     }
 
     public CompactionInfo.Holder getScrubInfo()
@@ -443,16 +456,19 @@ public class Scrubber implements Closeable
         private final RandomAccessReader dataFile;
         private final SSTableReader sstable;
         private final UUID scrubCompactionId;
+        private final Lock fileReadLock;
 
-        public ScrubInfo(RandomAccessReader dataFile, SSTableReader sstable)
+        public ScrubInfo(RandomAccessReader dataFile, SSTableReader sstable, Lock fileReadLock)
         {
             this.dataFile = dataFile;
             this.sstable = sstable;
+            this.fileReadLock = fileReadLock;
             scrubCompactionId = UUIDGen.getTimeUUID();
         }
 
         public CompactionInfo getCompactionInfo()
         {
+            fileReadLock.lock();
             try
             {
                 return new CompactionInfo(sstable.metadata(),
@@ -465,6 +481,10 @@ public class Scrubber implements Closeable
             catch (Exception e)
             {
                 throw new RuntimeException(e);
+            }
+            finally
+            {
+                fileReadLock.unlock();
             }
         }
 

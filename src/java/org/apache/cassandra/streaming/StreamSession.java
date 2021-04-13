@@ -337,7 +337,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * On channel closing, if no channels are left just close the message sender; this must be closed last to ensure
      * keep alive messages are sent until the very end of the streaming session.
      */
-    private synchronized void onChannelClose(Channel channel)
+    private void onChannelClose(Channel channel)
     {
         if (channels.remove(channel.id()) != null && channels.isEmpty())
             messageSender.close();
@@ -616,19 +616,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         state(State.PREPARING);
         PrepareSynMessage prepare = new PrepareSynMessage();
         prepare.requests.addAll(requests);
-        long totalBytesToStream = 0;
-        long totalSSTablesStreamed = 0;
         for (StreamTransferTask task : transfers.values())
         {
-            totalBytesToStream += task.getTotalSize();
-            totalSSTablesStreamed += task.getTotalNumberOfFiles();
             prepare.summaries.add(task.getSummary());
-        }
-
-        if(StreamOperation.REPAIR == getStreamOperation())
-        {
-            StreamingMetrics.totalOutgoingRepairBytes.inc(totalBytesToStream);
-            StreamingMetrics.totalOutgoingRepairSSTables.inc(totalSSTablesStreamed);
         }
 
         messageSender.sendMessage(prepare);
@@ -768,6 +758,13 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         long headerSize = message.stream.getEstimatedSize();
         StreamingMetrics.totalOutgoingBytes.inc(headerSize);
         metrics.outgoingBytes.inc(headerSize);
+
+        if(StreamOperation.REPAIR == getStreamOperation())
+        {
+            StreamingMetrics.totalOutgoingRepairBytes.inc(headerSize);
+            StreamingMetrics.totalOutgoingRepairSSTables.inc(message.stream.getNumFiles());
+        }
+
         // schedule timeout for receiving ACK
         StreamTransferTask task = transfers.get(message.header.tableId);
         if (task != null)
