@@ -35,9 +35,9 @@ public interface RefCounted<T>
     /**
      * @return the a new Ref() to the managed object, incrementing its refcount, or null if it is already released
      */
-    public Ref<? extends T> tryRef();
+    public Ref<T> tryRef();
 
-    public Ref<? extends T> ref();
+    public Ref<T> ref();
 
     public static interface Tidy
     {
