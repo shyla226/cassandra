@@ -1750,7 +1750,7 @@
     <testparallel testdelegate="testlist-cdc" />
   </target>
 
-  <target name="test-bigtable" depends="build-test" description="Execute unit tests with change-data-capture enabled">
+  <target name="test-bigtable" depends="build-test" description="Execute unit tests with default sstable format set to Big Table (otherwise the tests are executed with the default format set to Trie Index)">
       <path id="all-test-classes-path">
           <fileset dir="${test.unit.src}" includes="**/${test.name}.java" />
       </path>
