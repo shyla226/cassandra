@@ -2189,13 +2189,33 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
                     if (runOnClose != null)
                         runOnClose.run();
-                Throwable ex = Throwables.close(null, closables);
-                if (ex != null)
-                    throw Throwables.cleaned(ex);
-                    globalRef.release();
 
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, completed", descriptor);
+                Throwable exceptions = Throwables.close(null, closables);
+                if (exceptions != null)
+                {
+                    logger.error("Failed to close some sstable components of " + descriptor.baseFilename(), exceptions);
+                }
+
+                try
+                {
+                    globalRef.release();
+                }
+                catch (RuntimeException ex)
+                {
+                    logger.error("Failed to release the global ref of " + descriptor.baseFilename(), ex);
+                    exceptions = Throwables.merge(exceptions, ex);
+                }
+
+                if (exceptions != null)
+                {
+                    for (Throwable t : exceptions.getSuppressed())
+                        JVMStabilityInspector.inspectThrowable(t);
+
+                    throw Throwables.cleaned(exceptions);
+                }
+
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, completed", descriptor);
             });
         }
 
