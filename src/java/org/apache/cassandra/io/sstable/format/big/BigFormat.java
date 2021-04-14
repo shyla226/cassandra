@@ -182,11 +182,9 @@ public class BigFormat implements SSTableFormat
         // mb (3.0.7, 3.7): commit log lower bound included
         // mc (3.0.8, 3.9): commit log intervals included
         // md (3.0.18, 3.11.4): corrected sstable min/max clustering
-        // me (DSE 6.8): originating host id TODO make sure this is the last version in m group before merging to upstream
 
         // na (4.0.0): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
         // nb (4.1.0): improved min/max
-        // nc (DSE 6.8): originating host id TODO make sure this is the last version in n group before merging to upstream
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
@@ -201,7 +199,6 @@ public class BigFormat implements SSTableFormat
         private final boolean hasPendingRepair;
         private final boolean hasMetadataChecksum;
         private final boolean hasIsTransient;
-        private final boolean hasOriginatingHostId;
 
         /**
          * CASSANDRA-9067: 4.0 bloom filter representation changed (two longs just swapped)
@@ -226,7 +223,6 @@ public class BigFormat implements SSTableFormat
             hasIsTransient = version.compareTo("na") >= 0;
             hasMetadataChecksum = version.compareTo("na") >= 0;
             hasOldBfFormat = version.compareTo("na") < 0;
-            hasOriginatingHostId = version.matches("(m[e-z])|(n[c-z])");
         }
 
         @Override
@@ -329,7 +325,7 @@ public class BigFormat implements SSTableFormat
         @Override
         public boolean hasOriginatingHostId()
         {
-            return hasOriginatingHostId;
+            return false;
         }
 
         // TODO TBD
