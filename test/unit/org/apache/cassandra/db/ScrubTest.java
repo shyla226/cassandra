@@ -353,7 +353,9 @@ public class ScrubTest
     @Test
     public void testScrubOutOfOrder() throws Exception
     {
-        // TODO: STAR-247 run only for BigFormat: https://github.com/riptano/bdp/blob/6.8.10/dse-db/test/unit/org/apache/cassandra/db/ScrubTest.java#L380
+        // Run only for Big Table format because Big Table Format does not complain if partitions are given in invalid
+        // order. Legacy SSTables with out-of-order partitions exist in production systems and must be corrected
+        // by scrubbing. The trie index format does not permit such partitions.
         Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
 
         // This test assumes ByteOrderPartitioner to create out-of-order SSTable
