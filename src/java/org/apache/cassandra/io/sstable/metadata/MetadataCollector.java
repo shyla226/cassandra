@@ -162,12 +162,6 @@ public class MetadataCollector implements PartitionStatisticsCollector
         return this;
     }
 
-    public MetadataCollector addKeyHash(long hashed)
-    {
-        cardinality.offerHashed(hashed);
-        return this;
-    }
-
     public MetadataCollector addPartitionSizeInBytes(long partitionSize)
     {
         estimatedPartitionSize.add(partitionSize);

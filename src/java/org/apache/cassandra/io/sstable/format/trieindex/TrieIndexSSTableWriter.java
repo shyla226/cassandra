@@ -272,7 +272,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         long partitionSize = endPosition - currentStartPosition;
         maybeLogLargePartitionWarning(currentKey, partitionSize);
         metadataCollector.addPartitionSizeInBytes(partitionSize);
-        metadataCollector.addKeyHash(currentKey.hash2_64());
+        metadataCollector.addKey(currentKey.getKey());
         last = currentKey;
         if (first == null)
             first = currentKey;
