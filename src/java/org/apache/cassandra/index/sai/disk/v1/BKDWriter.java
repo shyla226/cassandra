@@ -47,6 +47,7 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FutureArrays;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.LongBitSet;
+import org.apache.lucene.util.NumericUtils;
 import org.apache.lucene.util.Sorter;
 import org.apache.lucene.util.bkd.MutablePointsReaderUtils;
 
@@ -139,7 +140,7 @@ public class BKDWriter implements Closeable
              totalPointCount > Integer.MAX_VALUE, compressor);
     }
 
-    protected BKDWriter(long maxDoc, int numDims, int bytesPerDim,
+    protected BKDWriter(long maxDoc, int numDims, int bytesPerDim2,
                         int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount,
                         boolean singleValuePerDoc, boolean longOrds, ICompressor compressor) throws IOException
     {
@@ -148,7 +149,7 @@ public class BKDWriter implements Closeable
         // creates temp files doesn't need crazy try/finally/sucess logic:
         this.maxPointsInLeafNode = maxPointsInLeafNode;
         this.numDims = numDims;
-        this.bytesPerDim = bytesPerDim;
+        this.bytesPerDim = bytesPerDim2 + 1;
         this.totalPointCount = totalPointCount;
         this.maxDoc = maxDoc;
         this.compressor = compressor;
@@ -197,10 +198,9 @@ public class BKDWriter implements Closeable
         }
     }
 
-    public static byte[] genMissingValue(int maxBytes, byte[] bytes)
+    public static byte[] genMissingValue(byte[] bytes)
     {
-        assert maxBytes == bytes.length;
-        //byte[] bytes = new byte[maxBytes];
+        //assert maxBytes == bytes.length;
         Arrays.fill(bytes, UnsignedBytes.MAX_VALUE);
         return bytes;
     }
@@ -261,13 +261,16 @@ public class BKDWriter implements Closeable
 
     /* In the 1D case, we can simply sort points in ascending order and use the
      * same writing logic as we use at merge time. */
-    private long writeField1Dim(IndexOutput out, MutableOneDimPointValues reader,
+    private long writeField1Dim(IndexOutput out,
+                                MutableOneDimPointValues reader,
                                 OneDimensionBKDWriterCallback callback) throws IOException
     {
         // TODO: cast to int
         if (reader.size() > 1)
-            MutablePointsReaderUtils.sort(Math.toIntExact(maxDoc), packedBytesLength, reader, 0, Math.toIntExact(reader.size()));
-
+        {
+            int bytesLen = reader.getBytesPerDimension();
+            MutablePointsReaderUtils.sort(Math.toIntExact(maxDoc), bytesLen, reader, 0, Math.toIntExact(reader.size()));
+        }
         final OneDimensionBKDWriter oneDimWriter = new OneDimensionBKDWriter(out, callback);
 
         reader.intersect((docID, packedValue) -> oneDimWriter.add(packedValue, docID));
@@ -341,12 +344,26 @@ public class BKDWriter implements Closeable
         final byte[] lastPackedValue;
         private long lastDocID;
 
+        private final byte[] expandedPackedValue = new byte[packedBytesLength];
+
         void add(byte[] packedValue, long docID) throws IOException
         {
-            assert valueInOrder(valueCount + leafCount,
-                                0, lastPackedValue, packedValue, 0, docID, lastDocID);
+            System.out.println("OneDimensionBKDWriter.add docID="+docID+" len="+packedValue.length+" packedValue=" + NumericUtils.sortableBytesToInt(packedValue, 0));
+            if (packedValue.length == packedBytesLength - 1)
+            {
+                expandedPackedValue[0] = 0;
+                System.arraycopy(packedValue, 0, expandedPackedValue, 1, packedValue.length);
+                assert expandedPackedValue[0] == 0;
+            }
+            else
+            {
+                System.arraycopy(packedValue, 0, expandedPackedValue, 0, packedValue.length);
+            }
 
-            System.arraycopy(packedValue, 0, leafValues, leafCount * packedBytesLength, packedBytesLength);
+            assert valueInOrder(valueCount + leafCount,
+                                0, lastPackedValue, expandedPackedValue, 0, docID, lastDocID);
+
+            System.arraycopy(expandedPackedValue, 0, leafValues, leafCount * packedBytesLength, packedBytesLength);
             leafDocs[leafCount] = docID;
             docsSeen.set(docID);
             leafCount++;
@@ -603,7 +620,6 @@ public class BKDWriter implements Closeable
     @SuppressWarnings("resource")
     private byte[] packIndex(long[] leafBlockFPs, byte[] splitPackedValues) throws IOException
     {
-
         int numLeaves = leafBlockFPs.length;
 
         // Possibly rotate the leaf block FPs, if the index not fully balanced binary tree (only happens

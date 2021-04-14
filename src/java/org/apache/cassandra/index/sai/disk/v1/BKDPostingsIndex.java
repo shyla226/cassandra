@@ -108,7 +108,7 @@ class BKDPostingsIndex
      */
     long getPostingsFilePointer(int nodeID)
     {
-        checkArgument(exists(nodeID));
+        checkArgument(exists(nodeID), "nodeID="+nodeID+" availableNodeIDs="+index.keySet());
         return index.get(nodeID).postingsFilePointer;
     }
 

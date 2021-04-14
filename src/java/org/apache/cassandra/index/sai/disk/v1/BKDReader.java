@@ -30,7 +30,7 @@ import java.util.TreeMap;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Stopwatch;
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -170,7 +170,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         bkdInput.seek(filePointer);
         final int count = bkdInput.readVInt();
         // loading doc ids occurred here prior
-        final int orderMapLength = bkdInput.readVInt();
+        final int orderMapLength = bkdInput.readVInt(); // read and unused
         final long orderMapPointer = bkdInput.getFilePointer();
 
         // TODO: need to change the order map stored on disk to avoid the origIndex array creation
@@ -323,7 +323,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final LongArrayList tempPostings = new LongArrayList();
         final long[] postings = new long[maxPointsInLeafNode];
         final DocMapper docMapper;
-        public final byte[] scratch;
+        private final byte[] scratch;
+        private final byte[] scratchShort;
         long lastPointId = Long.MIN_VALUE;
         int currentNodeID = -1;
 
@@ -332,11 +333,23 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             this.docMapper = docMapper;
 
             scratch = new byte[packedBytesLength];
+            scratchShort = new byte[packedBytesLength - 1];
 
             final long firstLeafFilePointer = getMinLeafBlockFP();
             bkdInput = indexComponents.openInput(kdtreeFile);
             sharedInput = postingsFile == null ? null : new SharedIndexInput(indexComponents.openInput(postingsFile));
             bkdInput.seek(firstLeafFilePointer);
+        }
+
+        public byte[] getTermValue()
+        {
+            System.arraycopy(scratch, 1, scratchShort, 0, scratchShort.length);
+            return scratchShort;
+        }
+
+        public byte[] getRawTermValue()
+        {
+            return scratch;
         }
 
         public int packedBytesLength()
@@ -409,7 +422,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
         public ByteComparable asByteComparable()
         {
-            return v -> ByteSource.fixedLength(scratch);
+            //return v -> ByteSource.fixedLength(scratch);
+            return v -> ByteSource.fixedLength(getTermValue());
         }
 
         public long rowID()
@@ -483,7 +497,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
 
             @Override
-            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
+            {
                 return Relation.CELL_CROSSES_QUERY;
             }
         };
@@ -596,12 +611,41 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
     }
 
+    private class ExtendedBytesIntersectVisitor implements IntersectVisitor
+    {
+        final IntersectVisitor visitor;
+        private byte[] scratch = new byte[bytesPerDim - 1];
+        private byte[] scratch2 = new byte[bytesPerDim - 1];
+
+        public ExtendedBytesIntersectVisitor(IntersectVisitor visitor)
+        {
+            this.visitor = visitor;
+        }
+
+        @Override
+        public boolean visit(byte[] packedValue)
+        {
+            System.arraycopy(packedValue, 1, scratch, 0, scratch.length);
+            return visitor.visit(scratch);
+        }
+
+        @Override
+        public Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
+        {
+            System.arraycopy(minPackedValue, 1, scratch, 0, scratch.length);
+            System.arraycopy(maxPackedValue, 1, scratch2, 0, scratch.length);
+            return visitor.compare(scratch, scratch2);
+        }
+    }
+
     public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor,
                                                            QueryEventListener.BKDIndexEventListener listener,
                                                            QueryContext context,
                                                            final String postingIndexName,
                                                            SortedPostingInputs sortedPostingInputs)
     {
+        visitor = new ExtendedBytesIntersectVisitor(visitor);
+
         Relation relation = visitor.compare(minPackedValue, maxPackedValue);
 
         if (relation == Relation.CELL_OUTSIDE_QUERY)
@@ -655,7 +699,6 @@ public class BKDReader extends TraversingBKDReader implements Closeable
      */
     class Intersection
     {
-        private final Stopwatch queryExecutionTimer = Stopwatch.createStarted();
         final QueryContext context;
 
         final IndexInput bkdInput;
@@ -725,15 +768,18 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
             if (postingIndexName.equals(DEFAULT_POSTING_INDEX))
             {
-                final long postingsFilePointer = postingsIndex.getPostingsFilePointer(nodeID);
-                final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput.sharedCopy(),
-                                                                                              postingsFilePointer);
-                PostingsReader postingsReader = new PostingsReader(sharedInput.sharedCopy(),
-                                                                   summary,
-                                                                   listener.postingListEventListener(),
-                                                                   primaryKeyMap);
-                postingLists.add(postingsReader.peekable());
-                return;
+                if (postingsIndex.exists(nodeID))
+                {
+                    final long postingsFilePointer = postingsIndex.getPostingsFilePointer(nodeID);
+                    final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput.sharedCopy(),
+                                                                                                  postingsFilePointer);
+                    PostingsReader postingsReader = new PostingsReader(sharedInput.sharedCopy(),
+                                                                       summary,
+                                                                       listener.postingListEventListener(),
+                                                                       primaryKeyMap);
+                    postingLists.add(postingsReader.peekable());
+                    return;
+                }
             }
             else
             {
@@ -960,15 +1006,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         @Override
         protected void closeAll()
         {
-            try
-            {
-                super.closeAll();
-                orderMapInput.close();
-            }
-            catch (IOException ioex)
-            {
-                throw new RuntimeException(ioex);
-            }
+            super.closeAll();
+            IOUtils.closeQuietly(orderMapInput);
         }
 
         @Override

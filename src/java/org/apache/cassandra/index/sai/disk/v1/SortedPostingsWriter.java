@@ -169,7 +169,7 @@ public class SortedPostingsWriter
 
             final PriorityQueue<PostingList.PeekablePostingList> leafPostingsReaders = new PriorityQueue<>(100, Comparator.comparingLong(PostingList.PeekablePostingList::peek));
 
-            List<PostingsReader> readers = new ArrayList();
+            List<PostingsReader> readersToClose = new ArrayList();
 
             long minPointID = Integer.MAX_VALUE;
 
@@ -182,15 +182,14 @@ public class SortedPostingsWriter
 
                 final PostingsReader postingsReader = new PostingsReader(postingsInput.sharedCopy(), leafNode.postingsFilePointer, NO_OP_POSTINGS_LISTENER);
                 leafPostingsReaders.add(postingsReader.peekable());
-                readers.add(postingsReader);
+                readersToClose.add(postingsReader);
             }
 
             final PostingList nonLeafNodePointIDs = MergePostingList.merge(leafPostingsReaders);
 
             final long writePostingsFilePointer = postingsWriter2.write(nonLeafNodePointIDs);
 
-            //for (PostingList.PeekablePostingList list : leafPostingsReaders)
-            for (PostingsReader postingsReader : readers)
+            for (PostingsReader postingsReader : readersToClose)
             {
                 postingsReader.close();
             }

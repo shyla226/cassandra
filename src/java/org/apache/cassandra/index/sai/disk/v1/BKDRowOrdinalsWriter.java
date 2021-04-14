@@ -12,8 +12,7 @@ public class BKDRowOrdinalsWriter
     // note: BKDReader must be closed by the caller
     public BKDRowOrdinalsWriter(BKDReader reader,
                                 IndexComponents components,
-                                MetadataWriter metadataWriter,
-                                int maxDoc) throws IOException
+                                MetadataWriter metadataWriter) throws IOException
     {
         List<BKDReader.RowIDAndPointIDIterator> iterators = reader.rowIDIterators();
         RowIDPointIDMergeIterator merger = new RowIDPointIDMergeIterator(iterators.toArray(new BKDReader.RowIDAndPointIDIterator[0]));

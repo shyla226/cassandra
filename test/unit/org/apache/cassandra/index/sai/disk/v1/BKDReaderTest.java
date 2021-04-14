@@ -57,7 +57,7 @@ public class BKDReaderTest extends NdiRandomizedTest
     public void testMissingValue()
     {
         byte[] bytes = new byte[16];
-        BKDWriter.genMissingValue( 16, bytes);
+        BKDWriter.genMissingValue( bytes);
         assertEquals(16, bytes.length);
         for (int x=0; x < bytes.length; x++)
         {
@@ -120,8 +120,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         MetadataWriter metaWriter = new MetadataWriter(metaOutput);
         BKDRowOrdinalsWriter writer = new BKDRowOrdinalsWriter(reader,
                                                                reader.indexComponents,
-                                                               metaWriter,
-                                                               10);
+                                                               metaWriter);
         reader.close();
     }
 
@@ -222,7 +221,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         {
             while (iterator.hasNext())
             {
-                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                int value = NumericUtils.sortableBytesToInt(iterator.getTermValue(), 0);
                 System.out.println("term=" + value);
                 iterator.next();
             }
@@ -374,10 +373,16 @@ public class BKDReaderTest extends NdiRandomizedTest
 
     public static BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, BKDTreeRamBuffer buffer, IndexComponents indexComponents) throws IOException
     {
+        return finishAndOpenReaderOneDim(maxPointsPerLeaf, buffer, indexComponents, Math.toIntExact(buffer.numRows()));
+    }
+
+    public static BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, BKDTreeRamBuffer buffer, IndexComponents indexComponents, long maxDoc) throws IOException
+    {
         final NumericIndexWriter writer = new NumericIndexWriter(indexComponents,
                                                                  maxPointsPerLeaf,
                                                                  Integer.BYTES,
-                                                                 Math.toIntExact(buffer.numRows()),
+                                                                 maxDoc,
+                                                                 //Math.toIntExact(buffer.numRows()), // max row id
                                                                  buffer.numRows(),
                                                                  new IndexWriterConfig("test", 2, 8),
                                                                  false);

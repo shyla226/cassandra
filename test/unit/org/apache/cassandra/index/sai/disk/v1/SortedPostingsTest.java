@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -80,28 +81,29 @@ public class SortedPostingsTest extends NdiRandomizedTest
         });
 
         final IndexComponents indexComponents = newIndexComponents();
-        byte[] scratch = new byte[4];
-        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+        byte[] scratch = new byte[5];
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, 5);
+        long maxRowID = -1;
         for (Row row : rowsCopy)
         {
-            //               value, rowid
+            maxRowID = Math.max(row.rowID, maxRowID);
+            //                  value, rowid
             int intVal = ((Number) row.array[col]).intValue();
-            NumericUtils.intToSortableBytes(intVal, scratch, 0);
+            NumericUtils.intToSortableBytes(intVal, scratch, 1);
             if (intVal == Integer.MAX_VALUE)
             {
-                BKDWriter.genMissingValue(4, scratch);
+                BKDWriter.genMissingValue(scratch);
             }
             buffer.addPackedValue((int) row.rowID, new BytesRef(scratch));
         }
 
-        BKDReader reader = BKDReaderTest.finishAndOpenReaderOneDim(10, buffer, indexComponents);
+        BKDReader reader = BKDReaderTest.finishAndOpenReaderOneDim(10, buffer, indexComponents, maxRowID+1);
 
         final MetadataWriter metaWriter = new MetadataWriter(indexComponents);
 
         final BKDRowOrdinalsWriter rowOrdinalsWriter = new BKDRowOrdinalsWriter(reader,
                                                                                 indexComponents,
-                                                                                metaWriter,
-                                                                                rows.size());
+                                                                                metaWriter);
         metaWriter.close();
         return reader;
     }
@@ -124,6 +126,7 @@ public class SortedPostingsTest extends NdiRandomizedTest
             int i = nextInt(0, 1000);
             if (nextInt(0, 10) == 0)
             {
+                //i = 9000;
                 i = Integer.MAX_VALUE;
             }
             rows.add(new Row(docID, i, docID));
@@ -215,28 +218,28 @@ public class SortedPostingsTest extends NdiRandomizedTest
         int min = nextInt(0, numRows/2);
         int max = nextInt(numRows/2, numRows);
 
-        System.out.println("min="+min+" max="+max);
+        System.out.println("min=" + min + " max=" + max);
 
         BKDReader.IntersectVisitor visitor = buildQuery(min, max);
 
         final List<PostingList.PeekablePostingList> pointIDLists = reader2.intersect(visitor,
-                                                                                                NO_OP_BKD_LISTENER,
-                                                                                                new QueryContext(),
-                                                                                                postingIndexName,
-                                                                                                new BKDReader.SortedPostingInputs()
-                                                          {
-                                                              @Override
-                                                              public IndexInput openPostingsInput() throws IOException
-                                                              {
-                                                                  return reader2.indexComponents.openBlockingInput(reader2.indexComponents.postingLists);
-                                                              }
+                                                                                     NO_OP_BKD_LISTENER,
+                                                                                     new QueryContext(),
+                                                                                     postingIndexName,
+                                                                                     new BKDReader.SortedPostingInputs()
+                                                                                     {
+                                                                                         @Override
+                                                                                         public IndexInput openPostingsInput() throws IOException
+                                                                                         {
+                                                                                             return reader2.indexComponents.openBlockingInput(reader2.indexComponents.postingLists);
+                                                                                         }
 
-                                                              @Override
-                                                              public IndexInput openOrderMapInput() throws IOException
-                                                              {
-                                                                  return reader2.indexComponents.openBlockingInput(reader2.indexComponents.termsData);
-                                                              }
-                                                          });
+                                                                                         @Override
+                                                                                         public IndexInput openOrderMapInput() throws IOException
+                                                                                         {
+                                                                                             return reader2.indexComponents.openBlockingInput(reader2.indexComponents.termsData);
+                                                                                         }
+                                                                                     });
         PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
         queue.addAll(pointIDLists);
         PostingList pointIDList = MergePostingList.merge(queue);
@@ -252,10 +255,12 @@ public class SortedPostingsTest extends NdiRandomizedTest
 
             iterator.seekTo(pointID);
 
-            int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+            byte[] termBytes = iterator.getRawTermValue();
+
+            int value = NumericUtils.sortableBytesToInt(termBytes, 1);
             final long rowID = iterator.rowID();
 
-            System.out.println("pointID=" + pointID + " value=" + value + " rowID=" + rowID);
+            System.out.println("termBytes=" + Arrays.toString(termBytes) + " pointID=" + pointID + " value=" + value + " rowID=" + rowID);
 
             rowIDs.add(rowID);
         }

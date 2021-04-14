@@ -29,7 +29,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.ColumnContext;
@@ -97,7 +96,6 @@ public class SSTableIndexWriter implements ColumnIndexWriter
 
         if (columnContext.isNonFrozenCollection())
         {
-
             Iterator<ByteBuffer> valueIterator = columnContext.getValuesOf(row, nowInSec);
             if (valueIterator != null)
             {
