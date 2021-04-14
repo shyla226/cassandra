@@ -243,22 +243,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      */
     public abstract RowIndexEntry<?> append(UnfilteredRowIterator iterator);
 
-    /**
-     * Start a partition. Will be followed by a sequence of addUnfiltered(), and finished with endPartition().
-     * The static row may be given in the first addUnfiltered() (by cursors), or via addStaticRow() called before any
-     * other addUnfiltered() (by append(UnfilteredRowIterator) above).
-     *
-     * @param key
-     * @param partitionLevelDeletion
-     * @return true if the partition was successfully started, false if there is a problem (e.g. key not in order).
-     * @throws IOException
-     */
-    public abstract boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException;
-
-    public abstract void addUnfiltered(Unfiltered unfiltered) throws IOException;
-
-    public abstract RowIndexEntry<?> endPartition() throws IOException;
-
     public abstract long getFilePointer();
 
     public abstract long getOnDiskFilePointer();

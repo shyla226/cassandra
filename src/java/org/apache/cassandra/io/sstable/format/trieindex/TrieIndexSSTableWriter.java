@@ -51,6 +51,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
@@ -62,6 +63,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -101,13 +103,10 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     private final IndexWriter iwriter;
     private final FileHandle.Builder dbuilder;
     protected final SequentialWriter dataFile;
+    private DecoratedKey lastWrittenKey;
     private DataPosition dataMark;
     private long lastEarlyOpenLength = 0;
     private final Optional<ChunkCache> chunkCache = Optional.ofNullable(ChunkCache.instance);
-
-    private DecoratedKey currentKey;
-    private DeletionTime currentPartitionLevelDeletion;
-    private long currentStartPosition;
 
     private static final SequentialWriterOption WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                       .trickleFsync(DatabaseDescriptor.getTrickleFsync())
@@ -193,94 +192,6 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     {
         dataFile.resetAndTruncate(dataMark);
         iwriter.resetAndTruncate();
-    }
-
-    /**
-     * Perform sanity checks on @param decoratedKey and @return the position in the data file before any data is written
-     */
-    protected void checkKeyOrder(DecoratedKey decoratedKey)
-    {
-        assert decoratedKey != null : "Keys must not be null"; // empty keys ARE allowed b/c of indexed row values
-        if (currentKey != null && currentKey.compareTo(decoratedKey) >= 0)
-            throw new RuntimeException("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getFile());
-    }
-
-    @Override
-    public boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
-    {
-        if (key.getKeyLength() > FBUtilities.MAX_UNSIGNED_SHORT)
-        {
-            logger.error("Key size {} exceeds maximum of {}, skipping row", key.getKeyLength(), FBUtilities.MAX_UNSIGNED_SHORT);
-            return false;
-        }
-
-        checkKeyOrder(key);
-        currentKey = key;
-        currentPartitionLevelDeletion = partitionLevelDeletion;
-        currentStartPosition = dataFile.position();
-        if (!observers.isEmpty())
-            observers.forEach(o -> o.startPartition(key, currentStartPosition));
-
-        // Reuse the writer for each row
-        partitionWriter.reset();
-
-        partitionWriter.writePartitionHeader(key, partitionLevelDeletion);
-
-        metadataCollector.updatePartitionDeletion(partitionLevelDeletion);
-        return true;
-    }
-
-    @Override
-    public void addUnfiltered(Unfiltered unfiltered) throws IOException
-    {
-        if (unfiltered.isRow())
-        {
-            Row row = (Row) unfiltered;
-            metadataCollector.updateClusteringValues(row.clustering());
-            Rows.collectStats(row, metadataCollector);
-        }
-        else
-        {
-            RangeTombstoneMarker marker = (RangeTombstoneMarker) unfiltered;
-            metadataCollector.updateClusteringValuesByBoundOrBoundary(marker.clustering());
-            if (marker.isBoundary())
-            {
-                RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker) marker;
-                metadataCollector.update(bm.endDeletionTime());
-                metadataCollector.update(bm.startDeletionTime());
-            }
-            else
-            {
-                metadataCollector.update(((RangeTombstoneBoundMarker) marker).deletionTime());
-            }
-        }
-
-        partitionWriter.addUnfiltered(unfiltered);
-    }
-
-    @Override
-    public RowIndexEntry<?> endPartition() throws IOException
-    {
-        metadataCollector.addCellPerPartitionCount();
-
-        long trieRoot = partitionWriter.finish();
-        RowIndexEntry<?> entry = TrieIndexEntry.create(currentStartPosition, trieRoot,
-                                                       currentPartitionLevelDeletion,
-                                                       partitionWriter.rowIndexCount);
-
-        long endPosition = dataFile.position();
-        long partitionSize = endPosition - currentStartPosition;
-        maybeLogLargePartitionWarning(currentKey, partitionSize);
-        metadataCollector.addPartitionSizeInBytes(partitionSize);
-        metadataCollector.addKey(currentKey.getKey());
-        last = currentKey;
-        if (first == null)
-            first = currentKey;
-
-        if (logger.isTraceEnabled())
-            logger.trace("wrote {} at {}", currentKey, entry.position);
-        iwriter.append(currentKey, entry);
-        return entry;
     }
 
     @SuppressWarnings("resource")
@@ -447,40 +358,79 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     }
 
     /**
+     * Perform sanity checks on @param decoratedKey and @return the position in the data file before any data is written
+     */
+    protected long beforeAppend(DecoratedKey decoratedKey)
+    {
+        assert decoratedKey != null : "Keys must not be null"; // empty keys ARE allowed b/c of indexed row values
+        if (lastWrittenKey != null && lastWrittenKey.compareTo(decoratedKey) >= 0)
+            throw new RuntimeException("Last written key " + lastWrittenKey + " >= current key " + decoratedKey + " writing into " + getFile());
+        return (lastWrittenKey == null) ? 0 : dataFile.position();
+    }
+
+    private long afterAppend(DecoratedKey decoratedKey, RowIndexEntry index) throws IOException
+    {
+        metadataCollector.addKey(decoratedKey.getKey());
+        lastWrittenKey = decoratedKey;
+        last = lastWrittenKey;
+        if (first == null)
+            first = lastWrittenKey;
+
+        if (logger.isTraceEnabled())
+            logger.trace("wrote {} at {}", decoratedKey, index.position);
+        return iwriter.append(decoratedKey, index);
+    }
+
+    /**
      * Appends partition data to this writer.
      *
      * @param partition the partition to write
-     * @return the created index entry if something was written, that is if {@code partition}
+     * @return the created index entry if something was written, that is if {@code iterator}
      * wasn't empty, {@code null} otherwise.
      *
      * @throws FSWriteError if a write to the dataFile fails
+     *
+     * WARNING: changes to method name or parameter name will need to be reflected in byteman tests. In particular
+     * OutOfSpaceTest.
      */
     public RowIndexEntry<?> append(UnfilteredRowIterator partition)
     {
-        assert dataFile.isOpen() : "update is being called after releaseBuffers";
+        DecoratedKey key = partition.partitionKey();
+
+        if (key.getKeyLength() > FBUtilities.MAX_UNSIGNED_SHORT)
+        {
+            logger.error("Key size {} exceeds maximum of {}, skipping row", key.getKeyLength(), FBUtilities.MAX_UNSIGNED_SHORT);
+            return null;
+        }
 
         if (partition.isEmpty())
             return null;
 
-        try
+        long startPosition = beforeAppend(key);
+        if (!observers.isEmpty())
+            observers.forEach(o -> o.startPartition(key, startPosition));
+
+        // Reuse the writer for each row
+        partitionWriter.reset();
+
+        try (UnfilteredRowIterator collecting = Transformation.apply(partition, new BigTableWriter.StatsCollector(metadataCollector)))
         {
-            if (!startPartition(partition.partitionKey(), partition.partitionLevelDeletion()))
-                return null;
+            long trieRoot = partitionWriter.writePartition(collecting);
 
-            if (!partition.staticRow().isEmpty())
-                addUnfiltered(partition.staticRow());
+            RowIndexEntry<?> entry = TrieIndexEntry.create(startPosition, trieRoot,
+                                                        collecting.partitionLevelDeletion(),
+                                                        partitionWriter.rowIndexCount);
 
-            while (partition.hasNext())
-            {
-                Unfiltered unfiltered = partition.next();
-                addUnfiltered(unfiltered);
-            }
-
-            return endPartition();
+            long endPosition = dataFile.position();
+            long rowSize = endPosition - startPosition;
+            maybeLogLargePartitionWarning(key, rowSize);
+            metadataCollector.addPartitionSizeInBytes(rowSize);
+            afterAppend(key, entry);
+            return entry;
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getFile());
+            throw new FSWriteError(e, dataFile.getPath());
         }
     }
 

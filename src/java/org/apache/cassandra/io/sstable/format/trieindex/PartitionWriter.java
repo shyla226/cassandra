@@ -29,9 +29,9 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.Version;
@@ -70,15 +70,6 @@ class PartitionWriter implements AutoCloseable
     private DeletionTime openMarker = DeletionTime.LIVE;
     private DeletionTime startOpenMarker = DeletionTime.LIVE;
 
-    // Sequence control, also used to add empty static row if `addStaticRow` is not called.
-    private enum State
-    {
-        AWAITING_PARTITION_HEADER,
-        AWAITING_STATIC_ROW,
-        AWAITING_ROWS
-    }
-    State state;
-
     PartitionWriter(SerializationHeader header,
                     ClusteringComparator comparator,
                     SequentialWriter writer,
@@ -105,7 +96,6 @@ class PartitionWriter implements AutoCloseable
         this.firstClustering = null;
         this.lastClustering = null;
         this.openMarker = DeletionTime.LIVE;
-        this.state = State.AWAITING_PARTITION_HEADER;
         rowTrie.reset();
     }
 
@@ -115,43 +105,41 @@ class PartitionWriter implements AutoCloseable
         rowTrie.close();
     }
 
-    void writePartitionHeader(DecoratedKey partitionKey, DeletionTime partitionLevelDeletion) throws IOException
+    public long writePartition(UnfilteredRowIterator partition) throws IOException
     {
-        assert state == State.AWAITING_PARTITION_HEADER;
+        writePartitionHeader(partition.partitionKey(), partition.partitionLevelDeletion(), partition.staticRow());
+
+        while (partition.hasNext())
+        {
+            Unfiltered unfiltered = partition.next();
+            addUnfiltered(unfiltered);
+        }
+
+        return finish();
+    }
+
+    void writePartitionHeader(DecoratedKey partitionKey, DeletionTime partitionLevelDeletion, Row staticRow) throws IOException
+    {
         ByteBufferUtil.writeWithShortLength(partitionKey.getKey(), writer);
 
         long deletionTimePosition = writer.position();
         DeletionTime.serializer.serialize(partitionLevelDeletion, writer);
         if (!observers.isEmpty())
             observers.forEach(o -> o.partitionLevelDeletion(partitionLevelDeletion, deletionTimePosition));
-        state = header.hasStatic() ? State.AWAITING_STATIC_ROW : State.AWAITING_ROWS;
+        if (header.hasStatic())
+            doWriteStaticRow(staticRow);
     }
 
     private void doWriteStaticRow(Row staticRow) throws IOException
     {
-        assert state == State.AWAITING_STATIC_ROW;
         long staticRowPosition = writer.position();
         unfilteredSerializer.serializeStaticRow(staticRow, helper, writer, version.correspondingMessagingVersion());
         if (!observers.isEmpty())
             observers.forEach(o -> o.staticRow(staticRow, staticRowPosition));
-        state = State.AWAITING_ROWS;
     }
 
     void addUnfiltered(Unfiltered unfiltered) throws IOException
     {
-        if (state == State.AWAITING_STATIC_ROW)
-        {
-            if (unfiltered.isRow() && ((Row) unfiltered).isStatic())
-            {
-                doWriteStaticRow((Row) unfiltered);
-                return;
-            }
-
-            doWriteStaticRow(Rows.EMPTY_STATIC_ROW);
-        }
-
-        assert state == State.AWAITING_ROWS;
-
         long pos = currentPosition();
 
         if (firstClustering == null)
@@ -186,9 +174,6 @@ class PartitionWriter implements AutoCloseable
 
     long finish() throws IOException
     {
-        if (state == State.AWAITING_STATIC_ROW)
-            doWriteStaticRow(Rows.EMPTY_STATIC_ROW);
-
         long endPosition = currentPosition();
         unfilteredSerializer.writeEndOfPartition(writer);
 

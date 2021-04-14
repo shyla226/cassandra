@@ -44,7 +44,6 @@ import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.FSWriteError;
@@ -56,7 +55,6 @@ import org.apache.cassandra.io.sstable.Downsampling;
 import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.IndexSummaryBuilder;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
@@ -182,24 +180,6 @@ public class BigTableWriter extends SSTableWriter
         return compressionParams;
     }
 
-    @Override
-    public boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void addUnfiltered(Unfiltered unfiltered) throws IOException
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public RowIndexEntry endPartition() throws IOException
-    {
-        throw new UnsupportedOperationException();
-    }
-
     public void mark()
     {
         dataMark = dataFile.mark();
@@ -298,11 +278,12 @@ public class BigTableWriter extends SSTableWriter
         }
     }
 
-    private static class StatsCollector extends Transformation
+    // TODO: Move this class to the parent SSTableReader or to a distinct file as it seems to be generic enough
+    public static class StatsCollector extends Transformation
     {
         private final MetadataCollector collector;
 
-        StatsCollector(MetadataCollector collector)
+        public StatsCollector(MetadataCollector collector)
         {
             this.collector = collector;
         }
