@@ -226,6 +226,7 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
         else
         {
             Unfiltered next = deserializer.readNext();
+            // TODO: it should be implemented as a transformation of the resulting iterator
             UnfilteredValidation.maybeValidateUnfiltered(next, metadata, key, sstable);
             updateOpenMarker((RangeTombstoneMarker) next);
         }
