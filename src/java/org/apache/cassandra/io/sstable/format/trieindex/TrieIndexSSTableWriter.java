@@ -199,15 +199,8 @@ public class TrieIndexSSTableWriter extends SSTableWriter
     {
         long dataLength = dataFile.position();
 
-        dataFile.requestSyncOnNextFlush();
-        iwriter.rowIndexFile.requestSyncOnNextFlush();
-        iwriter.partitionIndexFile.requestSyncOnNextFlush();
-
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
-            // useful for debugging problems with the trie index
-            //partitionIndex.dumpTrie(descriptor.filenameFor(Component.PARTITION_INDEX) + ".txt");
-
             StatsMetadata stats = statsMetadata();
             FileHandle ifile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
             if (compression)

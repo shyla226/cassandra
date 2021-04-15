@@ -65,19 +65,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     private final TransactionalProxy txnProxy = txnProxy();
 
-    private boolean requestSyncOnNextFlush;
-
-    /**
-     * Sets a flag that will cause the next flush point to be synced to disk.
-     * This is required to build partial indexes correctly, given that we read
-     * disk content with O_DIRECT, we need to ensure the data is synced to the
-     * device, a flush is not sufficient because O_DIRECT bypasses the OS page cache.
-     */
-    public void requestSyncOnNextFlush()
-    {
-        requestSyncOnNextFlush = true;
-    }
-
     // due to lack of multiple-inheritance, we proxy our transactional implementation
     protected class TransactionalProxy extends AbstractTransactional
     {
@@ -226,8 +213,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     @Override
     protected void doFlush(int count)
     {
-        boolean sync = requestSyncOnNextFlush;
-        requestSyncOnNextFlush = false;
 
         flushData();
 
@@ -236,13 +221,10 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
             bytesSinceTrickleFsync += buffer.position();
             if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
             {
-                sync = true;
+            syncDataOnlyInternal();
                 bytesSinceTrickleFsync = 0;
             }
         }
-
-        if (sync)
-            syncDataOnlyInternal();
 
         // Remember that we wrote, so we don't write it again on next flush().
         resetBuffer();

@@ -41,6 +41,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
@@ -51,7 +54,6 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.tries.Walker;
-import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.Rebufferer;
@@ -69,6 +71,11 @@ import static org.junit.Assert.assertTrue;
 @RunWith(Parameterized.class)
 public class PartitionIndexTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(PartitionIndexTest.class);
+
+    private final static long SEED = System.nanoTime();
+    private final static Random random = new Random(SEED);
+
     static final ByteComparable.Version VERSION = Walker.BYTE_COMPARABLE_VERSION;
 
     static
@@ -83,14 +90,17 @@ public class PartitionIndexTest
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
     {
-        return Arrays.asList(new Object[][]{
-        new Object[]{ Config.DiskAccessMode.standard },
-        new Object[]{ Config.DiskAccessMode.mmap },
-        });
+        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard },
+                             new Object[]{ Config.DiskAccessMode.mmap });
     }
 
     @Parameterized.Parameter(value = 0)
     public static Config.DiskAccessMode accessMode = Config.DiskAccessMode.standard;
+
+    public static void beforeClass()
+    {
+        logger.info("Using random seed: {}", SEED);
+    }
 
     /**
      * Tests last-nodes-sizing failure uncovered during code review.
@@ -461,7 +471,6 @@ public class PartitionIndexTest
                                              checkIteration(list, indexSize, index);
                                              callCount.incrementAndGet();
                                          }, 0, i * 1024);
-                    writer.requestSyncOnNextFlush();
                     builder.markDataSynced(i * 1024);
                     // verifier will be called when the sequentialWriter finishes a chunk
                 }
@@ -533,7 +542,6 @@ public class PartitionIndexTest
                                              index.close();
                                              callCount.incrementAndGet();
                                          }, 0, i * 1024);
-                    writer.requestSyncOnNextFlush();
 
                     for (; i < list.size(); ++i)
                         builder.addEntry(list.get(i), i);
@@ -611,16 +619,14 @@ public class PartitionIndexTest
             if (idx >= 0)
                 pos = pos - offsets[idx] + cutoffs[idx];
 
-            WrappingBufferHolder ret = (WrappingBufferHolder) super.rebuffer(pos);
-            long offset = ret.offset();
+            super.rebuffer(pos);
 
-            if (idx < cutoffs.length - 1 && ret.limit() + offset > cutoffs[idx + 1])
-                ret.limit((int) (cutoffs[idx + 1] - offset));
-
+            if (idx < cutoffs.length - 1 && buffer.limit() + offset > cutoffs[idx + 1])
+                buffer.limit((int) (cutoffs[idx + 1] - offset));
             if (idx >= 0)
-                ret.offset(offset - cutoffs[idx] + offsets[idx]);
+                offset = offset - cutoffs[idx] + offsets[idx];
 
-            return ret;
+            return this;
         }
 
         @Override
@@ -817,7 +823,7 @@ public class PartitionIndexTest
 
     DecoratedKey generateRandomKey()
     {
-        UUID uuid = UUID.randomUUID();
+        UUID uuid = new UUID(random.nextLong(), random.nextLong());
         return partitioner.decorateKey(ByteBufferUtil.bytes(uuid));
     }
 

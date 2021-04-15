@@ -18,37 +18,31 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
-import java.util.Deque;
-import java.util.concurrent.ConcurrentLinkedDeque;
-import javax.annotation.Nullable;
+import javax.annotation.concurrent.NotThreadSafe;
 
-import com.google.common.annotations.VisibleForTesting;
-
-public class WrappingRebufferer implements Rebufferer
+@NotThreadSafe
+public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.BufferHolder
 {
     protected final Rebufferer source;
-    private final Deque<WrappingBufferHolder> buffers;
+
+    protected BufferHolder bufferHolder;
+    protected ByteBuffer buffer;
+    protected long offset;
 
     public WrappingRebufferer(Rebufferer source)
     {
         this.source = source;
-        this.buffers = new ConcurrentLinkedDeque<>();
     }
 
     @Override
     public BufferHolder rebuffer(long position)
     {
-        BufferHolder bufferHolder = source.rebuffer(position);
-        return newBufferHolder().initialize(bufferHolder, bufferHolder.buffer(), bufferHolder.offset());
-    }
+        assert bufferHolder == null;
+        bufferHolder = source.rebuffer(position);
+        buffer = bufferHolder.buffer();
+        offset = bufferHolder.offset();
 
-    protected WrappingBufferHolder newBufferHolder()
-    {
-        WrappingBufferHolder ret = buffers.pollFirst();
-        if (ret == null)
-            ret = new WrappingBufferHolder();
-
-        return ret;
+        return this;
     }
 
     @Override
@@ -81,75 +75,32 @@ public class WrappingRebufferer implements Rebufferer
         source.closeReader();
     }
 
-
     @Override
     public String toString()
     {
         return String.format("%s[]:%s", getClass().getSimpleName(), source.toString());
     }
 
-    protected final class WrappingBufferHolder implements BufferHolder
+    @Override
+    public ByteBuffer buffer()
     {
-        @Nullable
-        private BufferHolder bufferHolder;
+        return buffer;
+    }
 
-        private ByteBuffer buffer;
-        private long offset;
+    @Override
+    public long offset()
+    {
+        return offset;
+    }
 
-        protected WrappingBufferHolder initialize(@Nullable BufferHolder bufferHolder, ByteBuffer buffer, long offset)
+    @Override
+    public void release()
+    {
+        if (bufferHolder != null)
         {
-            assert this.bufferHolder == null && this.buffer == null && this.offset == 0L : "initialized before release";
-
-            this.bufferHolder = bufferHolder;
-            this.buffer = buffer;
-            this.offset = offset;
-
-            return this;
-        }
-
-        @Override
-        public ByteBuffer buffer()
-        {
-            return buffer;
-        }
-
-        @Override
-        public long offset()
-        {
-            return offset;
-        }
-
-        public int limit()
-        {
-            return buffer.limit();
-        }
-
-        public void limit(int limit)
-        {
-            this.buffer.limit(limit);
-        }
-
-        @Override
-        public void release()
-        {
-            assert buffer != null : "released twice";
-
-            if (bufferHolder != null)
-            {
-                bufferHolder.release();
-                bufferHolder = null;
-            }
-
-            buffer = null;
-            offset = 0L;
-
-            buffers.offerFirst(this);
-        }
-
-        @VisibleForTesting
-        public void offset(long l)
-        {
-            this.offset = l;
+            bufferHolder.release();
+            bufferHolder = null;
         }
     }
+
 }

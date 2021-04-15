@@ -30,10 +30,10 @@ import static org.junit.Assert.assertTrue;
 public class WrappingRebuffererTest
 {
     @Test
-    public void testRecycleSameHolder()
+    public void testRebufferRelease()
     {
         TestRebufferer mock = new TestRebufferer();
-        try (WrappingRebufferer rebufferer = new WrappingRebufferer(mock))
+        try (WrappingRebufferer rebufferer = new WrappingRebufferer(mock) {})
         {
             Rebufferer.BufferHolder ret = rebufferer.rebuffer(0);
             assertNotNull(ret);
@@ -42,22 +42,20 @@ public class WrappingRebuffererTest
 
             ret.release();
             assertTrue(mock.released);
-
-            assertSame(ret, rebufferer.rebuffer(0)); // same buffer holder was recycled
         }
     }
 
     @Test
-    public void testRecycleTwoHolders()
+    public void testRebufferReleaseFailingContract()
     {
         TestRebufferer mock = new TestRebufferer();
-        try (WrappingRebufferer rebufferer = new WrappingRebufferer(mock))
+        try (WrappingRebufferer rebufferer = new WrappingRebufferer(mock) {})
         {
-
             Rebufferer.BufferHolder ret1 = rebufferer.rebuffer(0);
             assertNotNull(ret1);
             assertEquals(mock.buffer(), ret1.buffer());
             assertEquals(mock.offset(), ret1.offset());
+
 
             Rebufferer.BufferHolder ret2 = rebufferer.rebuffer(1);
             assertNotNull(ret2);

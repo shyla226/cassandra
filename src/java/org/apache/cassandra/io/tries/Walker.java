@@ -83,9 +83,9 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         long curOffset = position - bh.offset();
         if (curOffset < 0 || curOffset >= buf.limit())
         {
-            BufferHolder currentBh = bh;
+            bh.release();
+            bh = Rebufferer.EMPTY;
             bh = source.rebuffer(position);
-            currentBh.release();
             buf = bh.buffer();
             curOffset = position - bh.offset();
             assert curOffset >= 0 && curOffset < buf.limit() : String.format("Invalid offset: %d, buf: %s, bh: %s", curOffset, buf, bh);
