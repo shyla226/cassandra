@@ -107,7 +107,8 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                                 indexWriter.nextUnfilteredCluster(partition.next());
                         }
 
-                        long dataPosition = keys.advance() ? keys.dataPosition() : sstable.uncompressedLength();
+                        keys.advance();
+                        long dataPosition = keys.isExhausted() ? sstable.uncompressedLength() : keys.dataPosition();
                         bytesProcessed += dataPosition - previousKeyPosition;
                         previousKeyPosition = dataPosition;
                     }
