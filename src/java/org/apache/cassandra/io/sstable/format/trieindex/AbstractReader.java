@@ -274,8 +274,6 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
 
     /**
      * Stages in the reading progression.
-     * Because we can get an interruption (NotInCacheException) during each of the stages, we need to save the kind of
-     * processing we were doing before that happened to continue without redoing too much of the work.
      */
     enum Stage
     {
@@ -322,7 +320,6 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
     /**
      * Returns the start marker that should be issued as the beginning of the slice, or null if none. This marker is
      * usually ready immediately after the PRE_SLICE stage completes.
-     * This call is not allowed to read any further data / throw a NotInCacheException.
      */
     protected abstract RangeTombstoneMarker sliceStartMarker();
 
@@ -332,7 +329,6 @@ public abstract class AbstractReader implements TrieIndexSSTableReader.Partition
     /**
      * Returns the end marker that should be issued as the ending of the slice, or null if none. This marker is
      * the closing of anything that it active at the point where the slice ends and is known when the READY stage completes.
-     * This call is not allowed to read any further data / throw a NotInCacheException.
      */
     protected abstract RangeTombstoneMarker sliceEndMarker();
 

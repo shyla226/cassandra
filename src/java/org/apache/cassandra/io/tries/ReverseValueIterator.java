@@ -116,10 +116,6 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         long child;
         int transitionByte;
 
-        // This method must be async-read-safe. Every read from new buffering position (the go() calls) can
-        // trigger NotInCacheException, and iteration must be able to redo the work that was interrupted during the next
-        // call. Hence the mutable state must be fully ready before all go() calls
-        // (i.e. they must either be the last step in the loop or the state must be unchanged until that call has succeeded).
         go(stack.node);
         while (true)
         {
@@ -163,8 +159,6 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
             child = transition(childIdx);
             if (child != -1)
             {
-                // This call could throw NotInCacheException. If so, the loop will be re-entered in the same state as
-                // it was before entering this loop.
                 go(child);
 
                 stack.childIndex = childIdx;

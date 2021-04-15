@@ -392,7 +392,6 @@ public class PartitionIndex implements Closeable
          */
         protected long nextIndexPos()
         {
-            // The IndexInfo read below may trigger a NotInCacheException. To be able to resume from that
             // without missing positions, we save and reuse the unreturned position.
             if (pos == INVALID)
             {
@@ -401,7 +400,7 @@ public class PartitionIndex implements Closeable
                     return NOT_FOUND;
             }
 
-            go(pos); // can throw NotInCacheException, if it does next time we re-use the same pos
+            go(pos);
 
             pos = INVALID; // make sure next time we call nextPayloadedNode() again
             return getIndexPos(buf, payloadPosition(), payloadFlags()); // this should not throw

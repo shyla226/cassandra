@@ -46,8 +46,6 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
      */
     public IndexInfo nextIndexInfo()
     {
-        // The IndexInfo read below may trigger a NotInCacheException. To be able to resume from that
-        // without missing positions, we save and reuse the unreturned position.
         if (currentNode == -1)
         {
             currentNode = nextPayloadedNode();

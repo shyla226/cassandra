@@ -188,7 +188,7 @@ public class UnfilteredDeserializer
             return;
 
         assert preparePos != -1;
-        in.seek(preparePos); // this shouldn't throw a NotInCacheException as we are seeking backwards
+        in.seek(preparePos);
 
         preparePos = -1;
         isReady = false;
