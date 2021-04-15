@@ -243,8 +243,13 @@ public class ChunkCache
                     if (buf != null)
                         return buf;
 
-                    if (++spin == 1024)
-                        logger.error("Spinning for {}", key);
+                    if (++spin == 1000)
+                    {
+                        String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
+                                                   "This is likely due to too small chunk cache size causing contention", key);
+                        logger.error(msg);
+                        throw new RuntimeException(msg);
+                    }
                 }
             }
             catch (Throwable t)

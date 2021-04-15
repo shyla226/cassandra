@@ -84,7 +84,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         if (curOffset < 0 || curOffset >= buf.limit())
         {
             bh.release();
-            bh = Rebufferer.EMPTY;
+            bh = Rebufferer.EMPTY; // prevents double release if the call below fails
             bh = source.rebuffer(position);
             buf = bh.buffer();
             curOffset = position - bh.offset();

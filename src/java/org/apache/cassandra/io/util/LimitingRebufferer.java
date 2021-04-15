@@ -30,6 +30,8 @@ import com.google.common.util.concurrent.RateLimiter;
  *
  * Instantiated once per RandomAccessReader, thread-unsafe.
  * The instances reuse themselves as the BufferHolder to avoid having to return a new object for each rebuffer call.
+ * Only one BufferHolder can be active at a time. Calling {@link #rebuffer(long)} before the previously obtained
+ * buffer holder is released will throw {@link AssertionError}.
  */
 @NotThreadSafe
 public class LimitingRebufferer extends WrappingRebufferer

@@ -22,6 +22,11 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 /**
  * Special rebufferer that replaces the tail of the file (from the specified cutoff point) with the given buffer.
+ *
+ * Instantiated once per RandomAccessReader, thread-unsafe.
+ * The instances reuse themselves as the BufferHolder to avoid having to return a new object for each rebuffer call.
+ * Only one BufferHolder can be active at a time. Calling {@link #rebuffer(long)} before the previously obtained
+ * buffer holder is released will throw {@link AssertionError}.
  */
 @NotThreadSafe
 public class TailOverridingRebufferer extends WrappingRebufferer
@@ -39,6 +44,7 @@ public class TailOverridingRebufferer extends WrappingRebufferer
     @Override
     public Rebufferer.BufferHolder rebuffer(long position)
     {
+        assert buffer == null : "Buffer holder has been already acquired and has been not released yet";
         if (position < cutoff)
         {
             super.rebuffer(position);

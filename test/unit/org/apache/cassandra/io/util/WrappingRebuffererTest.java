@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 
 import org.junit.Test;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
@@ -56,22 +57,28 @@ public class WrappingRebuffererTest
             assertEquals(mock.buffer(), ret1.buffer());
             assertEquals(mock.offset(), ret1.offset());
 
-
-            Rebufferer.BufferHolder ret2 = rebufferer.rebuffer(1);
-            assertNotNull(ret2);
-            assertEquals(mock.buffer(), ret2.buffer());
-            assertEquals(mock.offset(), ret2.offset());
-
+            assertThatExceptionOfType(AssertionError.class).isThrownBy(() -> rebufferer.rebuffer(1));
             ret1.release();
-            assertTrue(mock.released);
 
-            mock.released = false;
-            ret2.release();
             assertTrue(mock.released);
-
-            assertSame(ret2, rebufferer.rebuffer(0)); // first buffer holder was recycled
-            assertSame(ret1, rebufferer.rebuffer(1)); // second buffer holder was recycled
+            assertThatExceptionOfType(AssertionError.class).isThrownBy(ret1::buffer);
+            assertThatExceptionOfType(AssertionError.class).isThrownBy(ret1::offset);
         }
+    }
+
+    @Test
+    public void testRebufferReleaseFailingContractWhenClosing()
+    {
+        assertThatExceptionOfType(AssertionError.class).isThrownBy(() -> {
+            TestRebufferer mock = new TestRebufferer();
+            try (WrappingRebufferer rebufferer = new WrappingRebufferer(mock) {})
+            {
+                Rebufferer.BufferHolder ret1 = rebufferer.rebuffer(0);
+                assertNotNull(ret1);
+                assertEquals(mock.buffer(), ret1.buffer());
+                assertEquals(mock.offset(), ret1.offset());
+            }
+        });
     }
 
 
