@@ -20,7 +20,9 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -66,6 +68,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
@@ -722,6 +725,45 @@ public class PartitionIndexTest
             {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    @Test
+    public void testDumpTrieToFile() throws IOException
+    {
+        File file = FileUtils.createTempFile("testDumpTrieToFile", "index");
+
+        ArrayList<DecoratedKey> list = Lists.newArrayList();
+        try (SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.DEFAULT);
+             FileHandle.Builder fhBuilder = makeHandle(file);
+             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
+        )
+        {
+            writer.setPostFlushListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
+            for (int i = 0; i < 1000; i++)
+            {
+                DecoratedKey key = generateRandomKey();
+                list.add(key);
+            }
+            Collections.sort(list);
+
+            for (int i = 0; i < 1000; ++i)
+                builder.addEntry(list.get(i), i);
+            long root = builder.complete();
+
+            try (FileHandle fh = fhBuilder.complete();
+                 PartitionIndex index = new PartitionIndex(fh, root, 1000, null, null, null, null))
+            {
+                File dump = FileUtils.createTempFile("testDumpTrieToFile", "dumpedTrie");
+                index.dumpTrie(dump.toString());
+                String dumpContent = String.join("\n", Files.readAllLines(dump.toPath()));
+                logger.info("Dumped trie: \n{}", dumpContent);
+                assertFalse(dumpContent.isEmpty());
+            }
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
         }
     }
 
