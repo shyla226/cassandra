@@ -324,7 +324,7 @@ public class TrieIndexScanner implements ISSTableScanner
                             startScan = rowIndexEntry.position;
                             if (dataRange == null)
                             {
-                                return sstable.simpleIterator(() -> dfile, partitionKey(), rowIndexEntry, false);
+                                return sstable.simpleIterator(dfile, partitionKey(), rowIndexEntry, false);
                             }
                             else
                             {

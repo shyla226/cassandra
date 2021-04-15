@@ -35,7 +35,6 @@ import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -746,17 +745,17 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
     {
         RowIndexEntry<?> position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
         if (position == null)
             return null;
-        return SSTableIdentityIterator.create(this, dfile.get(), position, key, tombstoneOnly);
+        return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
     }
 
-    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, RowIndexEntry<?> indexEntry, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, RowIndexEntry<?> indexEntry, boolean tombstoneOnly)
     {
-        return SSTableIdentityIterator.create(this, dfile.get(), indexEntry, key, tombstoneOnly);
+        return SSTableIdentityIterator.create(this, dfile, indexEntry, key, tombstoneOnly);
     }
 
     @Override

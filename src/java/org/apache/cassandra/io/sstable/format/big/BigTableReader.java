@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -152,12 +151,12 @@ public class BigTableReader extends SSTableReader
 
     @SuppressWarnings("resource") // caller to close
     @Override
-    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
     {
         BigTableRowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
         if (position == null)
             return null;
-        return SSTableIdentityIterator.create(this, dfile.get(), position, key, tombstoneOnly);
+        return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
     }
 
     /**

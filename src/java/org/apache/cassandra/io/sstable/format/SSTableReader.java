@@ -44,7 +44,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Supplier;
 import java.util.stream.Collector;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -1474,7 +1473,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                    boolean reversed,
                                                    SSTableReadsListener listener);
 
-    public abstract UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly);
+    public abstract UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly);
 
     /**
      * Finds and returns the first key beyond a given token in this SSTable or null if no such key exists.
