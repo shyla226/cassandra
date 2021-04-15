@@ -1682,15 +1682,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return keyAt(reader);
     }
 
-    /**
-     * Reads the keys from the preferred component - it is SSTable implementation specific.
-     *
-     * @param position position in the preferred component, as returned by {@link PartitionIndexIterator#keyPosition()}
-     *                 and retrieved by {@link SSTableFlushObserver#startPartition(DecoratedKey, long)}
-     * @return a decoreated key read from the preferred component at the provided position
-     */
-    public abstract DecoratedKey keyAt(long position) throws IOException;
-
     public abstract DecoratedKey keyAt(FileDataInput reader) throws IOException;
 
     /**
@@ -2020,6 +2011,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             return ifile.createReader();
         return null;
     }
+
+    public abstract RandomAccessReader openKeyComponentReader();
 
     public ChannelProxy getDataChannel()
     {

@@ -341,16 +341,6 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long position) throws IOException
-    {
-        try (FileDataInput in = dfile.createReader(position))
-        {
-            if (in.isEOF()) return null;
-            return decorateKey(ByteBufferUtil.readWithShortLength(in));
-        }
-    }
-
-    @Override
     public DecoratedKey keyAt(FileDataInput reader) throws IOException
     {
         if (reader.isEOF()) return null;
@@ -963,6 +953,12 @@ public class TrieIndexSSTableReader extends SSTableReader
     public RandomAccessReader openIndexReader()
     {
         throw new UnsupportedOperationException("tries do not have primary index");
+    }
+
+    @Override
+    public RandomAccessReader openKeyComponentReader()
+    {
+        return openDataReader();
     }
 
     @Override

@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReas
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -321,20 +322,17 @@ public class BigTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long position) throws IOException
-    {
-        try (FileDataInput in = ifile.createReader(position))
-        {
-            return keyAt(in);
-        }
-    }
-
-    @Override
     public DecoratedKey keyAt(FileDataInput reader) throws IOException
     {
         if (reader.isEOF()) return null;
 
         return decorateKey(ByteBufferUtil.readWithShortLength(reader));
+    }
+
+    @Override
+    public RandomAccessReader openKeyComponentReader()
+    {
+        return openIndexReader();
     }
 
     @Override

@@ -415,12 +415,6 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long position) throws IOException
-    {
-        return delegate.keyAt(position);
-    }
-
-    @Override
     public DecoratedKey keyAt(FileDataInput reader) throws IOException
     {
         return delegate.keyAt(reader);
@@ -610,6 +604,12 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     public RandomAccessReader openIndexReader()
     {
         return delegate.openIndexReader();
+    }
+
+    @Override
+    public RandomAccessReader openKeyComponentReader()
+    {
+        return delegate.openKeyComponentReader();
     }
 
     @Override

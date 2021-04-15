@@ -33,7 +33,9 @@ import org.apache.cassandra.index.sasi.plan.Expression;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import org.apache.commons.lang3.builder.HashCodeBuilder;
@@ -174,9 +176,9 @@ public class SSTableIndex
 
         public DecoratedKey apply(Long offset)
         {
-            try
+            try (RandomAccessReader in = sstable.openKeyComponentReader())
             {
-                return sstable.keyAt(offset);
+                return sstable.keyAt(in, offset);
             }
             catch (IOException e)
             {
