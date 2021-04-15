@@ -256,7 +256,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     protected RowIndexEntry<?> getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
-        // TODO handle permitMatchPastLast (this is probably always false)
+        assert !permitMatchPastLast;
 
         PartitionPosition searchKey;
         Operator searchOp;

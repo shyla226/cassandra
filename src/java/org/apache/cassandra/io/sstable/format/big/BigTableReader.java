@@ -166,6 +166,7 @@ public class BigTableReader extends SSTableReader
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
      * @param updateCacheAndStats true if updating stats and cache
      * @return The index entry corresponding to the key, or null if the key is not present
+     * TODO @param permitMatchPastLast is always set to false, we should remove it
      */
     protected BigTableRowIndexEntry getPosition(PartitionPosition key,
                                                 Operator op,
