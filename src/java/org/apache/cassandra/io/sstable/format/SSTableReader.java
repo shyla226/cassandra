@@ -2178,41 +2178,45 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 barrier = null;
 
             ScheduledExecutors.nonPeriodicTasks.execute(() -> {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, before barrier", descriptor);
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, before barrier", descriptor);
 
-                    if (barrier != null)
-                        barrier.await();
+                if (barrier != null)
+                    barrier.await();
 
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, after barrier", descriptor);
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, after barrier", descriptor);
 
-                    if (runOnClose != null)
-                        runOnClose.run();
-
-                Throwable exceptions = Throwables.close(null, closables);
-                if (exceptions != null)
+                Throwable exceptions = null;
+                if (runOnClose != null) try
                 {
-                    logger.error("Failed to close some sstable components of " + descriptor.baseFilename(), exceptions);
+                    runOnClose.run();
+                }
+                catch (RuntimeException | Error ex)
+                {
+                    logger.error("Failed to run on-close listeners for sstable " + descriptor.baseFilename(), ex);
+                    exceptions = ex;
+                }
+
+                Throwable closeExceptions = Throwables.close(null, closables);
+                if (closeExceptions != null)
+                {
+                    logger.error("Failed to close some sstable components of " + descriptor.baseFilename(), closeExceptions);
+                    exceptions = Throwables.merge(exceptions, closeExceptions);
                 }
 
                 try
                 {
                     globalRef.release();
                 }
-                catch (RuntimeException ex)
+                catch (RuntimeException | Error ex)
                 {
                     logger.error("Failed to release the global ref of " + descriptor.baseFilename(), ex);
                     exceptions = Throwables.merge(exceptions, ex);
                 }
 
                 if (exceptions != null)
-                {
-                    for (Throwable t : exceptions.getSuppressed())
-                        JVMStabilityInspector.inspectThrowable(t);
-
-                    throw Throwables.cleaned(exceptions);
-                }
+                    JVMStabilityInspector.inspectThrowable(exceptions);
 
                 if (logger.isTraceEnabled())
                     logger.trace("Async instance tidier for {}, completed", descriptor);
