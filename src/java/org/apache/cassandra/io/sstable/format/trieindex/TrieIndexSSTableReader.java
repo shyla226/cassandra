@@ -294,7 +294,6 @@ public class TrieIndexSSTableReader extends SSTableReader
      */
     private RowIndexEntry<?> retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
     {
-        // todo should we update bf here?
         if (pos >= 0)
         {
             try (FileDataInput in = rowIndexFile.createReader(pos))
