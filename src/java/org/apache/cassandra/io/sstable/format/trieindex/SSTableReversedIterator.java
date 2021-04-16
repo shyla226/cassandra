@@ -116,8 +116,7 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
         {
             if (next != null)
                 return true;
-            if (checkHasNext())
-                next = computeNext();
+            next = computeNext();
             return next != null;
         }
 
@@ -131,38 +130,32 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
             return toReturn;
         }
 
-        private boolean checkHasNext() throws IOException
-        {
-            do
-            {
-                if (blockCloseMarker != null || !rowOffsets.isEmpty())
-                    return true;
-            }
-            while (!foundLessThan && advanceIndexBlock());
-            // open marker to be output only as slice is finished 
-            return blockOpenMarker != null;
-        }
-
         private Unfiltered computeNext() throws IOException
         {
-            Unfiltered toReturn = null;
-            if (blockCloseMarker != null)
+            Unfiltered toReturn;
+            do
             {
-                toReturn = blockCloseMarker;
-                blockCloseMarker = null;
-                return toReturn;
-            }
-            while (!rowOffsets.isEmpty())
-            {
-                seekToPosition(rowOffsets.pop());
-                boolean hasNext = deserializer.hasNext();
-                assert hasNext;
-                toReturn = deserializer.readNext();
-                UnfilteredValidation.maybeValidateUnfiltered(toReturn, metadata(), key, sstable);
-                // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
-                if (!toReturn.isEmpty())
+                if (blockCloseMarker != null)
+                {
+                    toReturn = blockCloseMarker;
+                    blockCloseMarker = null;
                     return toReturn;
+                }
+                while (!rowOffsets.isEmpty())
+                {
+                    seekToPosition(rowOffsets.pop());
+                    boolean hasNext = deserializer.hasNext();
+                    assert hasNext;
+                    toReturn = deserializer.readNext();
+                    UnfilteredValidation.maybeValidateUnfiltered(toReturn, metadata(), key, sstable);
+                    // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
+                    if (!toReturn.isEmpty())
+                        return toReturn;
+                }
             }
+            while (!foundLessThan && advanceIndexBlock());
+
+            // open marker to be output only as slice is finished
             if (blockOpenMarker != null)
             {
                 toReturn = blockOpenMarker;
@@ -267,12 +260,12 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
             indexReader = new RowIndexReverseIterator(ifile,
                                                       indexEntry,
                                                       comparator.asByteComparable(slice.end()));
-            blockOpenMarker = null;
             gotoBlock(indexReader.nextIndexInfo(), true, Long.MAX_VALUE);
         }
 
         boolean gotoBlock(IndexInfo indexInfo, boolean filterEnd, long blockEnd) throws IOException
         {
+            blockOpenMarker = null;
             blockCloseMarker = null;
             rowOffsets.clear();
             if (indexInfo == null)
