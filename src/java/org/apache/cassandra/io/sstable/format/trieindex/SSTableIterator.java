@@ -23,7 +23,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableIterator;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -32,7 +32,7 @@ import org.apache.cassandra.io.util.FileHandle;
 /**
  *  A Cell Iterator over SSTable
  */
-class SSTableIterator extends AbstractBigTableIterator<RowIndexEntry>
+class SSTableIterator extends AbstractSSTableIterator<RowIndexEntry>
 {
     /**
      * The index of the slice being processed.

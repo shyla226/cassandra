@@ -18,12 +18,11 @@
 package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
-import java.util.NoSuchElementException;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableIterator;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
@@ -31,7 +30,7 @@ import org.apache.cassandra.io.util.FileHandle;
 /**
  *  A Cell Iterator over SSTable
  */
-public class SSTableIterator extends AbstractBigTableIterator<BigTableRowIndexEntry>
+public class SSTableIterator extends AbstractSSTableIterator<BigTableRowIndexEntry>
 {
     /**
      * The index of the slice being processed.
