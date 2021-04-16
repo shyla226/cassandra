@@ -52,11 +52,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.UnfilteredValidation;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
-import org.apache.cassandra.db.rows.DeserializationHelper;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -105,7 +101,6 @@ import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
-import static org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.readStaticRow;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
@@ -233,23 +228,6 @@ public class TrieIndexSSTableReader extends SSTableReader
     public long estimatedKeys()
     {
         return partitionIndex == null ? 0 : partitionIndex.size();
-    }
-
-    public PartitionReader reader(FileDataInput file,
-                                  boolean shouldCloseFile,
-                                  RowIndexEntry indexEntry,
-                                  DeserializationHelper helper,
-                                  Slices slices,
-                                  boolean reversed,
-                                  DecoratedKey key)
-    {
-        return indexEntry.isIndexed()
-               ? reversed
-                 ? new ReverseIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, key)
-                 : new ForwardIndexedReader(this, (TrieIndexEntry) indexEntry, slices, file, shouldCloseFile, helper, key)
-               : reversed
-                 ? new ReverseReader(this, slices, file, shouldCloseFile, helper, key)
-                 : new ForwardReader(this, slices, file, shouldCloseFile, helper, key);
     }
 
     @Override
@@ -630,20 +608,10 @@ public class TrieIndexSSTableReader extends SSTableReader
                                           boolean reversed,
                                           SSTableReadsListener listener)
     {
-        RowIndexEntry rie = getExactPosition(key, listener, true);
-        RandomAccessReader dataFileInput = openDataReader();
-        try
-        {
-            return iterator(dataFileInput, true, key, rie, slices, selectedColumns, reversed);
-        }
-        catch (CorruptSSTableException ex)
-        {
-            throw Throwables.cleaned(Throwables.close(ex, dataFileInput));
-        }
+        return iterator(null, key, getExactPosition(key, listener, true), slices, selectedColumns, reversed);
     }
 
     public UnfilteredRowIterator iterator(FileDataInput dataFileInput,
-                                          boolean shouldCloseFile,
                                           DecoratedKey key,
                                           RowIndexEntry indexEntry,
                                           Slices slices,
@@ -653,76 +621,9 @@ public class TrieIndexSSTableReader extends SSTableReader
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
 
-        DeletionTime partitionLevelDeletion;
-        Row staticRow;
-        DeserializationHelper helper = new DeserializationHelper(metadata(), descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL, selectedColumns);
-        try
-        {
-            // We seek to the beginning to the partition if either:
-            //   - the partition is not indexed; we then have a single block to read anyway
-            //     (and we need to read the partition deletion time).
-            //   - we're querying static columns.
-            boolean needSeekAtPartitionStart = !indexEntry.isIndexed() || !selectedColumns.fetchedColumns().statics.isEmpty();
-
-            if (needSeekAtPartitionStart)
-            {
-                // Not indexed (or is reading static), set to the beginning of the partition and read partition level deletion there
-                dataFileInput.seek(indexEntry.position);
-
-                ByteBufferUtil.skipShortLength(dataFileInput); // Skip partition key
-                partitionLevelDeletion = DeletionTime.serializer.deserialize(dataFileInput);
-                staticRow = readStaticRow(this, dataFileInput, helper, selectedColumns.fetchedColumns().statics);
-            }
-            else
-            {
-                partitionLevelDeletion = indexEntry.deletionTime();
-                staticRow = Rows.EMPTY_STATIC_ROW;
-            }
-
-            if (!partitionLevelDeletion.validate())
-                UnfilteredValidation.handleInvalid(metadata(), key, this, "partitionLevelDeletion=" + partitionLevelDeletion.toString());
-
-            PartitionReader reader = reader(dataFileInput, shouldCloseFile, indexEntry, helper, slices, reversed, key);
-            return new AbstractUnfilteredRowIterator(metadata(), key, partitionLevelDeletion, selectedColumns.fetchedColumns(), staticRow, reversed, stats())
-            {
-                protected Unfiltered computeNext()
-                {
-                    Unfiltered next;
-                    try
-                    {
-                        next = reader.next();
-                    }
-                    catch (IOException | IndexOutOfBoundsException e)
-                    {
-                        markSuspect();
-                        throw new CorruptSSTableException(e, dfile.path());
-                    }
-
-                    if (next != null)
-                        return next;
-                    else
-                        return endOfData();
-                }
-
-                public void close()
-                {
-                    try
-                    {
-                        reader.close();
-                    }
-                    catch (IOException e)
-                    {
-                        markSuspect();
-                        throw new CorruptSSTableException(e, dfile.path());
-                    }
-                }
-            };
-        }
-        catch (IOException e)
-        {
-            markSuspect();
-            throw new CorruptSSTableException(e, dfile.path());
-        }
+        return reversed
+               ? new SSTableReversedIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile)
+               : new SSTableIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile);
     }
 
     public interface PartitionReader extends Closeable
