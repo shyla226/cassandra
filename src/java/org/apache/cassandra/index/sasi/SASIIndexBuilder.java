@@ -93,7 +93,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                        RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
                         dataFile.seek(indexEntry.position);
                         ByteBufferUtil.readWithShortLength(dataFile); // key
 

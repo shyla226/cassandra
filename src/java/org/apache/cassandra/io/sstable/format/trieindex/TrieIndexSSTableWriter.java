@@ -24,8 +24,6 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -38,18 +36,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
-import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
-import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.FSReadError;
@@ -65,7 +55,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -78,7 +67,6 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
@@ -386,7 +374,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
      * WARNING: changes to method name or parameter name will need to be reflected in byteman tests. In particular
      * OutOfSpaceTest.
      */
-    public RowIndexEntry<?> append(UnfilteredRowIterator partition)
+    public RowIndexEntry append(UnfilteredRowIterator partition)
     {
         DecoratedKey key = partition.partitionKey();
 
@@ -410,7 +398,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         {
             long trieRoot = partitionWriter.writePartition(collecting);
 
-            RowIndexEntry<?> entry = TrieIndexEntry.create(startPosition, trieRoot,
+            RowIndexEntry entry = TrieIndexEntry.create(startPosition, trieRoot,
                                                         collecting.partitionLevelDeletion(),
                                                         partitionWriter.rowIndexCount);
 
@@ -460,7 +448,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             dataFile.setPostFlushListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
         }
 
-        public long append(DecoratedKey key, RowIndexEntry<?> indexEntry) throws IOException
+        public long append(DecoratedKey key, RowIndexEntry indexEntry) throws IOException
         {
             bf.add(key);
             long position;

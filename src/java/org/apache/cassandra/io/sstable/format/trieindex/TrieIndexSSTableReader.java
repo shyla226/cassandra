@@ -237,7 +237,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     public PartitionReader reader(FileDataInput file,
                                   boolean shouldCloseFile,
-                                  RowIndexEntry<?> indexEntry,
+                                  RowIndexEntry indexEntry,
                                   DeserializationHelper helper,
                                   Slices slices,
                                   boolean reversed,
@@ -253,7 +253,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    protected RowIndexEntry<?> getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
         assert !permitMatchPastLast;
 
@@ -292,7 +292,7 @@ public class TrieIndexSSTableReader extends SSTableReader
      * (with assumeNoMatch: true).
      * Returns the index entry at this position, or null if the search op rejects it.
      */
-    private RowIndexEntry<?> retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
+    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
     {
         if (pos >= 0)
         {
@@ -323,7 +323,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                         return null;
                 }
             }
-            return new RowIndexEntry<>(pos);
+            return new RowIndexEntry(pos);
         }
     }
 
@@ -348,9 +348,9 @@ public class TrieIndexSSTableReader extends SSTableReader
         return decorateKey(ByteBufferUtil.readWithShortLength(reader));
     }
 
-    public RowIndexEntry<?> getExactPosition(DecoratedKey dk,
-                                             SSTableReadsListener listener,
-                                             boolean updateStats)
+    public RowIndexEntry getExactPosition(DecoratedKey dk,
+                                          SSTableReadsListener listener,
+                                          boolean updateStats)
     {
         if (!inBloomFilter(dk))
         {
@@ -405,7 +405,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
     }
 
-    private RowIndexEntry<?> handleKeyNotFound(boolean updateStats, SSTableReadsListener listener)
+    private RowIndexEntry handleKeyNotFound(boolean updateStats, SSTableReadsListener listener)
     {
         if (updateStats)
             bloomFilterTracker.addFalsePositive();
@@ -413,12 +413,12 @@ public class TrieIndexSSTableReader extends SSTableReader
         return null;
     }
 
-    private RowIndexEntry<?> handleKeyFound(boolean updateStats, SSTableReadsListener listener, FileDataInput in, long indexPos) throws IOException
+    private RowIndexEntry handleKeyFound(boolean updateStats, SSTableReadsListener listener, FileDataInput in, long indexPos) throws IOException
     {
         if (updateStats)
             bloomFilterTracker.addTruePositive();
-        RowIndexEntry<?> entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
-                                               : new RowIndexEntry<>(~indexPos);
+        RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
+                                            : new RowIndexEntry(~indexPos);
 
         listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
         return entry;
@@ -630,7 +630,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                           boolean reversed,
                                           SSTableReadsListener listener)
     {
-        RowIndexEntry<?> rie = getExactPosition(key, listener, true);
+        RowIndexEntry rie = getExactPosition(key, listener, true);
         RandomAccessReader dataFileInput = openDataReader();
         try
         {
@@ -645,7 +645,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     public UnfilteredRowIterator iterator(FileDataInput dataFileInput,
                                           boolean shouldCloseFile,
                                           DecoratedKey key,
-                                          RowIndexEntry<?> indexEntry,
+                                          RowIndexEntry indexEntry,
                                           Slices slices,
                                           ColumnFilter selectedColumns,
                                           boolean reversed)
@@ -736,13 +736,13 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
     {
-        RowIndexEntry<?> position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
+        RowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
         if (position == null)
             return null;
         return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
     }
 
-    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, RowIndexEntry<?> indexEntry, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, RowIndexEntry indexEntry, boolean tombstoneOnly)
     {
         return SSTableIdentityIterator.create(this, dfile, indexEntry, key, tombstoneOnly);
     }
@@ -908,7 +908,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     {
         try
         {
-            RowIndexEntry<?> pos = getPosition(token, Operator.GT);
+            RowIndexEntry pos = getPosition(token, Operator.GT);
             if (pos == null)
                 return null;
 

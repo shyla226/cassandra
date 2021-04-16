@@ -118,12 +118,12 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         return writer;
     }
 
-    public RowIndexEntry<?> append(UnfilteredRowIterator partition)
+    public RowIndexEntry append(UnfilteredRowIterator partition)
     {
         // we do this before appending to ensure we can resetAndTruncate() safely if the append fails
         DecoratedKey key = partition.partitionKey();
         maybeReopenEarly(key);
-        RowIndexEntry<?> index = writer.append(partition);
+        RowIndexEntry index = writer.append(partition);
         if (DatabaseDescriptor.shouldMigrateKeycacheOnCompaction())
         {
             if (!transaction.isOffline() && index instanceof BigTableRowIndexEntry)
@@ -142,7 +142,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
     }
 
     // attempts to append the row, if fails resets the writer position
-    public RowIndexEntry<?> tryAppend(UnfilteredRowIterator partition)
+    public RowIndexEntry tryAppend(UnfilteredRowIterator partition)
     {
         writer.mark();
         try
@@ -164,7 +164,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             {
                 for (SSTableReader reader : transaction.originals())
                 {
-                    RowIndexEntry<?> index = reader.getPosition(key, SSTableReader.Operator.GE);
+                    RowIndexEntry index = reader.getPosition(key, SSTableReader.Operator.GE);
                     NativeLibrary.trySkipCache(reader.getFilename(), 0, index == null ? 0 : index.position);
                 }
             }

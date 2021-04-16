@@ -25,9 +25,9 @@ import org.apache.cassandra.utils.ObjectSizes;
 /**
  * The base RowIndexEntry is not stored on disk, only specifies a position in the data file
  */
-public class RowIndexEntry<T> implements IMeasurableMemory
+public class RowIndexEntry implements IMeasurableMemory
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new RowIndexEntry<>(0));
+    private static final long EMPTY_SIZE = ObjectSizes.measure(new RowIndexEntry(0));
 
     /**
      * Row position in a data file

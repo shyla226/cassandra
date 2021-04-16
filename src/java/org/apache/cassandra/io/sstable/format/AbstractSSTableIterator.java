@@ -31,7 +31,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-public abstract class AbstractSSTableIterator<E extends RowIndexEntry<?>> implements UnfilteredRowIterator
+public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implements UnfilteredRowIterator
 {
     protected final SSTableReader sstable;
     // We could use sstable.metadata(), but that can change during execution so it's good hygiene to grab an immutable instance

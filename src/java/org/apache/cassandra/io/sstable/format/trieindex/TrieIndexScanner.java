@@ -266,7 +266,7 @@ public class TrieIndexScanner implements ISSTableScanner
     protected class KeyScanningIterator extends AbstractIterator<UnfilteredRowIterator> implements CloseableIterator<UnfilteredRowIterator>
     {
         private DecoratedKey currentKey;
-        private RowIndexEntry<?> currentEntry;
+        private RowIndexEntry currentEntry;
         private PartitionIterator iterator;
         private LazilyInitializedUnfilteredRowIterator currentRowIterator;
 
@@ -312,7 +312,7 @@ public class TrieIndexScanner implements ISSTableScanner
                 {
                     // Store currentEntry referency during object instantination as later (during initialize) the
                     // reference may point to a different entry.
-                    private final RowIndexEntry<?> rowIndexEntry = currentEntry;
+                    private final RowIndexEntry rowIndexEntry = currentEntry;
 
                     protected UnfilteredRowIterator initializeIterator()
                     {

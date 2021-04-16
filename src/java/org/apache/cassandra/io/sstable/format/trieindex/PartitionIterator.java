@@ -44,9 +44,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     private FileDataInput indexInput;
 
     private DecoratedKey currentKey;
-    private RowIndexEntry<?> currentEntry;
+    private RowIndexEntry currentEntry;
     private DecoratedKey nextKey;
-    private RowIndexEntry<?> nextEntry;
+    private RowIndexEntry nextEntry;
     private boolean closeHandles = false;
 
     /**
@@ -144,7 +144,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         return dataPosition();
     }
 
-    public RowIndexEntry<?> entry()
+    public RowIndexEntry entry()
     {
         return currentEntry;
     }
@@ -186,7 +186,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
                 pos = ~pos;
                 FileDataInput in = dataInput(pos);
                 nextKey = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
-                nextEntry = new RowIndexEntry<>(pos);
+                nextEntry = new RowIndexEntry(pos);
             }
         }
         else

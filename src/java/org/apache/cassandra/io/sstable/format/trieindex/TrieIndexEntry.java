@@ -30,7 +30,7 @@ import org.apache.cassandra.utils.ObjectSizes;
  *
  * Not to be used outside of package. Public only for IndexRewriter tool.
  */
-public final class TrieIndexEntry extends RowIndexEntry<RowIndexReader.IndexInfo>
+public final class TrieIndexEntry extends RowIndexEntry
 {
     private static final long BASE_SIZE;
 
@@ -84,17 +84,17 @@ public final class TrieIndexEntry extends RowIndexEntry<RowIndexReader.IndexInfo
      * Create an index entry. The row index trie must already have been written (by RowIndexWriter) to the row index
      * file and its root position must be specified in trieRoot.
      */
-    public static RowIndexEntry<RowIndexReader.IndexInfo> create(long dataStartPosition,
+    public static RowIndexEntry create(long dataStartPosition,
                                        long trieRoot,
                                        DeletionTime partitionLevelDeletion,
                                        int rowIndexCount)
     {
         if (trieRoot == -1)
-            return new RowIndexEntry<RowIndexReader.IndexInfo>(dataStartPosition) {};
+            return new RowIndexEntry(dataStartPosition) {};
         return new TrieIndexEntry(dataStartPosition, trieRoot, rowIndexCount, partitionLevelDeletion);
     }
 
-    public static RowIndexEntry<?> deserialize(DataInputPlus in, long basePosition) throws IOException
+    public static RowIndexEntry deserialize(DataInputPlus in, long basePosition) throws IOException
     {
         long dataFilePosition = in.readUnsignedVInt();
         long indexTrieRoot = in.readVInt() + basePosition;

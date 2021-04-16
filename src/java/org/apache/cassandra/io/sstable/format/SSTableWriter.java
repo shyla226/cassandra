@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.io.sstable.format;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.function.Consumer;
 
@@ -31,18 +30,14 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -241,7 +236,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      *
      * @throws FSWriteError if a write to the dataFile fails
      */
-    public abstract RowIndexEntry<?> append(UnfilteredRowIterator iterator);
+    public abstract RowIndexEntry append(UnfilteredRowIterator iterator);
 
     public abstract long getFilePointer();
 

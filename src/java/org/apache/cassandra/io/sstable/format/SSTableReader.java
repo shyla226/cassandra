@@ -1441,7 +1441,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * allow key selection by token bounds but only if op != * EQ
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
      */
-    public final RowIndexEntry<?> getPosition(PartitionPosition key, Operator op)
+    public final RowIndexEntry getPosition(PartitionPosition key, Operator op)
     {
         return getPosition(key, op, true, false, SSTableReadsListener.NOOP_LISTENER);
     }
@@ -1461,11 +1461,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param listener a listener used to handle internal events
      * @return The index entry corresponding to the key, or null if the key is not present
      */
-    protected abstract RowIndexEntry<?> getPosition(PartitionPosition key,
-                                                    Operator op,
-                                                    boolean updateCacheAndStats,
-                                                    boolean permitMatchPastLast,
-                                                    SSTableReadsListener listener);
+    protected abstract RowIndexEntry getPosition(PartitionPosition key,
+                                                 Operator op,
+                                                 boolean updateCacheAndStats,
+                                                 boolean permitMatchPastLast,
+                                                 SSTableReadsListener listener);
 
     public abstract UnfilteredRowIterator iterator(DecoratedKey key,
                                                    Slices slices,

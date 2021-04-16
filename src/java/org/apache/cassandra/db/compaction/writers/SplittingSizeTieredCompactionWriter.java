@@ -86,7 +86,7 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
     @Override
     public boolean realAppend(UnfilteredRowIterator partition)
     {
-        RowIndexEntry<?> rie = sstableWriter.append(partition);
+        RowIndexEntry rie = sstableWriter.append(partition);
         if (sstableWriter.currentWriter().getEstimatedOnDiskBytesWritten() > currentBytesToWrite && currentRatioIndex < ratios.length - 1) // if we underestimate how many keys we have, the last sstable might get more than we expect
         {
             currentRatioIndex++;

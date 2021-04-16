@@ -84,7 +84,7 @@ public class SSTableReverseIteratorTest
         tbl.forceBlockingFlush();
         SSTableReader sstable = Iterables.getOnlyElement(tbl.getLiveSSTables());
         DecoratedKey dk = tbl.getPartitioner().decorateKey(Int32Type.instance.decompose(key));
-        RowIndexEntry<?> indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ);
+        RowIndexEntry indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ);
         Assert.assertTrue(indexEntry.isIndexed());
         Assert.assertTrue(indexEntry.columnsIndexCount() > 2);
 
