@@ -75,7 +75,7 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
-    public long advance(PrimaryKey primaryKey)
+    public long advance(SortedRow sortedRow)
     {
         for (int i = idx; i < length; ++i)
         {
@@ -83,7 +83,7 @@ public class ArrayPostingList implements OrdinalPostingList
 
             idx++;
 
-            if (segmentRowId >= primaryKey.sstableRowId())
+            if (segmentRowId >= sortedRow.sstableRowId())
             {
                 return segmentRowId;
             }
@@ -92,7 +92,7 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public SortedRow mapRowId(long rowId)
     {
         return PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(rowId);
     }

@@ -37,7 +37,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
@@ -89,7 +89,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
     }
 
     @Override
-    public void addRow(PrimaryKey key, Row row) throws IOException
+    public void addRow(SortedRow key, Row row) throws IOException
     {
         if (maybeAbort())
             return;
@@ -132,7 +132,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         return true;
     }
 
-    private void addTerm(ByteBuffer term, PrimaryKey key, AbstractType<?> type) throws IOException
+    private void addTerm(ByteBuffer term, SortedRow key, AbstractType<?> type) throws IOException
     {
         if (term.remaining() >= maxTermSize)
         {
@@ -306,8 +306,8 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         if (segments.isEmpty())
             return null;
 
-        PrimaryKey minKey = segments.get(0).minKey;
-        PrimaryKey maxKey = segments.get(segments.size() - 1).maxKey;
+        SortedRow minKey = segments.get(0).minKey;
+        SortedRow maxKey = segments.get(segments.size() - 1).maxKey;
 
         try (SegmentMerger segmentMerger = SegmentMerger.newSegmentMerger(columnContext.isLiteral());
              SSTableIndex.PerIndexFiles perIndexFiles = new SSTableIndex.PerIndexFiles(indexComponents, columnContext.isLiteral(), true))
