@@ -276,10 +276,10 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         return clusteringComparator;
     }
 
-    public long sstableRowId(LongArray tokenToRowId)
-    {
-        return tokenToRowId.findTokenRowID(partitionKey.getToken().getLongValue());
-    }
+//    public long sstableRowId(LongArray tokenToRowId)
+//    {
+//        return tokenToRowId.findTokenRowID(partitionKey.getToken().getLongValue());
+//    }
 
     public long sstableRowId()
     {

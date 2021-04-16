@@ -132,8 +132,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final QueryContext queryContext;
         private final PrimaryKey.PrimaryKeyFactory keyFactory;
 
-        private PrimaryKey currentKey = null;
-        private PrimaryKey lastKey;
+        private Comparable currentKey = null;
+        private Comparable lastKey;
 
         private ResultRetriever(Operation operation,
                                 QueryController controller,
@@ -173,20 +173,20 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // allocation, reuse their token mergers as they process individual positions on the ring.)
             while (true)
             {
-                if (!lastPrimaryKey.partitionKey().getToken().isMinimum() && lastPrimaryKey.compareTo(currentKey) < 0)
+                if (!lastPrimaryKey.partitionKey().getToken().isMinimum() && lastPrimaryKey.compareTo((PrimaryKey)currentKey) < 0)
                     return endOfData();
 
                 while (current != null)
                 {
-                    if (current.contains(currentKey.partitionKey()))
+                    if (current.contains( ((PrimaryKey)currentKey).partitionKey()))
                     {
-                        UnfilteredRowIterator partition = apply(currentKey);
+                        UnfilteredRowIterator partition = apply((PrimaryKey)currentKey);
                         if (partition != null)
                             return partition;
                         break;
                     }
                     // bigger than current range
-                    else if (!current.right.isMinimum() && current.right.compareTo(currentKey.partitionKey()) <= 0)
+                    else if (!current.right.isMinimum() && current.right.compareTo(((PrimaryKey)currentKey).partitionKey()) <= 0)
                     {
                         if (keyRanges.hasNext())
                             current = keyRanges.next().keyRange();
@@ -198,7 +198,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     {
                         // we already knew that key is not included in "current" abstract bounds,
                         // so "left" may have the same partition position as "key" when "left" is exclusive.
-                        assert current.left.compareTo(currentKey.partitionKey()) >= 0;
+                        assert current.left.compareTo(((PrimaryKey)currentKey).partitionKey()) >= 0;
                         operation.skipTo(keyFactory.createKey(current.left.getToken()));
                         break;
                     }

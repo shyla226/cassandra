@@ -102,20 +102,20 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertNotNull(range);
 
         // first let's skipTo something before range
-        Assert.assertEquals(4L, range.skipTo(LongIterator.fromToken(3L)).partitionKey().getToken().getLongValue());
-        Assert.assertEquals(4L, range.getCurrent().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(4L, ((PrimaryKey)range.skipTo(LongIterator.fromToken(3L))).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(4L, ((PrimaryKey)range.getCurrent()).partitionKey().getToken().getLongValue());
 
         // now let's skip right to the send value
-        Assert.assertEquals(6L, range.skipTo(LongIterator.fromToken(5L)).partitionKey().getToken().getLongValue());
-        Assert.assertEquals(6L, range.getCurrent().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(6L, ((PrimaryKey)range.skipTo(LongIterator.fromToken(5L))).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(6L, ((PrimaryKey)range.getCurrent()).partitionKey().getToken().getLongValue());
 
         // now right to the element
-        Assert.assertEquals(7L, range.skipTo(LongIterator.fromToken(7L)).partitionKey().getToken().getLongValue());
-        Assert.assertEquals(7L, range.getCurrent().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(7L, range.next().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(7L, ((PrimaryKey)range.skipTo(LongIterator.fromToken(7L))).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(7L, ((PrimaryKey)range.getCurrent()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(7L, ((PrimaryKey)range.next()).partitionKey().getToken().getLongValue());
 
         Assert.assertTrue(range.hasNext());
-        Assert.assertEquals(10L, range.getCurrent().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getCurrent()).partitionKey().getToken().getLongValue());
 
         // now right after the last element
         Assert.assertNull(range.skipTo(LongIterator.fromToken(11L)));
@@ -131,14 +131,14 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         builder.add(new LongIterator(new long[]{4L, 5L, 9L}));
         builder.add(new LongIterator(new long[]{7L, 8L, 9L}));
 
-        Assert.assertEquals(9L, builder.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(9L, ((PrimaryKey)builder.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertEquals(9L, builder.getTokenCount());
 
         RangeIterator tokens = builder.build();
 
         Assert.assertNotNull(tokens);
-        Assert.assertEquals(7L, tokens.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(9L, tokens.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(7L, ((PrimaryKey)tokens.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(9L, ((PrimaryKey)tokens.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertEquals(9L, tokens.getCount());
 
         Assert.assertEquals(convert(9L), convert(builder.build()));
@@ -158,15 +158,15 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
         builder.add(new LongIterator(new long[] { 6L, 8L, 9L }));
 
-        Assert.assertEquals(6L, builder.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(6L, builder.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(6L, ((PrimaryKey)builder.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(6L, ((PrimaryKey)builder.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertEquals(9L, builder.getTokenCount());
         Assert.assertEquals(3L, builder.rangeCount());
         Assert.assertFalse(builder.statistics.isDisjoint());
 
-        Assert.assertEquals(1L, builder.rangeIterators.get(0).getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(4L, builder.rangeIterators.get(1).getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(6L, builder.rangeIterators.get(2).getMinimum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(1L, ((PrimaryKey)builder.rangeIterators.get(0).getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(4L, ((PrimaryKey)builder.rangeIterators.get(1).getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(6L, ((PrimaryKey)builder.rangeIterators.get(2).getMinimum()).partitionKey().getToken().getLongValue());
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 6L }));
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));

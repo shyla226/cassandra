@@ -30,7 +30,6 @@ import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.utils.Throwables;
@@ -58,7 +57,7 @@ public class PostingListRangeIterator extends RangeIterator
     private final IndexSearcher.SearcherContext context;
 
     private boolean needsSkipping = false;
-    private PrimaryKey skipToToken = null;
+    private Comparable skipToToken = null;
 
 
     /**
@@ -78,7 +77,7 @@ public class PostingListRangeIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Comparable nextKey)
     {
         if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
             return;
@@ -88,7 +87,7 @@ public class PostingListRangeIterator extends RangeIterator
     }
 
     @Override
-    protected PrimaryKey computeNext()
+    protected Comparable computeNext()
     {
         try
         {
@@ -138,7 +137,7 @@ public class PostingListRangeIterator extends RangeIterator
     {
         if (needsSkipping)
         {
-            long segmentRowId = postingList.advance(skipToToken);
+            long segmentRowId = postingList.advance((PrimaryKey)skipToToken); // TODO: ???
 
             needsSkipping = false;
 

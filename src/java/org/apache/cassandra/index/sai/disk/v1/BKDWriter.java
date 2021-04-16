@@ -132,6 +132,8 @@ public class BKDWriter implements Closeable
 
     private final ICompressor compressor;
 
+    private final byte[] missingValue;
+
     public BKDWriter(long maxDoc, int numDims, int bytesPerDim,
             int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc,
             ICompressor compressor) throws IOException
@@ -160,6 +162,9 @@ public class BKDWriter implements Closeable
 
         minPackedValue = new byte[packedBytesLength];
         maxPackedValue = new byte[packedBytesLength];
+
+        missingValue = new byte[bytesPerDim];
+        genMissingValue(missingValue);
 
         // If we may have more than 1+Integer.MAX_VALUE values, then we must encode ords with long (8 bytes), else we can use int (4 bytes).
         this.longOrds = longOrds;
@@ -198,9 +203,18 @@ public class BKDWriter implements Closeable
         }
     }
 
+    public byte[] getMissingValue()
+    {
+        return missingValue;
+    }
+
+    public boolean isMissingValue(byte[] bytes)
+    {
+        return Arrays.equals(missingValue, bytes);
+    }
+
     public static byte[] genMissingValue(byte[] bytes)
     {
-        //assert maxBytes == bytes.length;
         Arrays.fill(bytes, UnsignedBytes.MAX_VALUE);
         return bytes;
     }

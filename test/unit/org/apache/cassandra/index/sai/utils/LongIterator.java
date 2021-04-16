@@ -18,20 +18,13 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.function.LongFunction;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.Token;
-import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class LongIterator extends RangeIterator
@@ -66,7 +59,7 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected PrimaryKey computeNext()
+    protected Comparable computeNext()
     {
         // throws exception if it's last element or chosen 1 out of n
         if (shouldThrow && (currentIdx >= keys.size() - 1 || random.nextInt(keys.size()) == 0))
@@ -79,12 +72,12 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(Comparable nextToken)
     {
         for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < keys.size(); i++)
         {
             PrimaryKey token = keys.get(i);
-            if (token.compareTo(nextToken) >= 0)
+            if (token.compareTo( (PrimaryKey)nextToken) >= 0)
             {
                 currentIdx = i;
                 break;
@@ -113,7 +106,7 @@ public class LongIterator extends RangeIterator
     {
         List<Long> results = new ArrayList<>();
         while (tokens.hasNext())
-            results.add(tokens.next().partitionKey().getToken().getLongValue());
+            results.add( ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
 
         return results;
     }
@@ -126,16 +119,16 @@ public class LongIterator extends RangeIterator
                 add(n);
         }};
     }
-
-    static List<Long> convertOffsets(RangeIterator keys)
-    {
-        List<Long> results = new ArrayList<>();
-        while (keys.hasNext())
-        {
-            PrimaryKey key = keys.next();
-            results.add(key.sstableRowId());
-        }
-
-        return results;
-    }
+// unused?
+//    static List<Long> convertOffsets(RangeIterator keys)
+//    {
+//        List<Long> results = new ArrayList<>();
+//        while (keys.hasNext())
+//        {
+//            PrimaryKey key = (PrimaryKey) keys.next();
+//            results.add(key.sstableRowId());
+//        }
+//
+//        return results;
+//    }
 }

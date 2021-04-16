@@ -32,11 +32,6 @@ public class BKDRowOrdinalsWriter
             writer.add(obj.pointID);
         }
 
-//        for (BKDReader.RowIDAndPointIDIterator iterator : iterators)
-//        {
-//            iterator.close();
-//        }
-
         merger.close();
 
         writer.close();

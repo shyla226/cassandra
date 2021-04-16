@@ -156,7 +156,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         for(long token : tokens)
         {
-            assertEquals(token, iterator.next().partitionKey().getToken().getLongValue());
+            assertEquals(token, ((PrimaryKey)iterator.next()).partitionKey().getToken().getLongValue());
         }
         assertFalse(iterator.hasNext());
     }

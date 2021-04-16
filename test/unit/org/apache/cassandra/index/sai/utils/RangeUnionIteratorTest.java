@@ -148,7 +148,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 
             Assert.assertNotNull(tokens);
             while (tokens.hasNext())
-                Assert.assertEquals(totalOrdering[count++], tokens.next().partitionKey().getToken().getLongValue());
+                Assert.assertEquals(totalOrdering[count++], ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
 
             Assert.assertEquals(totalCount, count);
         }
@@ -163,24 +163,24 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
         builder.add(new LongIterator(new long[] { 7L, 8L, 9L }));
 
-        Assert.assertEquals(9L, builder.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(9L, ((PrimaryKey)builder.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertEquals(9L, builder.getTokenCount());
 
         RangeIterator tokens = builder.build();
 
         Assert.assertNotNull(tokens);
-        Assert.assertEquals(1L, tokens.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(9L, tokens.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(1L, ((PrimaryKey)tokens.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(9L, ((PrimaryKey)tokens.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertEquals(9L, tokens.getCount());
 
         for (long i = 1; i < 10; i++)
         {
             Assert.assertTrue(tokens.hasNext());
-            Assert.assertEquals(i, tokens.next().partitionKey().getToken().getLongValue());
+            Assert.assertEquals(i, ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
         }
 
         Assert.assertFalse(tokens.hasNext());
-        Assert.assertEquals(1L, tokens.getMinimum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(1L, ((PrimaryKey)tokens.getMinimum()).partitionKey().getToken().getLongValue());
     }
 
     @Test
@@ -197,15 +197,15 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
         builder.add(new LongIterator(new long[] { 7L, 8L, 9L }));
 
-        Assert.assertEquals(1L, builder.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(9L, builder.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(1L, ((PrimaryKey)builder.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(9L, ((PrimaryKey)builder.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertEquals(9L, builder.getTokenCount());
         Assert.assertEquals(3L, builder.rangeCount());
         Assert.assertFalse(builder.statistics.isDisjoint());
 
-        Assert.assertEquals(1L, builder.rangeIterators.get(0).getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(4L, builder.rangeIterators.get(1).getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(7L, builder.rangeIterators.get(2).getMinimum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(1L, ((PrimaryKey)builder.rangeIterators.get(0).getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(4L, ((PrimaryKey)builder.rangeIterators.get(1).getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(7L, ((PrimaryKey)builder.rangeIterators.get(2).getMinimum()).partitionKey().getToken().getLongValue());
 
         RangeIterator tokens = RangeUnionIterator.build(new ArrayList<RangeIterator>()
         {{
@@ -246,16 +246,16 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 
         tokens.skipTo(LongIterator.fromToken(5L));
         Assert.assertTrue(tokens.hasNext());
-        Assert.assertEquals(5L, tokens.next().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(5L, ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
 
         tokens.skipTo(LongIterator.fromToken(7L));
         Assert.assertTrue(tokens.hasNext());
-        Assert.assertEquals(7L, tokens.next().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(7L, ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
 
         tokens.skipTo(LongIterator.fromToken(10L));
         Assert.assertFalse(tokens.hasNext());
-        Assert.assertEquals(1L, tokens.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(9L, tokens.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(1L, ((PrimaryKey)tokens.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(9L, ((PrimaryKey)tokens.getMaximum()).partitionKey().getToken().getLongValue());
     }
 
     @Test
@@ -280,27 +280,27 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
     {
         LongIterator tokens = new LongIterator(new long[] { 0L, 1L, 2L, 3L });
 
-        Assert.assertEquals(0L, tokens.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(3L, tokens.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(0L, ((PrimaryKey)tokens.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(3L, ((PrimaryKey)tokens.getMaximum()).partitionKey().getToken().getLongValue());
 
         for (int i = 0; i <= 3; i++)
         {
             Assert.assertTrue(tokens.hasNext());
-            Assert.assertEquals(i, tokens.getCurrent().partitionKey().getToken().getLongValue());
-            Assert.assertEquals(i, tokens.next().partitionKey().getToken().getLongValue());
+            Assert.assertEquals(i, ((PrimaryKey)tokens.getCurrent()).partitionKey().getToken().getLongValue());
+            Assert.assertEquals(i, ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
         }
 
         tokens = new LongIterator(new long[] { 0L, 1L, 3L, 5L });
 
-        Assert.assertEquals(3L, tokens.skipTo(LongIterator.fromToken(2L)).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(3L, ((PrimaryKey)tokens.skipTo(LongIterator.fromToken(2L))).partitionKey().getToken().getLongValue());
         Assert.assertTrue(tokens.hasNext());
-        Assert.assertEquals(3L, tokens.getCurrent().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(3L, tokens.next().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(3L, ((PrimaryKey)tokens.getCurrent()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(3L, ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
 
-        Assert.assertEquals(5L, tokens.skipTo(LongIterator.fromToken(5L)).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(5L, ((PrimaryKey)tokens.skipTo(LongIterator.fromToken(5L))).partitionKey().getToken().getLongValue());
         Assert.assertTrue(tokens.hasNext());
-        Assert.assertEquals(5L, tokens.getCurrent().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(5L, tokens.next().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(5L, ((PrimaryKey)tokens.getCurrent()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(5L, ((PrimaryKey)tokens.next()).partitionKey().getToken().getLongValue());
 
         LongIterator empty = new LongIterator(new long[0]);
 
@@ -318,8 +318,8 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {i + 10}));
         range = builder.build();
-        Assert.assertEquals(10L, range.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(19L, range.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(19L, ((PrimaryKey)range.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(10, range.getCount());
 
@@ -327,8 +327,8 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         builder.add(new LongIterator(new long[] {}));
         builder.add(new LongIterator(new long[] {10}));
         range = builder.build();
-        Assert.assertEquals(10L, range.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(10L, range.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(1, range.getCount());
 
@@ -338,8 +338,8 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
             builder.add(new LongIterator(new long[] {i + 10}));
         builder.add(new LongIterator(new long[] {}));
         range = builder.build();
-        Assert.assertEquals(10, range.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(19, range.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10, ((PrimaryKey)range.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(19, ((PrimaryKey)range.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(10, range.getCount());
 
@@ -347,8 +347,8 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         builder.add(new LongIterator(new long[] {10}));
         builder.add(new LongIterator(new long[] {}));
         range = builder.build();
-        Assert.assertEquals(10L, range.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(10L, range.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(1, range.getCount());
 
@@ -359,8 +359,8 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
             builder.add(new LongIterator(new long[] {i + 10}));
         builder.add(new LongIterator(new long[] {}));
         range = builder.build();
-        Assert.assertEquals(10L, range.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(19L, range.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(19L, ((PrimaryKey)range.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(10, range.getCount());
 
@@ -372,8 +372,8 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         for (int i = 5; i < 10; i++)
             builder.add(new LongIterator(new long[] {i + 10}));
         range = builder.build();
-        Assert.assertEquals(10L, range.getMinimum().partitionKey().getToken().getLongValue());
-        Assert.assertEquals(19L, range.getMaximum().partitionKey().getToken().getLongValue());
+        Assert.assertEquals(10L, ((PrimaryKey)range.getMinimum()).partitionKey().getToken().getLongValue());
+        Assert.assertEquals(19L, ((PrimaryKey)range.getMaximum()).partitionKey().getToken().getLongValue());
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(10, range.getCount());
     }

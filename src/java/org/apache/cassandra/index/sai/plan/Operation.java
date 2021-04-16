@@ -42,9 +42,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -212,13 +210,13 @@ public class Operation extends RangeIterator
     }
 
     @Override
-    protected PrimaryKey computeNext()
+    protected Comparable computeNext()
     {
         return range != null && range.hasNext() ? range.next() : endOfData();
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Comparable nextKey)
     {
         if (range != null)
             range.skipTo(nextKey);

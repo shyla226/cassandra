@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 
@@ -172,7 +173,7 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            assertEquals(0L, results.next().partitionKey().getToken().getLongValue());
+            assertEquals(0L, ((PrimaryKey)results.next()).partitionKey().getToken().getLongValue());
         }
 
         try (RangeIterator results = makeIterator(indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
@@ -210,7 +211,7 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            List<Long> actualTokenList = Lists.newArrayList(Iterators.transform(results, key -> key.partitionKey().getToken().getLongValue()));
+            List<Long> actualTokenList = Lists.newArrayList(Iterators.transform(results, key -> ((PrimaryKey)key).partitionKey().getToken().getLongValue()));
             assertEquals(expectedTokenList, actualTokenList);
         }
 

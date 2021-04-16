@@ -79,6 +79,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
     public static final String DEFAULT_POSTING_INDEX = "DEFAULT_POSTING_INDEX";
     final Map<String,SortedPostingsIndex> postingIndexMap = new HashMap();
+    private final byte[] missingValue;
 
     /**
      * Performs a blocking read.
@@ -111,6 +112,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final PackedIndexTree index = new PackedIndexTree();
         getLeafOffsets(index, leafFPToLeafNode);
 
+        missingValue = new byte[bytesPerDim];
+        BKDWriter.genMissingValue(missingValue);
+
         final PackedLongValues.Builder filePointerBuilder = PackedLongValues.deltaPackedBuilder(PackedInts.COMPACT);
 
         for (Map.Entry<Long,Integer> entry : leafFPToLeafNode.entrySet())
@@ -119,6 +123,11 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             filePointerBuilder.add(filePosition);
         }
         filePointers = filePointerBuilder.build();
+    }
+
+    public boolean isMissingValue(byte[] bytes)
+    {
+        return Arrays.equals(missingValue, bytes);
     }
 
     public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor,

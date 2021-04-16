@@ -85,7 +85,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
                         assertTrue(results.hasNext());
-                        final long actualToken = results.next().partitionKey().getToken().getLongValue();
+                        final long actualToken = ((PrimaryKey)results.next()).partitionKey().getToken().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
                     assertFalse(results.hasNext());
@@ -106,7 +106,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
-                        final long actualToken = results.next().partitionKey().getToken().getLongValue();
+                        final long actualToken = ((PrimaryKey)results.next()).partitionKey().getToken().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
                 }

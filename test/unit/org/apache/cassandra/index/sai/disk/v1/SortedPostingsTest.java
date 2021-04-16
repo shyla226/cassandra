@@ -97,7 +97,7 @@ public class SortedPostingsTest extends NdiRandomizedTest
             buffer.addPackedValue((int) row.rowID, new BytesRef(scratch));
         }
 
-        BKDReader reader = BKDReaderTest.finishAndOpenReaderOneDim(10, buffer, indexComponents, maxRowID+1);
+        BKDReader reader = BKDReaderTest.finishAndOpenReaderOneDim(10, buffer, indexComponents, maxRowID + 1);
 
         final MetadataWriter metaWriter = new MetadataWriter(indexComponents);
 
@@ -126,8 +126,7 @@ public class SortedPostingsTest extends NdiRandomizedTest
             int i = nextInt(0, 1000);
             if (nextInt(0, 10) == 0)
             {
-                //i = 9000;
-                i = Integer.MAX_VALUE;
+                i = Integer.MAX_VALUE; // MAX_VALUE indicates a missing value
             }
             rows.add(new Row(docID, i, docID));
             fileWriter.write(docID + "," + i + "," + docID+"\n");
@@ -257,10 +256,12 @@ public class SortedPostingsTest extends NdiRandomizedTest
 
             byte[] termBytes = iterator.getRawTermValue();
 
+            boolean isMissingValue = reader.isMissingValue(termBytes);
+
             int value = NumericUtils.sortableBytesToInt(termBytes, 1);
             final long rowID = iterator.rowID();
 
-            System.out.println("termBytes=" + Arrays.toString(termBytes) + " pointID=" + pointID + " value=" + value + " rowID=" + rowID);
+            System.out.println("isMissingValue="+isMissingValue+" termBytes=" + Arrays.toString(termBytes) + " pointID=" + pointID + " value=" + value + " rowID=" + rowID);
 
             rowIDs.add(rowID);
         }

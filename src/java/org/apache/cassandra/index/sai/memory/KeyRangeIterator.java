@@ -51,13 +51,13 @@ public class KeyRangeIterator extends RangeIterator
         this.uniqueKeys = false;
     }
 
-    protected PrimaryKey computeNext()
+    protected Comparable computeNext()
     {
-        PrimaryKey key = computeNextKey();
+        Comparable key = computeNextKey();
         return key == null ? endOfData() : key;
     }
 
-    private PrimaryKey computeNextKey()
+    private Comparable computeNextKey()
     {
         PrimaryKey next = null;
 
@@ -78,11 +78,11 @@ public class KeyRangeIterator extends RangeIterator
         return next;
     }
 
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Comparable nextKey)
     {
         while (!keys.isEmpty())
         {
-            PrimaryKey key = keys.peek();
+            Comparable key = keys.peek();
             if (key.compareTo(nextKey) >= 0)
                 break;
 
