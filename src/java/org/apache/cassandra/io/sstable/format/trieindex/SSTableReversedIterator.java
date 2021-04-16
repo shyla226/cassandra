@@ -158,6 +158,7 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
                 boolean hasNext = deserializer.hasNext();
                 assert hasNext;
                 toReturn = deserializer.readNext();
+                UnfilteredValidation.maybeValidateUnfiltered(toReturn, metadata(), key, sstable);
                 // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
                 if (!toReturn.isEmpty())
                     return toReturn;
