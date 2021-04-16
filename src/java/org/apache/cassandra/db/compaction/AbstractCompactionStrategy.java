@@ -28,6 +28,7 @@ import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -80,6 +81,7 @@ public abstract class AbstractCompactionStrategy
     protected Map<String, String> options;
 
     protected final ColumnFamilyStore cfs;
+    protected final Tracker dataTracker;
     protected float tombstoneThreshold;
     protected long tombstoneCompactionInterval;
     protected boolean uncheckedTombstoneCompaction;
@@ -87,6 +89,9 @@ public abstract class AbstractCompactionStrategy
     protected boolean logAll = true;
 
     private final Directories directories;
+
+    /** An identifier for this compaction strategy that is unique for each table */
+    private final int id;
 
     /**
      * pause/resume/getNextBackgroundTask must synchronize.  This guarantees that after pause completes,
@@ -109,6 +114,7 @@ public abstract class AbstractCompactionStrategy
     {
         assert cfs != null;
         this.cfs = cfs;
+        this.dataTracker = cfs.getTracker();
         this.options = ImmutableMap.copyOf(options);
         this.backgroundCompactions = new BackgroundCompactions(this, cfs);
 
@@ -135,6 +141,7 @@ public abstract class AbstractCompactionStrategy
         }
 
         directories = cfs.getDirectories();
+        id = cfs.getNextCompactionId();
     }
 
     public BackgroundCompactions getBackgroundCompactions()
@@ -145,6 +152,14 @@ public abstract class AbstractCompactionStrategy
     public Directories getDirectories()
     {
         return directories;
+    }
+
+    /**
+     * @return an identifier for this compaction strategy that is unique for each table
+     */
+    public int id()
+    {
+        return id;
     }
 
     /**
@@ -222,7 +237,7 @@ public abstract class AbstractCompactionStrategy
                     return null;
                 }
 
-                LifecycleTransaction transaction = cfs.getTracker().tryModify(compaction.getSelected().sstables, OperationType.COMPACTION);
+                LifecycleTransaction transaction = dataTracker.tryModify(compaction.getSelected().sstables, OperationType.COMPACTION);
                 if (transaction != null)
                 {
                     backgroundCompactions.setSubmitted(transaction.opId(), compaction);
@@ -288,7 +303,7 @@ public abstract class AbstractCompactionStrategy
                     return null;
                 }
 
-                LifecycleTransaction modifier = cfs.getTracker().tryModify(latestBucket, OperationType.COMPACTION);
+                LifecycleTransaction modifier = dataTracker.tryModify(latestBucket, OperationType.COMPACTION);
                 if (modifier != null)
                     return createCompactionTask(gcBefore, modifier, false, false);
 
@@ -323,7 +338,7 @@ public abstract class AbstractCompactionStrategy
         Iterable<SSTableReader> filteredSSTables = filterSuspectSSTables(getSSTables());
         if (Iterables.isEmpty(filteredSSTables))
             return null;
-        LifecycleTransaction txn = cfs.getTracker().tryModify(filteredSSTables, OperationType.COMPACTION);
+        LifecycleTransaction txn = dataTracker.tryModify(filteredSSTables, OperationType.COMPACTION);
         if (txn == null)
             return null;
         return Collections.singleton(createCompactionTask(gcBefore, txn, true, splitOutput));
@@ -343,7 +358,7 @@ public abstract class AbstractCompactionStrategy
     {
         assert !sstables.isEmpty(); // checked for by CM.submitUserDefined
 
-        LifecycleTransaction modifier = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
+        LifecycleTransaction modifier = dataTracker.tryModify(sstables, OperationType.COMPACTION);
         if (modifier == null)
         {
             logger.trace("Unable to mark {} for compaction; probably a background compaction got to it first.  You can disable background compactions temporarily if this is a problem", sstables);
@@ -548,7 +563,7 @@ public abstract class AbstractCompactionStrategy
      * Returns the sstables managed by this strategy instance
      */
     @VisibleForTesting
-    protected abstract Set<SSTableReader> getSSTables();
+    public abstract Set<SSTableReader> getSSTables();
 
     /**
      * Called when the metadata has changed for an sstable - for example if the level changed

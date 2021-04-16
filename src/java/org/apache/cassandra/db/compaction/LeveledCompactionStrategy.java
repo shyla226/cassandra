@@ -75,10 +75,10 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
                 {
                     if (configuredMaxSSTableSize >= 1000)
                         logger.warn("Max sstable size of {}MB is configured for {}.{}; having a unit of compaction this large is probably a bad idea",
-                                configuredMaxSSTableSize, cfs.name, cfs.getTableName());
+                                configuredMaxSSTableSize, cfs.getKeyspaceName(), cfs.getTableName());
                     if (configuredMaxSSTableSize < 50)
                         logger.warn("Max sstable size of {}MB is configured for {}.{}.  Testing done for CASSANDRA-5727 indicates that performance improves up to 160MB",
-                                configuredMaxSSTableSize, cfs.name, cfs.getTableName());
+                                configuredMaxSSTableSize, cfs.getKeyspaceName(), cfs.getTableName());
                 }
             }
 
@@ -336,7 +336,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
     }
 
     @Override
-    protected Set<SSTableReader> getSSTables()
+    public Set<SSTableReader> getSSTables()
     {
         return manifest.getSSTables();
     }
@@ -478,7 +478,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
     @Override
     public String toString()
     {
-        return String.format("LCS@%d(%s)", hashCode(), cfs.name);
+        return String.format("LCS@%d(%s)", hashCode(), cfs.getTableName());
     }
 
     private CompactionAggregate findDroppableSSTable(final int gcBefore)
@@ -489,7 +489,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
             return -1 * Doubles.compare(r1, r2);
         };
         Function<Collection<SSTableReader>, SSTableReader> selector = list -> Collections.max(list, comparator);
-        Set<SSTableReader> compacting = cfs.getCompactingSSTables();
+        Set<SSTableReader> compacting = dataTracker.getCompacting();
 
         for (int i = manifest.getLevelCount(); i >= 0; i--)
         {

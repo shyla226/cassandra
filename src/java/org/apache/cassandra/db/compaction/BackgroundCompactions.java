@@ -34,7 +34,7 @@ import org.apache.cassandra.schema.TableMetadata;
 /**
  * A class for grouping the background compactions picked by a strategy, either pending or in progress.
  */
-class BackgroundCompactions implements CompactionObserver
+public class BackgroundCompactions implements CompactionObserver
 {
     private static final Logger logger = LoggerFactory.getLogger(BackgroundCompactions.class);
 
@@ -47,8 +47,15 @@ class BackgroundCompactions implements CompactionObserver
     /** The compaction logger */
     private final CompactionLogger compactionLogger;
 
-    /** The compaction aggregates with either pending or ongoing compactions, or both. */
-    private volatile TreeMap<Long, CompactionAggregate> aggregates = new TreeMap<>();
+    /** The compaction aggregates with either pending or ongoing compactions, or both. This is a private map
+     * whose access needs to be synchronized. */
+    private final TreeMap<Long, CompactionAggregate> aggregatesMap;
+
+    /**
+     * The current list of compaction aggregates, this list must be recreated every time the aggregates
+     * map is changed.
+     */
+    private volatile List<CompactionAggregate> aggregates;
 
     /**  The ongoing compactions grouped by unique operation ID. */
     private ConcurrentHashMap<UUID, CompactionPick> compactions = new ConcurrentHashMap<>();
@@ -61,6 +68,8 @@ class BackgroundCompactions implements CompactionObserver
         this.strategy = strategy;
         this.metadata = cfs.metadata();
         this.compactionLogger = cfs.getCompactionStrategyManager().compactionLogger();
+        this.aggregatesMap = new TreeMap<>();
+        this.aggregates = ImmutableList.of();
     }
 
     /**
@@ -72,7 +81,7 @@ class BackgroundCompactions implements CompactionObserver
      *
      * @param pending compaction aggregates with pending compactions
      */
-    synchronized void setPending(List<CompactionAggregate> pending)
+    synchronized void setPending(Collection<CompactionAggregate> pending)
     {
         if (pending == null)
             throw new IllegalArgumentException("argument cannot be null");
@@ -81,11 +90,13 @@ class BackgroundCompactions implements CompactionObserver
             logger.trace("Resetting pending aggregates for strategy {}/{}, received {} new aggregates",
                          strategy.getName(), strategy.hashCode(), pending.size());
 
-        // First create a new map with all the pending aggregates
-        TreeMap<Long, CompactionAggregate> aggregates = new TreeMap();
+        // First remove the existing aggregates
+        aggregatesMap.clear();
+
+        // Then add all the pending aggregates
         for (CompactionAggregate aggregate : pending)
         {
-            CompactionAggregate prev = aggregates.put(aggregate.getKey(), aggregate);
+            CompactionAggregate prev = aggregatesMap.put(aggregate.getKey(), aggregate);
             if (logger.isTraceEnabled())
                 logger.trace("Adding new pending aggregate: {}", aggregate);
 
@@ -93,8 +104,8 @@ class BackgroundCompactions implements CompactionObserver
                 throw new IllegalArgumentException("Received pending aggregates with non unique keys: " + prev.getKey());
         }
 
-        // Then add the current aggregates with ongoing compactions
-        for (CompactionAggregate oldAggregate : this.aggregates.values())
+        // Then add the old aggregates but only if they have ongoing compactions
+        for (CompactionAggregate oldAggregate : this.aggregates)
         {
             Collection<CompactionPick> compacting = oldAggregate.getInProgress();
             if (compacting.isEmpty())
@@ -108,12 +119,12 @@ class BackgroundCompactions implements CompactionObserver
             // See if we have a matching aggregate in the pending aggregates, if so add all the existing compactions to it
             // otherwise strip the pending and selected compactions from the old one and keep it only with the compactions in progress
             CompactionAggregate newAggregate;
-            CompactionAggregate matchingAggregate = oldAggregate.getMatching(aggregates);
+            CompactionAggregate matchingAggregate = oldAggregate.getMatching(aggregatesMap);
             if (matchingAggregate != null)
             {
                 // add the old compactions to the new aggregate
                 // the key will change slightly for STCS so remove it before adding it again
-                aggregates.remove(matchingAggregate.getKey());
+                aggregatesMap.remove(matchingAggregate.getKey());
                 newAggregate = matchingAggregate.withAdditionalCompactions(compacting);
 
                 if (logger.isTraceEnabled())
@@ -131,11 +142,11 @@ class BackgroundCompactions implements CompactionObserver
             if (logger.isTraceEnabled())
                 logger.trace("Adding new aggregate with previous compactions {}", newAggregate);
 
-            aggregates.put(newAggregate.getKey(), newAggregate);
+            aggregatesMap.put(newAggregate.getKey(), newAggregate);
         }
 
-        // Finally publish the new aggregates
-        this.aggregates = aggregates;
+        // Publish the new aggregates
+        this.aggregates = ImmutableList.copyOf(aggregatesMap.values());
 
         if (compactionLogger != null && compactionLogger.enabled())
         {
@@ -144,8 +155,7 @@ class BackgroundCompactions implements CompactionObserver
         }
     }
 
-    @Override
-    public void setSubmitted(UUID id, CompactionAggregate aggregate)
+    void setSubmitted(UUID id, CompactionAggregate aggregate)
     {
         if (id == null || aggregate == null)
             throw new IllegalArgumentException("arguments cannot be null");
@@ -161,14 +171,16 @@ class BackgroundCompactions implements CompactionObserver
 
         synchronized (this)
         {
-            CompactionAggregate existingAggregate = aggregate.getMatching(aggregates);
+            CompactionAggregate existingAggregate = aggregate.getMatching(aggregatesMap);
+            boolean aggregatesMapChanged = false;
 
             if (existingAggregate == null)
             {
                 if (logger.isTraceEnabled())
                     logger.trace("Could not find aggregate for compaction using the one passed in: {}", aggregate);
 
-                aggregates.put(aggregate.getKey(), aggregate);
+                aggregatesMapChanged = true;
+                aggregatesMap.put(aggregate.getKey(), aggregate);
             }
             else
             {
@@ -179,9 +191,10 @@ class BackgroundCompactions implements CompactionObserver
                 {
                     // add the compaction just submitted to the aggregate that was found but because for STCS its
                     // key may change slightly, first remove it
-                    aggregates.remove(existingAggregate.getKey());
+                    aggregatesMapChanged = true;
+                    aggregatesMap.remove(existingAggregate.getKey());
                     CompactionAggregate newAggregate = existingAggregate.withAdditionalCompactions(ImmutableList.of(compaction));
-                    aggregates.put(newAggregate.getKey(), newAggregate);
+                    aggregatesMap.put(newAggregate.getKey(), newAggregate);
 
                     if (logger.isTraceEnabled())
                         logger.trace("Added compaction to existing aggregate: {} -> {}", existingAggregate, newAggregate);
@@ -192,6 +205,10 @@ class BackgroundCompactions implements CompactionObserver
                         logger.trace("Existing aggregate {} already had compaction", existingAggregate);
                 }
             }
+
+            // Publish the new aggregates if needed
+            if (aggregatesMapChanged)
+                this.aggregates = ImmutableList.copyOf(aggregatesMap.values());
         }
 
         if (compactionLogger != null && compactionLogger.enabled())
@@ -199,7 +216,7 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     @Override
-    public void setInProgress(CompactionProgress progress)
+    public void onInProgress(CompactionProgress progress)
     {
         if (progress == null)
             throw new IllegalArgumentException("argument cannot be null");
@@ -212,7 +229,7 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     @Override
-    public void setCompleted(UUID id)
+    public void onCompleted(UUID id)
     {
         if (id == null)
             throw new IllegalArgumentException("argument cannot be null");
@@ -228,8 +245,15 @@ class BackgroundCompactions implements CompactionObserver
         if (completed != null)
             completed.setCompleted();
 
+        // TODO - updte bytes read and written into the strategy
+
         // We rely on setPending() to refresh the aggregates again even though in some cases it may not be
         // called immediately (e.g. compactions disabled)
+    }
+
+    public Collection<CompactionAggregate> getAggregates()
+    {
+        return aggregates;
     }
 
     /**

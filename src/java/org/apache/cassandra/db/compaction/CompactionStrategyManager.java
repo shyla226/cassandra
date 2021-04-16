@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -123,6 +124,9 @@ public class CompactionStrategyManager implements INotificationConsumer
 
     private final ImmutableList<AbstractStrategyHolder> holders;
 
+    /** This is used to generate a unique index for compaction strategies */
+    private final AtomicInteger idGenerator;
+
     private volatile CompactionParams params;
     private DiskBoundaries currentBoundaries;
     private volatile boolean enabled;
@@ -167,6 +171,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         repaired = new CompactionStrategyHolder(cfs, router, true);
         unrepaired = new CompactionStrategyHolder(cfs, router, false);
         holders = ImmutableList.of(transientRepairs, pendingRepairs, repaired, unrepaired);
+        idGenerator = new AtomicInteger(0);
 
         cfs.getTracker().subscribe(this);
         logger.trace("{} subscribed to the data tracker.", this);
@@ -181,6 +186,11 @@ public class CompactionStrategyManager implements INotificationConsumer
     CompactionLogger compactionLogger()
     {
         return compactionLogger;
+    }
+
+    public int getNextId()
+    {
+        return idGenerator.incrementAndGet();
     }
 
     /**
@@ -995,19 +1005,18 @@ public class CompactionStrategyManager implements INotificationConsumer
 
     public int getEstimatedRemainingTasks()
     {
-        maybeReloadDiskBoundaries();
-        int tasks = 0;
-        readLock.lock();
-        try
-        {
-            for (AbstractCompactionStrategy strategy : getAllStrategies())
-                tasks += strategy.getEstimatedRemainingTasks();
-        }
-        finally
-        {
-            readLock.unlock();
-        }
-        return tasks;
+        return getStrategies(false).stream()
+                                   .flatMap(list -> list.stream())
+                                   .map(AbstractCompactionStrategy::getEstimatedRemainingTasks)
+                                   .reduce(0, Integer::sum);
+    }
+
+    int getTotalCompactions()
+    {
+        return getStrategies(false).stream()
+                                   .flatMap(list -> list.stream())
+                                   .map(AbstractCompactionStrategy::getTotalCompactions)
+                                   .reduce(0, Integer::sum);
     }
 
     public boolean shouldBeEnabled()

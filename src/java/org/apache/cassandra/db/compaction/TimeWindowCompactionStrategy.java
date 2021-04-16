@@ -80,10 +80,10 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     @Override
     protected synchronized CompactionAggregate getNextBackgroundAggregate(final int gcBefore)
     {
-        if (Iterables.isEmpty(cfs.getSSTables(SSTableSet.LIVE)))
+        if (Iterables.isEmpty(dataTracker.getView().select(SSTableSet.LIVE)))
             return null;
 
-        Set<SSTableReader> compacting = cfs.getCompactingSSTables();
+        Set<SSTableReader> compacting = dataTracker.getCompacting();
         Set<SSTableReader> uncompacting;
         synchronized (sstables)
         {
@@ -192,7 +192,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    protected Set<SSTableReader> getSSTables()
+    public Set<SSTableReader> getSSTables()
     {
         synchronized (sstables)
         {

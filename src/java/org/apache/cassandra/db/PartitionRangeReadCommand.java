@@ -268,9 +268,14 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime);
     }
 
-    protected void recordLatency(TableMetrics metric, long latencyNanos)
+    protected void recordReadLatency(TableMetrics metric, long latencyNanos)
     {
         metric.rangeLatency.addNano(latencyNanos);
+    }
+
+    protected void recordReadRequest(TableMetrics metric)
+    {
+        metric.rangeRequests.inc();
     }
 
     @VisibleForTesting

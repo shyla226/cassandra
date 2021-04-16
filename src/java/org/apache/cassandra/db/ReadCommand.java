@@ -522,7 +522,8 @@ public abstract class ReadCommand extends AbstractReadQuery
         return searcher.search(executionController);
     }
 
-    protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
+    protected abstract void recordReadRequest(TableMetrics metric);
+    protected abstract void recordReadLatency(TableMetrics metric, long latencyNanos);
 
     /**
      * Allow to post-process the result of the query after it has been reconciled on the coordinator
@@ -564,6 +565,11 @@ public abstract class ReadCommand extends AbstractReadQuery
             private int tombstones = 0;
 
             private DecoratedKey currentKey;
+
+            private MetricRecording()
+            {
+                recordReadRequest(metric);
+            }
 
             @Override
             public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator iter)
@@ -626,7 +632,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             @Override
             public void onClose()
             {
-                recordLatency(metric, System.nanoTime() - startTimeNanos);
+                recordReadLatency(metric, System.nanoTime() - startTimeNanos);
 
                 metric.tombstoneScannedHistogram.update(tombstones);
                 metric.liveScannedHistogram.update(liveRows);

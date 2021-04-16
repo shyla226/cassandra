@@ -50,6 +50,9 @@ public class CompactionMetrics
     /** Estimated number of compactions remaining to perform, group by keyspace and then table name */
     public final Gauge<Map<String, Map<String, Integer>>> pendingTasksByTableName;
 
+    /** Write amplification of compactions (bytes compacted / bytes flushed), group by keyspace and then table name */
+    public final Gauge<Map<String, Map<String, Double>>> writeAmplificationByTableName;
+
     /** Number of completed operations since server [re]start */
     public final Gauge<Long> completedTasks;
     /** Total number of operations since server [re]start */
@@ -128,6 +131,20 @@ public class CompactionMetrics
                     tableNameToCountMap.put(metaData.name, 1);
                 }
             }
+            return resultMap;
+        });
+
+        writeAmplificationByTableName = Metrics.register(factory.createMetricName("WriteAmplificationByTableName"), () -> {
+            Map<String, Map<String, Double>> resultMap = new HashMap<>();
+
+            for (String keyspaceName : Schema.instance.getKeyspaces())
+            {
+                Map<String, Double> ksMap = new HashMap<>();
+                resultMap.put(keyspaceName, ksMap);
+                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                    ksMap.put(cfs.getTableName(), cfs.getWA());
+            }
+
             return resultMap;
         });
 

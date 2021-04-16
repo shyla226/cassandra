@@ -18,21 +18,19 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
@@ -41,208 +39,121 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.mockito.MockitoAnnotations;
-
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.lifecycle.Tracker;
-import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.dht.Bounds;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.db.compaction.LeveledManifest.MAX_COMPACTING_L0;
 import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.anyIterable;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
 /**
  * Test for the compaction statistics for all strategies that support them.
  */
-public class CompactionStrategyStatisticsTest
+public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
 {
-    private static final double epsilon = 0.00000001;
-    private static final Random random = new Random(87689624525L);
-    private static final AtomicInteger generation = new AtomicInteger(1);
-
-    private final String keyspace = "ks";
-    private final String table = "table";
     private final int minCompactionThreshold = 4;
     private final int maxCompactionThreshold = 32;
-    private final long minSSTableSize = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE;
-
-    private long repairedAt;
-
-    @Mock
-    private ColumnFamilyStore cfs;
-
-    @Mock
-    private Tracker dataTracker;
-
-    @Mock
-    private CompactionStrategyManager strategyManager;
-
-    private CompactionLogger compactionLogger;
 
     @BeforeClass
     public static void setUpClass()
     {
-        DatabaseDescriptor.daemonInitialization(); // because of all the static initialization in CFS
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+        BaseCompactionStrategyTest.setUpClass();
     }
 
     @Before
     public void setUp()
     {
-        MockitoAnnotations.initMocks(this);
-
-        TableMetadata metadata = TableMetadata.builder(keyspace, table)
-                                              .addPartitionKeyColumn("pk", AsciiType.instance)
-                                              .build();
-        repairedAt = System.currentTimeMillis();
+        super.setUp();
 
         when(cfs.getMinimumCompactionThreshold()).thenReturn(minCompactionThreshold);
         when(cfs.getMaximumCompactionThreshold()).thenReturn(maxCompactionThreshold);
-        when(cfs.metadata()).thenReturn(metadata);
-        when(cfs.getKeyspaceName()).thenReturn(keyspace);
-        when(cfs.getTableName()).thenReturn(table);
-        when(cfs.getTracker()).thenReturn(dataTracker);
-        when(cfs.getPartitioner()).thenReturn(DatabaseDescriptor.getPartitioner());
-        when(cfs.getCompactionStrategyManager()).thenReturn(strategyManager);
-
-        // use a real compaction logger to execute that code too even though we don't really check
-        // the content of the files, at least we cover the code. The files will be overwritten next
-        // time the test is run or by a gradle clean task, so they will not grow indefinitely
-        compactionLogger = new CompactionLogger(cfs, strategyManager);
-        compactionLogger.enable();
-        when(strategyManager.compactionLogger()).thenReturn(compactionLogger);
     }
 
-    private void addSizeTieredOptions(Map<String, String> options)
+    /**
+     * Creates 5 buckets with T sorted runs in each using W = 2 and o = 1 (the default)
+     */
+    @Test
+    public void testUnifiedCompactionStrategy_tiered_fiveBuckets_W2()
     {
-        options.put(SizeTieredCompactionStrategyOptions.MIN_SSTABLE_SIZE_KEY, Long.toString(minSSTableSize));
-        options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, Double.toString(SizeTieredCompactionStrategyOptions.DEFAULT_BUCKET_LOW));
-        options.put(SizeTieredCompactionStrategyOptions.BUCKET_HIGH_KEY, Double.toString(SizeTieredCompactionStrategyOptions.DEFAULT_BUCKET_HIGH));
-    }
+        int W = 2; // W = 2 => T = F = 4
+        int T = 4;
+        int F = 4;
+        long m = 2; // m = 2 MB
 
-    private void addTimeTieredOptions(Map<String, String> options)
-    {
-        addSizeTieredOptions(options);
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getW(anyInt())).thenReturn(W);
+        when(controller.getMinSSTableSizeBytes()).thenReturn(m << 20);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
 
-        options.put(TimeWindowCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, TimeUnit.MILLISECONDS.toString());
-        options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, "30");
-        options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY, "MINUTES");
-        options.put(TimeWindowCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, Long.toString(Long.MAX_VALUE)); // disable check for expired sstables
-    }
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, controller);
 
-    private void addLeveledOptions(Map<String, String> options, long maxSSTableSizeBytes)
-    {
-        addSizeTieredOptions(options);
+        final int numCompactions = 5;
+        long minSize = m << 20; // MB to bytes
 
-        options.put(LeveledCompactionStrategy.SSTABLE_SIZE_OPTION, Long.toString(maxSSTableSizeBytes >> 20)); // Bytes to MB
-        options.put(LeveledCompactionStrategy.LEVEL_FANOUT_SIZE_OPTION, "10");
-    }
-
-    private SSTableReader mockSSTable(int level, long bytesOnDisk, long timestamp, double hotness, DecoratedKey first, DecoratedKey last)
-    {
-        SSTableReader ret = Mockito.mock(SSTableReader.class);
-
-        when(ret.bytesOnDisk()).thenReturn(bytesOnDisk);
-        when(ret.onDiskLength()).thenReturn(bytesOnDisk);
-        when(ret.uncompressedLength()).thenReturn(bytesOnDisk); // let's assume no compression
-        when(ret.hotness()).thenReturn(hotness);
-        when(ret.getSSTableLevel()).thenReturn(level);
-        when(ret.getMaxTimestamp()).thenReturn(timestamp);
-        when(ret.getMinTimestamp()).thenReturn(timestamp);
-        when(ret.getFirst()).thenReturn(first);
-        when(ret.getLast()).thenReturn(last);
-        when(ret.isMarkedSuspect()).thenReturn(false);
-        when(ret.isRepaired()).thenReturn(true);
-        when(ret.getRepairedAt()).thenReturn(repairedAt);
-        when(ret.getGeneration()).thenReturn(generation.getAndIncrement());
-        when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s",
-                                                      FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last));
-
-        return ret;
-    }
-
-    private List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp)
-    {
-        IPartitioner partitioner = cfs.getPartitioner();
-        DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
-        DecoratedKey last = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
-
-        List<SSTableReader> sstables = new ArrayList<>();
-        for (int i = 0; i < numSSTables; i++)
+        // The highest index in the testBuckets should be the bucket picked first, which is zero so start from the end
+        List<Collection<SSTableReader>> testBuckets = new ArrayList<>(numCompactions);
+        for (int i = numCompactions - 1; i >= 0; i--)
         {
-            long b = (long)(bytesOnDisk * 0.8 + bytesOnDisk * 0.05 * random.nextDouble()); // leave 5% variability
-            double h = hotness * 0.8 + hotness * 0.05 * random.nextDouble(); // leave 5% variability
-            sstables.add(mockSSTable(0, b, timestamp, h, first, last));
+            // calculate the max size then mockSSTables will remove 15% to this value,
+            // this assumes o = 1, which is the default
+
+            long size = (long) (minSize * Math.pow(F, i+1));
+            List<SSTableReader> sstables = mockSSTables(T,
+                                                        size,
+                                                        0,
+                                                        System.currentTimeMillis());
+            testBuckets.add(sstables);
         }
 
-        return sstables;
+        testCompactionStatistics(testBuckets, strategy);
     }
 
-    private List<SSTableReader> mockNonOverlappingSSTables(int numSSTables, int level, long bytesOnDisk)
+    /**
+     * Creates 5 buckets with T sorted runs in each using W = 2 and o = 1 (the default)
+     */
+    @Test
+    public void testUnifiedCompactionStrategy_leveled_oneBucket_F8()
     {
-        IPartitioner partitioner = cfs.getPartitioner(); // mocked same as DD.getPartitioner()
-        if (!partitioner.splitter().isPresent())
-            fail(String.format("Cannot split ranges with current partitioner %s", partitioner));
+        int W = -6; // W = 2 => T = 2, F = 8
+        int T = 2;
+        int F = 8;
+        int m = 2; // m = 2 MB
+        long minSize = m << 20; // MB to bytes
 
-        Range<Token> range = new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken());
-        Splitter.WeightedRange weightedRange = new Splitter.WeightedRange(1.0, range);
-        Splitter splitter = partitioner.splitter().get();
-        List<Token> boundaries = splitter.splitOwnedRanges(numSSTables,
-                                                           ImmutableList.of(weightedRange),
-                                                           false);
-        assertEquals(numSSTables, boundaries.size());
-        boundaries.add(0, partitioner.getMinimumToken());
-        ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getW(anyInt())).thenReturn(W);
+        when(controller.getMinSSTableSizeBytes()).thenReturn(minSize);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
 
-        long timestamp = System.currentTimeMillis();
-        List<SSTableReader> sstables = new ArrayList<>(numSSTables);
-        for (int i = 0; i < numSSTables; i++)
-        {
-            DecoratedKey first = new BufferDecoratedKey(boundaries.get(i).increaseSlightly(), emptyBuffer);
-            DecoratedKey last =  new BufferDecoratedKey(boundaries.get(i+1), emptyBuffer);
-            sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, controller);
 
-            timestamp+=10;
-        }
+        // put F sstables in the first bucket
+        List<SSTableReader> ssTablesList = new LinkedList<>();
+        for (int i = 0; i < F; i++)
+            ssTablesList.addAll(mockSSTables(1, minSize, 0, System.currentTimeMillis()));
 
-        return sstables;
-    }
+        Collections.sort(ssTablesList, Comparator.comparing(SSTableReader::onDiskLength).reversed());
+        Set<SSTableReader> sstables = new LinkedHashSet<>(F);
+        sstables.addAll(ssTablesList);
 
-    private long totUncompressedLength(Collection<SSTableReader> sstables)
-    {
-        long ret = 0;
-        for (SSTableReader sstable : sstables)
-            ret += sstable.uncompressedLength();
+        // sort by size and add 2 by 2 from largest to smallest, normally the sstable resulting from the 1 compaction
+        // would be added back to the same bucket and be selected for the next compaction but we don't simulate this
+        // so next time a compaction is invoked it will pick the next two largest sstables, that's why there will be
+        // F/2 compactions rather than F-1
+//        LinkedList<Collection<SSTableReader>> compactions = new LinkedList();
+//        for (int i = 0; (i + T) <= ssTablesList.size(); i += T)
+//        {
+//            List<SSTableReader> candidates = ssTablesList.subList(i, i + T);
+//            compactions.addFirst(candidates); // we want the first 2 sstables (the largest) to be the last in the list
+//        }
 
-        return ret;
-    }
-
-    private double totHotness(Collection<SSTableReader> sstables)
-    {
-        double ret = 0;
-        for (SSTableReader sstable : sstables)
-            ret += sstable.hotness();
-
-        return ret;
+        testCompactionStatistics(sstables, ImmutableList.of(sstables), 1, strategy);
     }
 
     /**
@@ -258,7 +169,7 @@ public class CompactionStrategyStatisticsTest
         SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(cfs, options);
 
         final int numCompactions = 5;
-        long minSize = minSSTableSize;
+        long minSize = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE;
         double hotness = 1000;
 
         List<Collection<SSTableReader>> testBuckets = new ArrayList<>(numCompactions);
@@ -486,8 +397,21 @@ public class CompactionStrategyStatisticsTest
         //L0 will compact all its sstables and the ones of L1 since they all overlap and the total is below the max threshold
         compactions.add(Sets.union(Sets.newLinkedHashSet(ssTablesByLevel.get(0)), Sets.newLinkedHashSet(ssTablesByLevel.get(1))));
 
-        // L1 will compact the first sstable because the score is > 1 plus the overlapping sstables from L2
-        compactions.add(overlapping(ssTablesByLevel.get(1).get(0), ssTablesByLevel.get(2)));
+        // L1 will compact the first sstable that it finds not overlapping with L2 sstables that are not suspect or already
+        // compacting. Because the next line will select the first sstable in L2 to compact, L1 will pick the first sstable
+        // that does not overlap with it
+        SSTableReader candidate = null;
+        for (SSTableReader c : ssTablesByLevel.get(1))
+        {
+            if (c.getFirst().compareTo(ssTablesByLevel.get(2).get(0).getLast()) > 0)
+            {
+                candidate = c;
+                break;
+            }
+        }
+        assertNotNull(candidate);
+        // compact the candidate with all the overlapping sstables of L2
+        compactions.add(overlapping(candidate, ssTablesByLevel.get(2)));
 
         // L2 will compact the first sstable because the score is > 1 but no other overlapping sstables since L3 is empty
         compactions.add(overlapping(ssTablesByLevel.get(2).get(0), ImmutableList.of()));
@@ -496,11 +420,14 @@ public class CompactionStrategyStatisticsTest
         // already compacting, hence we can only test 2 compactions initially
         testCompactionStatistics(sstables, compactions, 2, strategy);
 
-        // Now check L0 compaction can proceed, the other levels won't compact since the score should be < 1
-        ssTablesByLevel.get(1).remove(0); // the first one must have been compacted
+        // Now check L0 compaction can proceed, the other levels won't compact since the score should be <= 1
+        ssTablesByLevel.get(1).remove(candidate); // remove the L1 sstable that was already compacted
         Set<SSTableReader> candidates = Sets.union(Sets.newLinkedHashSet(ssTablesByLevel.get(0)), Sets.newLinkedHashSet(ssTablesByLevel.get(1)));
         long totLength = totUncompressedLength(candidates);
-        UUID id = mockCompaction(strategy, sstables, candidates, Collections.emptySet());
+
+        AbstractCompactionTask task = strategy.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        assertNotNull(task);
+        UUID id = task.transaction().opId();
 
         verifyStatistics(strategy,
                          1,
@@ -512,8 +439,8 @@ public class CompactionStrategyStatisticsTest
                          0,
                          0);
 
-        CompactionProgress progress = mockCompactionProgress(candidates, id);
-        strategy.getBackgroundCompactions().setInProgress(progress);
+        CompactionProgress progress = mockCompletedCompactionProgress(candidates, id);
+        strategy.getBackgroundCompactions().onInProgress(progress);
 
         verifyStatistics(strategy,
                          1,
@@ -525,7 +452,7 @@ public class CompactionStrategyStatisticsTest
                          totLength,
                          0);
 
-        strategy.backgroundCompactions.setCompleted(id);
+        strategy.backgroundCompactions.onCompleted(id);
 
         // Now we should have L1 again...
     }
@@ -588,9 +515,11 @@ public class CompactionStrategyStatisticsTest
                                           int numExpectedCompactions,
                                           AbstractCompactionStrategy strategy)
     {
-        // Add the tables to the strategy
+        // Add the tables to the strategy and the data tracker
         for (SSTableReader sstable : sstables)
             strategy.addSSTable(sstable);
+
+        dataTracker.addInitialSSTables(sstables);
 
         List<SSTableReader> sstablesForCompaction = compactions.stream().flatMap(Collection::stream).collect(Collectors.toList());
 
@@ -613,7 +542,9 @@ public class CompactionStrategyStatisticsTest
             int compactingLevel = compactions.size() - i - 1;
             Set<SSTableReader> candidates = Sets.newHashSet(compactions.get(compactingLevel));
 
-            UUID id = mockCompaction(strategy, sstables, candidates, compacting);
+            AbstractCompactionTask task = strategy.getNextBackgroundTask(FBUtilities.nowInSeconds());
+            assertNotNull(task);
+            UUID id = task.transaction().opId();
 
             numCompactionsInProgress++;
             numSSTablesCompacting += candidates.size();
@@ -632,8 +563,8 @@ public class CompactionStrategyStatisticsTest
                              totHotness);
 
             // Now we simulate starting the compaction task
-            CompactionProgress progress = mockCompactionProgress(candidates, id);
-            strategy.getBackgroundCompactions().setInProgress(progress);
+            CompactionProgress progress = mockCompletedCompactionProgress(candidates, id);
+            strategy.getBackgroundCompactions().onInProgress(progress);
 
             // The compaction has started and so we must updated the following expected values
             totRead += progress.uncompressedBytesRead();
@@ -660,7 +591,7 @@ public class CompactionStrategyStatisticsTest
         {
             Set<SSTableReader> compSSTables = pair.left;
             long totSSTablesLen = totUncompressedLength(compSSTables);
-            strategy.getBackgroundCompactions().setCompleted(pair.right);
+            strategy.getBackgroundCompactions().onCompleted(pair.right);
 
             numCompactions--;
             numCompactionsInProgress--;
@@ -675,8 +606,10 @@ public class CompactionStrategyStatisticsTest
             for (SSTableReader sstable : pair.left)
                 strategy.removeSSTable(sstable);
 
+            dataTracker.removeCompactingUnsafe(pair.left);
             sstables.removeAll(pair.left);
             compacting.removeAll(pair.left);
+            strategy.removeSSTables(pair.left);
 
             verifyStatistics(strategy,
                              numCompactions,
@@ -688,49 +621,9 @@ public class CompactionStrategyStatisticsTest
                              totWritten,
                              totHotness);
         }
-    }
 
-    private UUID mockCompaction(AbstractCompactionStrategy strategy, Set<SSTableReader> live, Set<SSTableReader> candidates, Set<SSTableReader> compacting)
-    {
-        final UUID id = UUID.randomUUID();
-        final AtomicReference<LifecycleTransaction> txn = new AtomicReference<>();
-
-        when(dataTracker.tryModify(anyIterable(), eq(OperationType.COMPACTION))).thenAnswer(invocation -> {
-            assertNull(txn.get());
-
-            LifecycleTransaction ret = Mockito.mock(LifecycleTransaction.class);
-            when(ret.opId()).thenReturn(id);
-            when(ret.originals()).thenReturn(candidates);
-            when(ret.getCompacting()).thenReturn(Sets.union(compacting, candidates));
-
-            txn.set(ret);
-            return ret;
-        });
-
-        when(cfs.getSSTables(eq(SSTableSet.LIVE))).thenReturn(live);
-        when(cfs.getNoncompactingSSTables()).thenAnswer(invocation -> Sets.difference(live, txn.get() == null ? compacting : Sets.union(compacting, candidates)));
-        when(cfs.getNoncompactingSSTables(anyIterable())).thenAnswer(invocation -> Sets.difference(Sets.newHashSet((Iterable<SSTableReader>)invocation.getArguments()[0]),
-                                                                                                  txn.get() == null ? compacting : Sets.union(compacting, candidates)));
-        when(cfs.getCompactingSSTables()).thenAnswer(invocation -> txn.get() == null ? compacting : Sets.union(compacting, candidates));
-
-        // Ask for a background compaction
-        AbstractCompactionTask task = strategy.getNextBackgroundTask((int) TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()));
-        assertNotNull(task);
-        return id;
-    }
-
-    private CompactionProgress mockCompactionProgress(Set<SSTableReader> compacting, UUID id)
-    {
-        CompactionProgress progress = Mockito.mock(CompactionProgress.class);
-
-        long compactingLen = totUncompressedLength(compacting);
-        when(progress.operationId()).thenReturn(id);
-        when(progress.inSSTables()).thenReturn(compacting);
-        when(progress.uncompressedBytesRead()).thenReturn(compactingLen);
-        when(progress.uncompressedBytesWritten()).thenReturn(compactingLen);
-        when(progress.durationInNanos()).thenReturn(TimeUnit.SECONDS.toNanos(30));
-
-        return progress;
+        assertTrue(String.format("Data tracker still had compacting sstables: %s", dataTracker.getCompacting()),
+                   dataTracker.getCompacting().isEmpty());
     }
 
     private void verifyStatistics(AbstractCompactionStrategy strategy,
@@ -777,13 +670,21 @@ public class CompactionStrategyStatisticsTest
                 readBytes += tieredStatistics.read();
                 hotness += tieredStatistics.hotness;
             }
-            else
+            else if (compactionStatistics instanceof LeveledCompactionStatistics)
             {
                 LeveledCompactionStatistics leveledStatistics = (LeveledCompactionStatistics) compactionStatistics;
 
                 totBytes += leveledStatistics.tot();
                 writtenBytes += leveledStatistics.written();
                 readBytes += leveledStatistics.read();
+            }
+            else
+            {
+                UnifiedCompactionStatistics tieredStatistics = (UnifiedCompactionStatistics) compactionStatistics;
+
+                totBytes += tieredStatistics.tot();
+                writtenBytes += tieredStatistics.written();
+                readBytes += tieredStatistics.read();
             }
         }
 
@@ -802,6 +703,5 @@ public class CompactionStrategyStatisticsTest
 
         if (hotness > 0)
             assertEquals(expectedTotHotness, hotness, epsilon);
-
     }
 }

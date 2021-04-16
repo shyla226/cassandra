@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -47,6 +46,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -129,13 +129,11 @@ public class CompactionLogger
     private static final JsonNodeFactory json = JsonNodeFactory.instance;
     private static final Logger logger = LoggerFactory.getLogger(CompactionLogger.class);
 
-    private static final ExecutorService loggerService = Executors.newFixedThreadPool(1);
+    private static final ExecutorService loggerService = Executors.newFixedThreadPool(1, new NamedThreadFactory("compaction-logger"));
     private static final Writer jsonWriter = new CompactionLogSerializer("compaction", "log", loggerService);
 
     private final WeakReference<ColumnFamilyStore> cfsRef;
     private final WeakReference<CompactionStrategyManager> csmRef;
-    private final AtomicInteger identifier = new AtomicInteger(0);
-    private final Map<AbstractCompactionStrategy, String> compactionStrategyMapping = new MapMaker().weakKeys().makeMap();
     private final Map<AbstractCompactionStrategy, Writer> csvWriters = new MapMaker().makeMap();
     private final AtomicBoolean enabled = new AtomicBoolean(false);
 
@@ -184,11 +182,6 @@ public class CompactionLogger
         return node;
     }
 
-    private String getId(AbstractCompactionStrategy strategy)
-    {
-        return compactionStrategyMapping.computeIfAbsent(strategy, s -> String.valueOf(identifier.getAndIncrement()));
-    }
-
     private JsonNode formatSSTables(AbstractCompactionStrategy strategy)
     {
         ArrayNode node = json.arrayNode();
@@ -222,7 +215,7 @@ public class CompactionLogger
         CompactionStrategyManager csm = csmRef.get();
         if (csm == null)
             return node;
-        node.put("strategyId", getId(strategy));
+        node.put("strategyId", strategy.id());
         node.put("type", strategy.getName());
         node.set("tables", formatSSTables(strategy));
         node.put("repaired", csm.isRepaired(strategy));
@@ -243,14 +236,14 @@ public class CompactionLogger
     private JsonNode getStrategyId(AbstractCompactionStrategy strategy)
     {
         ObjectNode node = json.objectNode();
-        node.put("strategyId", getId(strategy));
+        node.put("strategyId", strategy.id());
         return node;
     }
 
     private JsonNode describeSSTable(AbstractCompactionStrategy strategy, SSTableReader sstable)
     {
         ObjectNode node = json.objectNode();
-        node.put("strategyId", getId(strategy));
+        node.put("strategyId", strategy.id());
         node.set("table", formatSSTable(strategy, sstable));
         return node;
     }
@@ -335,7 +328,7 @@ public class CompactionLogger
             ObjectNode node = json.objectNode();
             node.put("type", "pending");
             maybeAddSchemaAndTimeInfo(node);
-            node.put("strategyId", getId(strategy));
+            node.put("strategyId", strategy.id());
             node.put("pending", remaining);
             jsonWriter.write(node, this::getEventJsonNode, this);
         }
@@ -368,7 +361,7 @@ public class CompactionLogger
                                         strategy.getName(),
                                         strategy.getMetadata().keyspace,
                                         strategy.getMetadata().name,
-                                        getId(strategy));
+                                        strategy.id());
 
         writer = new CompactionLogSerializer(fileName, "csv", loggerService);
         if (csvWriters.putIfAbsent(strategy, writer) == null)

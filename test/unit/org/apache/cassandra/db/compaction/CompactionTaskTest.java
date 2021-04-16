@@ -213,13 +213,14 @@ public class CompactionTaskTest
         CompactionObserver compObserver = Mockito.mock(CompactionObserver.class);
         final ArgumentCaptor<TableOperation> tableOpCaptor = ArgumentCaptor.forClass(AbstractTableOperation.class);
         final ArgumentCaptor<CompactionProgress> compactionCaptor = ArgumentCaptor.forClass(CompactionProgress.class);
-        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0, compObserver);
+        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+        task.addObserver(compObserver);
         assertNotNull(task);
         task.execute(operationObserver);
 
         verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
-        verify(compObserver, times(1)).setInProgress(compactionCaptor.capture());
-        verify(compObserver, times(1)).setCompleted(eq(txn.opId()));
+        verify(compObserver, times(1)).onInProgress(compactionCaptor.capture());
+        verify(compObserver, times(1)).onCompleted(eq(txn.opId()));
     }
 
 

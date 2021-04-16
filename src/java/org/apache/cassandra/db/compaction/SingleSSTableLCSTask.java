@@ -53,7 +53,7 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
     public static AbstractCompactionTask forCompaction(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level)
     {
         SingleSSTableLCSTask ret = new SingleSSTableLCSTask(strategy.cfs, txn, level);
-        ret.compObserver = strategy.getBackgroundCompactions();
+        ret.addObserver(strategy.getBackgroundCompactions());
         return ret;
     }
 
@@ -61,6 +61,11 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
     public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
     {
         throw new UnsupportedOperationException("This method should never be called on SingleSSTableLCSTask");
+    }
+
+    int getLevel()
+    {
+        return level;
     }
 
     @Override

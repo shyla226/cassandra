@@ -145,6 +145,7 @@ public class Flushing
 
         private void writeSortedContents()
         {
+            long before = System.nanoTime();
             logger.info("Writing {}, flushed range = [{}, {})", toFlush.memtable(), toFlush.from(), toFlush.to());
 
             // (we can't clear out the map as-we-go to free up memory,
@@ -176,7 +177,7 @@ public class Flushing
                             FBUtilities.prettyPrintMemory(bytesFlushed),
                             toFlush.memtable().getFinalCommitLogUpperBound());
                 // Update the metrics
-                metrics.bytesFlushed.inc(bytesFlushed);
+                metrics.incBytesFlushed(toFlush.memtable().getLiveDataSize(), bytesFlushed, before - System.nanoTime());
             }
         }
 

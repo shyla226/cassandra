@@ -78,7 +78,7 @@ public class CompactionTask extends AbstractCompactionTask
      */
     protected CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
     {
-        this(cfs, txn, gcBefore, keepOriginals, CompactionObserver.NO_OP, null);
+        this(cfs, txn, gcBefore, keepOriginals, null);
     }
 
     /**
@@ -86,20 +86,20 @@ public class CompactionTask extends AbstractCompactionTask
      */
     protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
     {
-        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy == null ? CompactionObserver.NO_OP : strategy.getBackgroundCompactions(), strategy);
+        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy);
+
+        addObserver(strategy.getBackgroundCompactions());
     }
 
     private CompactionTask(ColumnFamilyStore cfs,
                            LifecycleTransaction txn,
                            int gcBefore,
                            boolean keepOriginals,
-                           CompactionObserver compObserver,
                            @Nullable AbstractCompactionStrategy strategy)
     {
         super(cfs, txn);
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
-        this.compObserver = compObserver;
         this.strategy = strategy;
 
         logger.debug("Created compaction task with id {} and strategy {}", txn.opId(), strategy);
@@ -127,14 +127,6 @@ public class CompactionTask extends AbstractCompactionTask
     static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
     {
         return new CompactionTask(cfs, txn, gcBefore, false);
-    }
-
-    /**
-     * Create a compaction task without a compaction strategy, currently only called by tests.
-     */
-    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionObserver compObserver)
-    {
-        return new CompactionTask(cfs, txn, gcBefore, false, compObserver, null);
     }
 
     /**
@@ -223,7 +215,7 @@ public class CompactionTask extends AbstractCompactionTask
         private final Set<SSTableReader> fullyExpiredSSTables;
         private final UUID taskId;
         private final RateLimiter limiter;
-        private final long start;
+        private final long startNanos;
         private final long startTime;
         private final Set<SSTableReader> actuallyCompact;
         private final CompactionProgress progress;
@@ -266,7 +258,7 @@ public class CompactionTask extends AbstractCompactionTask
             assert !Iterables.any(transaction.originals(), sstable -> !sstable.descriptor.cfname.equals(cfs.name));
 
             this.limiter = CompactionManager.instance.getRateLimiter();
-            this.start = System.nanoTime();
+            this.startNanos = System.nanoTime();
             this.startTime = System.currentTimeMillis();
             this.actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
             this.progress = new Progress();
@@ -287,7 +279,7 @@ public class CompactionTask extends AbstractCompactionTask
                 this.writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
 
-                compObserver.setInProgress(progress);
+                compObservers.forEach(obs -> obs.onInProgress(progress));
             }
             catch (Throwable t)
             {
@@ -319,7 +311,7 @@ public class CompactionTask extends AbstractCompactionTask
                 debugLogCompactingMessage(taskId);
             }
 
-            long lastCheckObsoletion = start;
+            long lastCheckObsoletion = startNanos;
             double compressionRatio = scanners.getCompressionRatio();
             if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
                 compressionRatio = 1.0;
@@ -400,7 +392,7 @@ public class CompactionTask extends AbstractCompactionTask
 
                 if (logger.isDebugEnabled())
                 {
-                    debugLogCompactionSummaryInfo(taskId, start, totalKeysWritten, newSStables, progress);
+                    debugLogCompactionSummaryInfo(taskId, System.nanoTime() - startNanos, totalKeysWritten, newSStables, progress);
                 }
                 if (logger.isTraceEnabled())
                 {
@@ -409,7 +401,9 @@ public class CompactionTask extends AbstractCompactionTask
                 cfs.getCompactionLogger().compaction(startTime, transaction.originals(),  System.currentTimeMillis(), newSStables);
 
                 // update the metrics
-                cfs.metric.compactionBytesWritten.inc(progress.outputDiskSize());
+                cfs.metric.incBytesCompacted(progress.adjustedInputDiskSize(),
+                                             progress.outputDiskSize(),
+                                             System.nanoTime() - startNanos);
             }
 
             Throwables.maybeFail(err);
@@ -563,7 +557,7 @@ public class CompactionTask extends AbstractCompactionTask
             @Override
             public long durationInNanos()
             {
-                return System.nanoTime() - start;
+                return System.nanoTime() - startNanos;
             }
 
             @Override
@@ -747,13 +741,12 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     private void debugLogCompactionSummaryInfo(UUID taskId,
-                                               long start,
+                                               long durationInNano,
                                                long totalKeysWritten,
                                                Collection<SSTableReader> newSStables,
                                                CompactionProgress progress)
     {
         // log a bunch of statistics about the result and save to system table compaction_history
-        long durationInNano = System.nanoTime() - start;
         long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
 
         long totalMergedPartitions = 0;

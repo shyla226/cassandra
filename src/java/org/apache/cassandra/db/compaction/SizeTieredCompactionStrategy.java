@@ -392,7 +392,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    protected Set<SSTableReader> getSSTables()
+    public Set<SSTableReader> getSSTables()
     {
         synchronized (sstables)
         {

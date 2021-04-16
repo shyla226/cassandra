@@ -370,6 +370,31 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
+     * The key cardinality estimator for the sstable, if it can be loaded.
+     *
+     * @return the sstable key cardinality estimator created during flush/compaction, or {@code null} if that estimator
+     * cannot be loaded for any reason.
+     */
+    @VisibleForTesting
+    public ICardinality keyCardinalityEstimator()
+    {
+        if (openReason == OpenReason.EARLY)
+            return null;
+
+        try
+        {
+            CompactionMetadata metadata = (CompactionMetadata) descriptor.getMetadataSerializer()
+                                                                         .deserialize(descriptor, MetadataType.COMPACTION);
+            return metadata == null ? null : metadata.cardinalityEstimator;
+        }
+        catch (IOException e)
+        {
+            logger.warn("Reading cardinality from Statistics.db failed for {}.", this, e);
+            return null;
+        }
+    }
+
+    /**
      * Estimates how much of the keys we would keep if the sstables were compacted together
      */
     public static double estimateCompactionGain(Set<SSTableReader> overlapping)

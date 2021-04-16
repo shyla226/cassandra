@@ -16,30 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.compaction;
+package org.apache.cassandra.utils;
 
-import java.util.UUID;
-
-/**
- * An observer of a compaction operation. It is notified when a compaction operation is started.
- * <p/>
- * It returns a closeable that is invoked when the compaction is finished.
- * <p/>
- * The progress can be queried at any time to obtain real-time updates of the compaction operation.
- */
-public interface CompactionObserver
+public interface MovingAverage
 {
-    /**
-     * Indicates that a compaction has started.
-     * <p/>
-     * @param progress the compaction progress, it contains the unique id and real-time progress information
-     */
-    void onInProgress(CompactionProgress progress);
+    MovingAverage update(double val);
 
-    /**
-     * Indicates that a compaction with the given id has completed.
-     * <p/>
-     * @param id  the id of the compaction
-     */
-    void onCompleted(UUID id);
+    double get();
 }

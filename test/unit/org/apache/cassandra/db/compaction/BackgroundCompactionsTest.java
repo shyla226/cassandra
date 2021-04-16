@@ -199,7 +199,7 @@ public class BackgroundCompactionsTest
         CompactionProgress progress = Mockito.mock(CompactionProgress.class);
         when(progress.operationId()).thenReturn(uuid);
 
-        backgroundCompactions.setInProgress(progress);
+        backgroundCompactions.onInProgress(progress);
         Mockito.verify(compaction, times(1)).setProgress(eq(progress));
 
         assertEquals(pending.size() - 1, backgroundCompactions.getEstimatedRemainingTasks());
@@ -210,7 +210,7 @@ public class BackgroundCompactionsTest
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(1, backgroundCompactions.getTotalCompactions());
 
-        backgroundCompactions.setCompleted(uuid);
+        backgroundCompactions.onCompleted(uuid);
 
         Mockito.verify(compaction, times(1)).setCompleted();
         Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("completed"), any(CompactionStrategyStatistics.class));
@@ -260,7 +260,7 @@ public class BackgroundCompactionsTest
         CompactionProgress progress = Mockito.mock(CompactionProgress.class);
         when(progress.operationId()).thenReturn(uuid);
 
-        backgroundCompactions.setInProgress(progress);
+        backgroundCompactions.onInProgress(progress);
         Mockito.verify(compaction, times(1)).setProgress(eq(progress));
 
         assertEquals(pending.size() - 1, backgroundCompactions.getEstimatedRemainingTasks());
@@ -271,7 +271,7 @@ public class BackgroundCompactionsTest
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(1, backgroundCompactions.getTotalCompactions());
 
-        backgroundCompactions.setCompleted(uuid);
+        backgroundCompactions.onCompleted(uuid);
 
         Mockito.verify(compaction, times(1)).setCompleted();
         Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("completed"), any(CompactionStrategyStatistics.class));
@@ -313,7 +313,7 @@ public class BackgroundCompactionsTest
         CompactionProgress progress = Mockito.mock(CompactionProgress.class);
         when(progress.operationId()).thenReturn(uuid);
 
-        backgroundCompactions.setInProgress(progress);
+        backgroundCompactions.onInProgress(progress);
         Mockito.verify(compaction, times(1)).setProgress(eq(progress));
 
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());
@@ -324,7 +324,7 @@ public class BackgroundCompactionsTest
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(1, backgroundCompactions.getTotalCompactions());
 
-        backgroundCompactions.setCompleted(uuid);
+        backgroundCompactions.onCompleted(uuid);
 
         Mockito.verify(compaction, times(1)).setCompleted();
         Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("completed"), any(CompactionStrategyStatistics.class));
@@ -414,13 +414,13 @@ public class BackgroundCompactionsTest
     public void testSetInProgressNoProgress()
     {
         BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
-        backgroundCompactions.setInProgress(null);
+        backgroundCompactions.onInProgress(null);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testSetCompletedNoId()
     {
         BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
-        backgroundCompactions.setCompleted(null);
+        backgroundCompactions.onCompleted(null);
     }
 }
