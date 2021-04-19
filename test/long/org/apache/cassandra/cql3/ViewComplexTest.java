@@ -55,7 +55,8 @@ import org.junit.runners.Parameterized;
 import com.google.common.base.Objects;
 
 @RunWith(Parameterized.class)
-public class ViewComplexTest extends CQLTester
+public class
+ViewComplexTest extends CQLTester
 {
     @Parameterized.Parameter
     public ProtocolVersion version;
