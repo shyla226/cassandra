@@ -46,6 +46,7 @@ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.DefaultCompactionWriter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompactionParams;
@@ -70,55 +71,23 @@ public class CompactionTask extends AbstractCompactionTask
 
     // The compaction strategy is not necessarily available for all compaction tasks (e.g. GC or sstable splitting)
     @Nullable
-    private final AbstractCompactionStrategy strategy;
+    private final CompactionStrategy strategy;
 
-    /**
-     * This constructs a compaction tasks that operations that do not normally have a compaction strategy, such as tombstone
-     * collection or table splitting, also tests.
-     */
-    protected CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
-    {
-        this(cfs, txn, gcBefore, keepOriginals, null);
-    }
-
-    /**
-     * This constructs a compaction task that has been created by a compaction strategy.
-     */
-    protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
-    {
-        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy);
-
-        addObserver(strategy.getBackgroundCompactions());
-    }
-
-    private CompactionTask(ColumnFamilyStore cfs,
-                           LifecycleTransaction txn,
-                           int gcBefore,
-                           boolean keepOriginals,
-                           @Nullable AbstractCompactionStrategy strategy)
+    public CompactionTask(ColumnFamilyStore cfs,
+                          LifecycleTransaction txn,
+                          int gcBefore,
+                          boolean keepOriginals,
+                          @Nullable CompactionStrategy strategy)
     {
         super(cfs, txn);
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
         this.strategy = strategy;
 
+        if (strategy != null)
+            addObserver(strategy);
+
         logger.debug("Created compaction task with id {} and strategy {}", txn.opId(), strategy);
-    }
-
-    /**
-     * Create a compaction task for a generic compaction strategy.
-     */
-    public static AbstractCompactionTask forCompaction(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
-    {
-        return new CompactionTask(strategy, txn, gcBefore, false);
-    }
-
-    /**
-     * Create a compaction task for {@link TimeWindowCompactionStrategy}.
-     */
-    static AbstractCompactionTask forTimeWindowCompaction(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
-    {
-        return new TimeWindowCompactionTask(strategy, txn, gcBefore, strategy.ignoreOverlaps());
     }
 
     /**
@@ -126,7 +95,7 @@ public class CompactionTask extends AbstractCompactionTask
      */
     static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
     {
-        return new CompactionTask(cfs, txn, gcBefore, false);
+        return new CompactionTask(cfs, txn, gcBefore, false, null);
     }
 
     /**
@@ -134,7 +103,7 @@ public class CompactionTask extends AbstractCompactionTask
      */
     public static AbstractCompactionTask forGarbageCollection(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
     {
-        AbstractCompactionTask task = new CompactionTask(cfs, txn, gcBefore, false)
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, gcBefore, false, null)
         {
             @Override
             protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
@@ -211,7 +180,7 @@ public class CompactionTask extends AbstractCompactionTask
     public final class CompactionOperation implements AutoCloseable
     {
         private final CompactionController controller;
-        private final CompactionStrategyManager strategyManager;
+        private final CompactionStrategy strategy;
         private final Set<SSTableReader> fullyExpiredSSTables;
         private final UUID taskId;
         private final RateLimiter limiter;
@@ -230,7 +199,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         // resources that need closing
         private Refs<SSTableReader> sstableRefs;
-        private AbstractCompactionStrategy.ScannerList scanners;
+        private ScannerList scanners;
         private CompactionIterator compactionIterator;
         private TableOperation op;
         private Closeable obsCloseable;
@@ -245,9 +214,7 @@ public class CompactionTask extends AbstractCompactionTask
         {
             this.controller = controller;
 
-            // Note that the current compaction strategy, is not necessarily the one this task was created under.
-            // This should be harmless; see comments to CFS.maybeReloadCompactionStrategy.
-            this.strategyManager = cfs.getCompactionStrategyManager();
+            this.strategy = cfs.getCompactionStrategy();
             this.fullyExpiredSSTables = controller.getFullyExpiredSSTables();
             this.taskId = transaction.opId();
 
@@ -273,7 +240,7 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
-                this.scanners = strategyManager.getScanners(actuallyCompact);
+                this.scanners = strategy.getScanners(actuallyCompact);
                 this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
                 this.op = compactionIterator.getOperation();
                 this.writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact);
@@ -318,7 +285,7 @@ public class CompactionTask extends AbstractCompactionTask
 
             long lastBytesScanned = 0;
 
-            if (!controller.cfs.getCompactionStrategyManager().isActive())
+            if (!controller.cfs.getCompactionStrategyContainer().isActive())
                 throw new CompactionInterruptedException(op.getProgress());
 
             estimatedKeys = writer.estimatedKeys();
@@ -398,7 +365,7 @@ public class CompactionTask extends AbstractCompactionTask
                 {
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
                 }
-                cfs.getCompactionLogger().compaction(startTime, transaction.originals(),  System.currentTimeMillis(), newSStables);
+                strategy.getCompactionLogger().compaction(startTime, transaction.originals(),  System.currentTimeMillis(), newSStables);
 
                 // update the metrics
                 cfs.metric.incBytesCompacted(progress.adjustedInputDiskSize(),
@@ -487,9 +454,9 @@ public class CompactionTask extends AbstractCompactionTask
 
             @Override
             @Nullable
-            public AbstractCompactionStrategy strategy()
+            public CompactionStrategy strategy()
             {
-                return strategy;
+                return CompactionTask.this.strategy;
             }
 
             @Override
@@ -670,7 +637,7 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         final Set<SSTableReader> nonExpiredSSTables = Sets.difference(transaction.originals(), fullyExpiredSSTables);
-        CompactionStrategyManager strategy = cfs.getCompactionStrategyManager();
+        CompactionStrategy strategy = cfs.getCompactionStrategy();
         int sstablesRemoved = 0;
 
         while(!nonExpiredSSTables.isEmpty())

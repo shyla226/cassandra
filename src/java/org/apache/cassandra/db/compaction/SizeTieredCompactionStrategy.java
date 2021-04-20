@@ -61,9 +61,9 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
     @VisibleForTesting
     protected final Set<SSTableReader> sstables = new HashSet<>();
 
-    public SizeTieredCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
+    public SizeTieredCompactionStrategy(CompactionStrategyFactory factory, Map<String, String> options)
     {
-        super(cfs, options);
+        super(factory, options);
         this.sizeTieredOptions = new SizeTieredCompactionStrategyOptions(options);
     }
 
@@ -77,7 +77,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
         List<SSTableReader> candidates = new ArrayList<>();
         synchronized (sstables)
         {
-            Iterables.addAll(candidates, nonSuspectAndNotIn(sstables, cfs.getCompactingSSTables()));
+            Iterables.addAll(candidates, nonSuspectAndNotIn(sstables, dataTracker.getCompacting()));
         }
 
         SizeTieredBuckets sizeTieredBuckets = new SizeTieredBuckets(candidates, sizeTieredOptions, minThreshold, maxThreshold);
@@ -336,8 +336,8 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
     protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         return isMaximal && splitOutput
-               ? SplittingCompactionTask.forSplitting(this, txn, gcBefore)
-               : CompactionTask.forCompaction(this, txn, gcBefore);
+               ? new SplittingCompactionTask(cfs, txn, gcBefore, this)
+               : new CompactionTask(cfs, txn, gcBefore, false, this);
     }
 
     public long getMaxSSTableBytes()
@@ -347,7 +347,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
-        Map<String, String> uncheckedOptions = AbstractCompactionStrategy.validateOptions(options);
+        Map<String, String> uncheckedOptions = CompactionStrategyOptions.validateOptions(options);
         uncheckedOptions = SizeTieredCompactionStrategyOptions.validateOptions(options, uncheckedOptions);
 
         uncheckedOptions.remove(CompactionParams.Option.MIN_THRESHOLD.toString());
@@ -409,14 +409,9 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
 
     private static class SplittingCompactionTask extends CompactionTask
     {
-        public SplittingCompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+        public SplittingCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionStrategy strategy)
         {
-            super(strategy, txn, gcBefore, false);
-        }
-
-        static AbstractCompactionTask forSplitting(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
-        {
-            return new SplittingCompactionTask(strategy, txn, gcBefore);
+            super(cfs, txn, gcBefore, false, strategy);
         }
 
         @Override

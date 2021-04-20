@@ -289,7 +289,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         try
         {
             // avoid iterating over the memtable if we purge all tombstones
-            boolean useMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
+            boolean useMinLocalDeletionTime = cfs.onlyPurgeRepairedTombstones();
 
             for (Memtable memtable : view.memtables)
             {

@@ -109,7 +109,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
                     String.format("'minimal_sstable_size_in_mb' : '%d', ", minimalSstableSizeMb) +
                     String.format("'static_scaling_factors' : '%s'}", scalingFactorsStr));
 
-        AbstractCompactionStrategy strategy = getCurrentCompactionStrategy();
+        CompactionStrategy strategy = getCurrentCompactionStrategy();
         assertTrue(strategy instanceof UnifiedCompactionStrategy);
 
         UnifiedCompactionStrategy unifiedCompactionStrategy = (UnifiedCompactionStrategy) strategy;
@@ -141,7 +141,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
                     String.format("'adaptive_gain': '%f', ", 0.25) +
                     String.format("'adaptive_min_cost': '%d'}", 1));
 
-        AbstractCompactionStrategy strategy = getCurrentCompactionStrategy();
+        CompactionStrategy strategy = getCurrentCompactionStrategy();
         assertTrue(strategy instanceof UnifiedCompactionStrategy);
 
         UnifiedCompactionStrategy unifiedCompactionStrategy = (UnifiedCompactionStrategy) strategy;
@@ -284,7 +284,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
         {
             // check multiple times because we don't look ahead to future buckets at the moment so there is a brief
             // window without pending compactions and without compactions in progress, this may make the test flaky on slow J2
-            if (cfs.getCompactionStrategyManager().getTotalCompactions() == 0)
+            if (cfs.getCompactionStrategy().getTotalCompactions() == 0)
                 numTimesWithNoCompactions++;
 
             FBUtilities.sleepQuietly(10);
@@ -304,10 +304,10 @@ public class CQLUnifiedCompactionTest extends CQLTester
         return key;
     }
 
-    private AbstractCompactionStrategy getCurrentCompactionStrategy()
+    private CompactionStrategy getCurrentCompactionStrategy()
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        return cfs.getCompactionStrategyManager()
+        return cfs.getCompactionStrategyContainer()
                   .getStrategies()
                   .stream()
                   .flatMap(list -> list.stream())

@@ -36,39 +36,51 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
- * Tests CompactionStrategyManager's handling of pending repair sstables
+ * Tests CompactionStrategyContainer's handling of pending repair sstables
  */
-public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingRepairTest
+public class CompactionStrategyContainerPendingRepairTest extends AbstractPendingRepairTest
 {
 
     private boolean transientContains(SSTableReader sstable)
     {
-        return csm.getTransientRepairsUnsafe().containsSSTable(sstable);
+        return ((CompactionStrategyManager) compactionStrategyContainer)
+               .getTransientRepairsUnsafe()
+               .containsSSTable(sstable);
     }
 
     private boolean pendingContains(SSTableReader sstable)
     {
-        return csm.getPendingRepairsUnsafe().containsSSTable(sstable);
+        return ((CompactionStrategyManager) compactionStrategyContainer)
+               .getPendingRepairsUnsafe()
+               .containsSSTable(sstable);
     }
 
     private boolean repairedContains(SSTableReader sstable)
     {
-        return csm.getRepairedUnsafe().containsSSTable(sstable);
+        return ((CompactionStrategyManager) compactionStrategyContainer)
+               .getRepairedUnsafe()
+               .containsSSTable(sstable);
     }
 
     private boolean unrepairedContains(SSTableReader sstable)
     {
-        return csm.getUnrepairedUnsafe().containsSSTable(sstable);
+        return ((CompactionStrategyManager) compactionStrategyContainer)
+               .getUnrepairedUnsafe()
+               .containsSSTable(sstable);
     }
 
     private boolean hasPendingStrategiesFor(UUID sessionID)
     {
-        return !Iterables.isEmpty(csm.getPendingRepairsUnsafe().getStrategiesFor(sessionID));
+        return !Iterables.isEmpty(((CompactionStrategyManager) compactionStrategyContainer)
+                                  .getPendingRepairsUnsafe()
+                                  .getStrategiesFor(sessionID));
     }
 
     private boolean hasTransientStrategiesFor(UUID sessionID)
     {
-        return !Iterables.isEmpty(csm.getTransientRepairsUnsafe().getStrategiesFor(sessionID));
+        return !Iterables.isEmpty(((CompactionStrategyManager) compactionStrategyContainer)
+                                  .getTransientRepairsUnsafe()
+                                  .getStrategiesFor(sessionID));
     }
 
     /**
@@ -79,7 +91,9 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     {
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
-        Assert.assertTrue(Iterables.isEmpty(csm.getPendingRepairsUnsafe().allStrategies()));
+        Assert.assertTrue(Iterables.isEmpty(((CompactionStrategyManager) compactionStrategyContainer)
+                                            .getPendingRepairsUnsafe()
+                                            .allStrategies()));
 
         SSTableReader sstable = makeSSTable(true);
         Assert.assertFalse(sstable.isRepaired());
@@ -92,7 +106,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertFalse(hasTransientStrategiesFor(repairID));
 
         // add the sstable
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
         Assert.assertFalse(repairedContains(sstable));
         Assert.assertFalse(unrepairedContains(sstable));
         Assert.assertTrue(pendingContains(sstable));
@@ -124,7 +138,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         notification = new SSTableListChangedNotification(Collections.singleton(sstable1),
                                                           Collections.emptyList(),
                                                           OperationType.COMPACTION);
-        csm.handleNotification(notification, cfs.getTracker());
+        compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
 
         Assert.assertFalse(repairedContains(sstable1));
         Assert.assertFalse(unrepairedContains(sstable1));
@@ -139,7 +153,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         notification = new SSTableListChangedNotification(Collections.singleton(sstable2),
                                                           Collections.singleton(sstable1),
                                                           OperationType.COMPACTION);
-        csm.handleNotification(notification, cfs.getTracker());
+        compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
 
         Assert.assertFalse(repairedContains(sstable1));
         Assert.assertFalse(unrepairedContains(sstable1));
@@ -167,7 +181,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         // change to pending repaired
         mutateRepaired(sstable, repairID, false);
         notification = new SSTableRepairStatusChanged(Collections.singleton(sstable));
-        csm.handleNotification(notification, cfs.getTracker());
+        compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
         Assert.assertFalse(unrepairedContains(sstable));
         Assert.assertFalse(repairedContains(sstable));
         Assert.assertTrue(hasPendingStrategiesFor(repairID));
@@ -177,7 +191,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         // change to repaired
         mutateRepaired(sstable, System.currentTimeMillis());
         notification = new SSTableRepairStatusChanged(Collections.singleton(sstable));
-        csm.handleNotification(notification, cfs.getTracker());
+        compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
         Assert.assertFalse(unrepairedContains(sstable));
         Assert.assertTrue(repairedContains(sstable));
         Assert.assertFalse(pendingContains(sstable));
@@ -191,12 +205,12 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
 
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID, false);
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
         Assert.assertTrue(pendingContains(sstable));
 
         // delete sstable
         SSTableDeletingNotification notification = new SSTableDeletingNotification(sstable);
-        csm.handleNotification(notification, cfs.getTracker());
+        compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
         Assert.assertFalse(pendingContains(sstable));
         Assert.assertFalse(unrepairedContains(sstable));
         Assert.assertFalse(repairedContains(sstable));
@@ -212,17 +226,17 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
-        List<List<AbstractCompactionStrategy>> strategies;
+        List<List<CompactionStrategy>> strategies;
 
-        strategies = csm.getStrategies();
+        strategies = compactionStrategyContainer.getStrategies();
         Assert.assertEquals(3, strategies.size());
         Assert.assertTrue(strategies.get(2).isEmpty());
 
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID, false);
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
 
-        strategies = csm.getStrategies();
+        strategies = compactionStrategyContainer.getStrategies();
         Assert.assertEquals(3, strategies.size());
         Assert.assertFalse(strategies.get(2).isEmpty());
     }
@@ -238,7 +252,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID, false);
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
         LocalSessionAccessor.finalizeUnsafe(repairID);
         Assert.assertTrue(hasPendingStrategiesFor(repairID));
         Assert.assertFalse(hasTransientStrategiesFor(repairID));
@@ -246,8 +260,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertTrue(sstable.isPendingRepair());
         Assert.assertFalse(sstable.isRepaired());
 
-        cfs.getCompactionStrategyManager().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = csm.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
+        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
@@ -278,7 +292,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID, false);
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
         LocalSessionAccessor.failUnsafe(repairID);
 
         Assert.assertTrue(hasPendingStrategiesFor(repairID));
@@ -287,8 +301,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertTrue(sstable.isPendingRepair());
         Assert.assertFalse(sstable.isRepaired());
 
-        cfs.getCompactionStrategyManager().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = csm.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
+        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
@@ -314,7 +328,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID, true);
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
         LocalSessionAccessor.finalizeUnsafe(repairID);
 
         Assert.assertFalse(hasPendingStrategiesFor(repairID));
@@ -324,8 +338,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertFalse(repairedContains(sstable));
         Assert.assertFalse(unrepairedContains(sstable));
 
-        cfs.getCompactionStrategyManager().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = csm.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
+        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
@@ -345,7 +359,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairID, true);
-        csm.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
+        compactionStrategyContainer.handleNotification(new SSTableAddedNotification(Collections.singleton(sstable), null), cfs.getTracker());
         LocalSessionAccessor.failUnsafe(repairID);
 
         Assert.assertFalse(hasPendingStrategiesFor(repairID));
@@ -355,8 +369,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertFalse(repairedContains(sstable));
         Assert.assertFalse(unrepairedContains(sstable));
 
-        cfs.getCompactionStrategyManager().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = csm.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
+        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 

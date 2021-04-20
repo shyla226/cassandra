@@ -81,9 +81,7 @@ public class CostsCalculatorTest
 
         when(executorService.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(fut);
         when(strategy.getSSTables()).thenReturn(Sets.newHashSet(sstable));
-        when(strategy.getBackgroundCompactions()).thenReturn(backgroundCompactions);
         when(strategy.getMetadata()).thenReturn(metadata);
-        when(strategy.id()).thenReturn(1);
 
         when(sstable.onDiskLength()).thenReturn((long) PageAware.PAGE_SIZE);
         when(backgroundCompactions.getAggregates()).thenReturn(ImmutableList.of());

@@ -742,7 +742,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             public WithoutPurgeableTombstones()
             {
                 super(nowInSec(), cfs.gcBefore(nowInSec()), oldestUnrepairedTombstone(),
-                      cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones(),
+                      cfs.onlyPurgeRepairedTombstones(),
                       iterator.metadata().enforceStrictLiveness());
             }
 

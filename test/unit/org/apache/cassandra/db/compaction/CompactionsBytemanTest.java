@@ -194,7 +194,7 @@ public class CompactionsBytemanTest extends CQLTester
             }
             cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
-        cfs.getCompactionStrategyManager().mutateRepaired(cfs.getLiveSSTables(), System.currentTimeMillis(), null, false);
+        cfs.getCompactionStrategyContainer().mutateRepaired(cfs.getLiveSSTables(), System.currentTimeMillis(), null, false);
         for (int i = 0; i < 5; i++)
         {
             for (int j = 0; j < 10; j++)

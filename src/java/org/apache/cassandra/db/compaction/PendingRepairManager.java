@@ -52,7 +52,8 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * Companion to CompactionStrategyManager which manages the sstables marked pending repair.
+ * This class manages the sstables marked pending repair so that they can be assigned to legacy compaction
+ * strategies via the legacy strategy container or manager.
  *
  * SSTables are classified as pending repair by the anti-compaction performed at the beginning
  * of an incremental repair, or when they're streamed in with a pending repair id. This prevents
@@ -64,6 +65,7 @@ class PendingRepairManager
     private static final Logger logger = LoggerFactory.getLogger(PendingRepairManager.class);
 
     private final ColumnFamilyStore cfs;
+    private final CompactionStrategyFactory strategyFactory;
     private final CompactionParams params;
     private final boolean isTransient;
     private volatile ImmutableMap<UUID, AbstractCompactionStrategy> strategies = ImmutableMap.of();
@@ -79,9 +81,10 @@ class PendingRepairManager
         }
     }
 
-    PendingRepairManager(ColumnFamilyStore cfs, CompactionParams params, boolean isTransient)
+    PendingRepairManager(ColumnFamilyStore cfs, CompactionStrategyFactory strategyFactory, CompactionParams params, boolean isTransient)
     {
         this.cfs = cfs;
+        this.strategyFactory = strategyFactory;
         this.params = params;
         this.isTransient = isTransient;
     }
@@ -116,7 +119,7 @@ class PendingRepairManager
                 if (strategy == null)
                 {
                     logger.debug("Creating {}.{} compaction strategy for pending repair: {}", cfs.metadata.keyspace, cfs.metadata.name, id);
-                    strategy = cfs.createCompactionStrategyInstance(params);
+                    strategy = strategyFactory.createLegacyStrategy(params);
                     strategies = mapBuilder().putAll(strategies).put(id, strategy).build();
                 }
             }
@@ -154,7 +157,6 @@ class PendingRepairManager
             removeSessionIfEmpty(entry.getKey());
         }
     }
-
 
     void removeSSTables(Iterable<SSTableReader> removed)
     {
@@ -218,15 +220,15 @@ class PendingRepairManager
 
     synchronized void startup()
     {
-        strategies.values().forEach(AbstractCompactionStrategy::startup);
+        strategies.values().forEach(CompactionStrategy::startup);
     }
 
     synchronized void shutdown()
     {
-        strategies.values().forEach(AbstractCompactionStrategy::shutdown);
+        strategies.values().forEach(CompactionStrategy::shutdown);
     }
 
-    private int getEstimatedRemainingTasks(UUID sessionID, AbstractCompactionStrategy strategy)
+    private int getEstimatedRemainingTasks(UUID sessionID, CompactionStrategy strategy)
     {
         if (canCleanup(sessionID))
         {
@@ -403,7 +405,7 @@ class PendingRepairManager
             }
             else
             {
-                Collection<AbstractCompactionTask> tasks = entry.getValue().getMaximalTask(gcBefore, splitOutput);
+                Collection<AbstractCompactionTask> tasks = entry.getValue().getMaximalTasks(gcBefore, splitOutput);
                 if (tasks != null)
                     maximalTasks.addAll(tasks);
             }
@@ -457,7 +459,7 @@ class PendingRepairManager
         return scanners;
     }
 
-    public boolean hasStrategy(AbstractCompactionStrategy strategy)
+    public boolean hasStrategy(CompactionStrategy strategy)
     {
         return strategies.values().contains(strategy);
     }
@@ -479,7 +481,7 @@ class PendingRepairManager
     public Collection<AbstractCompactionTask> createUserDefinedTasks(Collection<SSTableReader> sstables, int gcBefore)
     {
         Map<UUID, List<SSTableReader>> group = sstables.stream().collect(Collectors.groupingBy(s -> s.getSSTableMetadata().pendingRepair));
-        return group.entrySet().stream().map(g -> strategies.get(g.getKey()).getUserDefinedTask(g.getValue(), gcBefore)).collect(Collectors.toList());
+        return group.entrySet().stream().map(g -> strategies.get(g.getKey()).getUserDefinedTasks(g.getValue(), gcBefore)).flatMap(Collection::stream).collect(Collectors.toList());
     }
 
     /**
@@ -518,7 +520,7 @@ class PendingRepairManager
                 else
                 {
                     logger.info("Moving {} from pending to repaired with repaired at = {} and session id = {}", transaction.originals(), repairedAt, sessionID);
-                    cfs.getCompactionStrategyManager().mutateRepaired(transaction.originals(), repairedAt, ActiveRepairService.NO_PENDING_REPAIR, false);
+                    cfs.getCompactionStrategyContainer().mutateRepaired(transaction.originals(), repairedAt, ActiveRepairService.NO_PENDING_REPAIR, false);
                 }
                 completed = true;
             }

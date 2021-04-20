@@ -608,7 +608,7 @@ public class TableMetrics
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
         compactionBytesRead = createTableCounter("CompactionBytesRead");
         compactionLatencyPerKb = ExpMovingAverage.oneMinute(new SystemTimeSource());
-        pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategyManager().getEstimatedRemainingTasks());
+        pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategy().getEstimatedRemainingTasks());
         liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getLiveSSTables().size());
         oldVersionSSTableCount = createTableGauge("OldVersionSSTableCount", new Gauge<Integer>()
         {

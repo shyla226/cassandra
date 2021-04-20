@@ -107,7 +107,7 @@ public class AbstractCompactionStrategyTest
     public void testGetNextBackgroundTaskDoesNotBlock(String table)
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(table);
-        AbstractCompactionStrategy strategy = cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
+        CompactionStrategy strategy = cfs.getCompactionStrategyContainer().getStrategies().get(1).get(0);
 
         // Add 4 sstables
         for (int i = 1; i <= 4; i++)

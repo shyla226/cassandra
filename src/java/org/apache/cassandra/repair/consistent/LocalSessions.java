@@ -1019,7 +1019,7 @@ public class LocalSessions
     {
         Predicate<TableId> predicate = tid -> {
             ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(tid);
-            return cfs != null && cfs.getCompactionStrategyManager().hasDataForPendingRepair(session.sessionID);
+            return cfs != null && cfs.getCompactionStrategyContainer().hasDataForPendingRepair(session.sessionID);
 
         };
         return Iterables.any(session.tableIds, predicate::test);

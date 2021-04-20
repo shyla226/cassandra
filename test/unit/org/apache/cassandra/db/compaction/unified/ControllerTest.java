@@ -77,7 +77,6 @@ public class ControllerTest
         MockitoAnnotations.initMocks(this);
 
         when(strategy.getMetadata()).thenReturn(metadata);
-        when(strategy.id()).thenReturn(1);
         when(strategy.getEstimatedRemainingTasks()).thenReturn(0);
 
         when(metadata.toString()).thenReturn("");

@@ -432,6 +432,14 @@ public class LeveledManifest
         return generations.get(i).size();
     }
 
+    public synchronized int[] getSSTableCountPerLevel()
+    {
+        int[] counts = new int[getLevelCount()];
+        for (int i = 0; i < counts.length; i++)
+            counts[i] = getLevel(i).size();
+        return counts;
+    }
+
     public synchronized int[] getAllLevelSize()
     {
         return generations.getAllLevelSize();

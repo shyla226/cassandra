@@ -46,22 +46,22 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     private final List<AbstractCompactionStrategy> strategies = new ArrayList<>();
     private final boolean isRepaired;
 
-    public CompactionStrategyHolder(ColumnFamilyStore cfs, DestinationRouter router, boolean isRepaired)
+    public CompactionStrategyHolder(ColumnFamilyStore cfs, CompactionStrategyFactory strategyFactory, DestinationRouter router, boolean isRepaired)
     {
-        super(cfs, router);
+        super(cfs, strategyFactory, router);
         this.isRepaired = isRepaired;
     }
 
     @Override
     public void startup()
     {
-        strategies.forEach(AbstractCompactionStrategy::startup);
+        strategies.forEach(CompactionStrategy::startup);
     }
 
     @Override
     public void shutdown()
     {
-        strategies.forEach(AbstractCompactionStrategy::shutdown);
+        strategies.forEach(CompactionStrategy::shutdown);
     }
 
     @Override
@@ -69,7 +69,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     {
         strategies.clear();
         for (int i = 0; i < numTokenPartitions; i++)
-            strategies.add(cfs.createCompactionStrategyInstance(params));
+            strategies.add(strategyFactory.createLegacyStrategy(params));
     }
 
     @Override
@@ -105,7 +105,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     public Collection<TaskSupplier> getBackgroundTaskSuppliers(int gcBefore)
     {
         List<TaskSupplier> suppliers = new ArrayList<>(strategies.size());
-        for (AbstractCompactionStrategy strategy : strategies)
+        for (CompactionStrategy strategy : strategies)
             suppliers.add(new TaskSupplier(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTask(gcBefore)));
 
         return suppliers;
@@ -115,9 +115,9 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     public Collection<AbstractCompactionTask> getMaximalTasks(int gcBefore, boolean splitOutput)
     {
         List<AbstractCompactionTask> tasks = new ArrayList<>(strategies.size());
-        for (AbstractCompactionStrategy strategy : strategies)
+        for (CompactionStrategy strategy : strategies)
         {
-            Collection<AbstractCompactionTask> task = strategy.getMaximalTask(gcBefore, splitOutput);
+            Collection<AbstractCompactionTask> task = strategy.getMaximalTasks(gcBefore, splitOutput);
             if (task != null)
                 tasks.addAll(task);
         }
@@ -133,7 +133,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
             if (sstables.isGroupEmpty(i))
                 continue;
 
-            tasks.add(strategies.get(i).getUserDefinedTask(sstables.getGroup(i), gcBefore));
+            tasks.addAll(strategies.get(i).getUserDefinedTasks(sstables.getGroup(i), gcBefore));
         }
         return tasks;
     }
@@ -239,7 +239,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
         Preconditions.checkArgument(pendingRepair == null,
                                     "CompactionStrategyHolder can't create sstable writer with pendingRepair id");
         // to avoid creating a compaction strategy for the wrong pending repair manager, we get the index based on where the sstable is to be written
-        AbstractCompactionStrategy strategy = strategies.get(router.getIndexForSSTableDirectory(descriptor));
+        CompactionStrategy strategy = strategies.get(router.getIndexForSSTableDirectory(descriptor));
         return strategy.createSSTableMultiWriter(descriptor,
                                                  keyCount,
                                                  repairedAt,
@@ -249,12 +249,6 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
                                                  header,
                                                  indexGroups,
                                                  lifecycleNewTracker);
-    }
-
-    @Override
-    public int getStrategyIndex(AbstractCompactionStrategy strategy)
-    {
-        return strategies.indexOf(strategy);
     }
 
     @Override

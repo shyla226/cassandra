@@ -68,8 +68,7 @@ public class CompactionController extends AbstractCompactionController
 
     public CompactionController(ColumnFamilyStore cfs, Set<SSTableReader> compacting, int gcBefore)
     {
-        this(cfs, compacting, gcBefore, null,
-             cfs.getCompactionStrategyManager().getCompactionParams().tombstoneOption());
+        this(cfs, compacting, gcBefore, null, cfs.getCompactionParams().tombstoneOption());
     }
 
     public CompactionController(ColumnFamilyStore cfs, Set<SSTableReader> compacting, int gcBefore, RateLimiter limiter, TombstoneOption tombstoneOption)
@@ -165,7 +164,7 @@ public class CompactionController extends AbstractCompactionController
         if (NEVER_PURGE_TOMBSTONES || compacting == null || cfStore.getNeverPurgeTombstones())
             return Collections.<SSTableReader>emptySet();
 
-        if (cfStore.getCompactionStrategyManager().onlyPurgeRepairedTombstones() && !Iterables.all(compacting, SSTableReader::isRepaired))
+        if (cfStore.onlyPurgeRepairedTombstones() && !Iterables.all(compacting, SSTableReader::isRepaired))
             return Collections.emptySet();
 
         if (ignoreOverlaps)
@@ -296,7 +295,7 @@ public class CompactionController extends AbstractCompactionController
 
     public boolean compactingRepaired()
     {
-        return !cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones() || compactingRepaired;
+        return !cfs.onlyPurgeRepairedTombstones() || compactingRepaired;
     }
 
     boolean provideTombstoneSources()

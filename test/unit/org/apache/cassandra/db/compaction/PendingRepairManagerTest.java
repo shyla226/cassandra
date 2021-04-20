@@ -40,7 +40,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupInProgress()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -58,7 +58,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupFinalized()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -77,7 +77,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupFailed()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -94,14 +94,14 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     public void needsCleanupNoSession()
     {
         UUID fakeID = UUIDGen.getTimeUUID();
-        PendingRepairManager prm = new PendingRepairManager(cfs, null, false);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, null, false);
         Assert.assertTrue(prm.canCleanup(fakeID));
     }
 
     @Test
     public void estimateRemainingTasksInProgress()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -117,7 +117,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void estimateRemainingFinishedRepairTasks()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -135,7 +135,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTask()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -169,7 +169,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTaskNoSessions()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
     }
 
@@ -179,7 +179,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTaskAllCleanup() throws Exception
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
@@ -197,7 +197,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void maximalTaskNeedsCleanup()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -222,13 +222,13 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void userDefinedTaskTest()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         UUID repairId = registerSession(cfs, true, true);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairId, false);
         prm.addSSTable(sstable);
 
-        try (CompactionTasks tasks = csm.getUserDefinedTasks(Collections.singleton(sstable), 100))
+        try (CompactionTasks tasks = cfs.getCompactionStrategyContainer().getUserDefinedTasks(Collections.singleton(sstable), 100))
         {
             Assert.assertEquals(1, tasks.size());
         }
@@ -237,7 +237,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void mixedPendingSessionsTest()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         UUID repairId = registerSession(cfs, true, true);
         UUID repairId2 = registerSession(cfs, true, true);
         SSTableReader sstable = makeSSTable(true);
@@ -247,7 +247,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         mutateRepaired(sstable2, repairId2, false);
         prm.addSSTable(sstable);
         prm.addSSTable(sstable2);
-        try (CompactionTasks tasks = csm.getUserDefinedTasks(Lists.newArrayList(sstable, sstable2), 100))
+        try (CompactionTasks tasks = cfs.getCompactionStrategyContainer().getUserDefinedTasks(Lists.newArrayList(sstable, sstable2), 100))
         {
             Assert.assertEquals(2, tasks.size());
         }
@@ -260,7 +260,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test(expected = PendingRepairManager.IllegalSSTableArgumentException.class)
     public void getScannersInvalidSSTable() throws Exception
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(true);
         prm.getScanners(Collections.singleton(sstable), Collections.singleton(RANGE1));
     }
@@ -272,7 +272,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test(expected = PendingRepairManager.IllegalSSTableArgumentException.class)
     public void getOrCreateInvalidSSTable() throws Exception
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(true);
         prm.getOrCreate(sstable);
     }
@@ -280,7 +280,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void sessionHasData()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -295,14 +295,14 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void noEmptyCompactionTask()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(false);
         UUID id = UUID.randomUUID();
         mutateRepaired(sstable, id, false);
         prm.getOrCreate(sstable);
         cfs.truncateBlocking();
         Assert.assertFalse(cfs.getSSTables(SSTableSet.LIVE).iterator().hasNext());
-        Assert.assertNull(cfs.getCompactionStrategyManager().getNextBackgroundTask(0));
+        Assert.assertNull(cfs.getCompactionStrategy().getNextBackgroundTask(0));
 
     }
 }

@@ -604,7 +604,7 @@ public class CompactionsTest
         assertTrue(store.getLiveSSTables().size() >= 2);
 
         // Enable compaction but do not submit any background compactions
-        store.getCompactionStrategyManager().enable();
+        store.getCompactionStrategyContainer().enable();
 
         CountDownLatch compactionRegistered = new CountDownLatch(1);
         CountDownLatch resumeCompaction = new CountDownLatch(1);

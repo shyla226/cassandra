@@ -91,7 +91,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getW(anyInt())).thenReturn(4);
         when(controller.getSurvivalFactor()).thenReturn(1.0);
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         assertNull(strategy.getNextBackgroundTask(FBUtilities.nowInSeconds()));
         assertEquals(0, strategy.getEstimatedRemainingTasks());
@@ -169,7 +169,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         when(controller.getSurvivalFactor()).thenReturn(1.0);
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         IPartitioner partitioner = cfs.getPartitioner();
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));

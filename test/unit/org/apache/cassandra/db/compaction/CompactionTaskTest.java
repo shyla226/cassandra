@@ -72,14 +72,14 @@ public class CompactionTaskTest
     @Before
     public void setUp() throws Exception
     {
-        cfs.getCompactionStrategyManager().enable();
+        cfs.getCompactionStrategyContainer().enable();
         cfs.truncateBlocking();
     }
 
     @Test
     public void compactionDisabled() throws Exception
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
@@ -95,7 +95,7 @@ public class CompactionTaskTest
 
         AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
         Assert.assertNotNull(task);
-        cfs.getCompactionStrategyManager().pause();
+        cfs.getCompactionStrategyContainer().pause();
         try
         {
             task.execute(CompactionManager.instance.active);
@@ -111,7 +111,7 @@ public class CompactionTaskTest
     @Test
     public void compactionInterruption()
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         Set<SSTableReader> sstables = generateData(2, 2);
 
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
@@ -156,7 +156,7 @@ public class CompactionTaskTest
     @Test
     public void mixedSSTableFailure() throws Exception
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
@@ -205,7 +205,7 @@ public class CompactionTaskTest
     @Test
     public void testCompactionReporting()
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         Set<SSTableReader> sstables = generateData(2, 2);
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         assertNotNull(txn);

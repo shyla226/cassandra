@@ -40,6 +40,7 @@ import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.utils.Throwables.*;
@@ -58,19 +59,19 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy.WithAg
     /** The controller can be changed at any time to change the strategy behavior */
     private Controller controller;
 
-    public UnifiedCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
+    public UnifiedCompactionStrategy(CompactionStrategyFactory factory, Map<String, String> options)
     {
-        this(cfs, options, Controller.fromOptions(cfs, options));
+        this(factory, options, Controller.fromOptions(factory.getCfs(), options));
     }
 
-    public UnifiedCompactionStrategy(ColumnFamilyStore cfs, Controller controller)
+    public UnifiedCompactionStrategy(CompactionStrategyFactory factory, Controller controller)
     {
-        this(cfs, new HashMap<>(), controller);
+        this(factory, new HashMap<>(), controller);
     }
 
-    public UnifiedCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options, Controller controller)
+    public UnifiedCompactionStrategy(CompactionStrategyFactory factory, Map<String, String> options, Controller controller)
     {
-        super(cfs, options);
+        super(factory, options);
 
         this.sstables = ConcurrentHashMap.newKeySet();
         this.controller = controller;
@@ -78,7 +79,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy.WithAg
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
-        return Controller.validateOptions(AbstractCompactionStrategy.validateOptions(options));
+        return Controller.validateOptions(CompactionStrategyOptions.validateOptions(options));
     }
 
     @Override
@@ -109,7 +110,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy.WithAg
     @Override
     protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
     {
-        return CompactionTask.forCompaction(this, txn, gcBefore);
+        return new CompactionTask(cfs, txn, gcBefore, false, this);
     }
 
     private Collection<CompactionAggregate> getAggregates()
@@ -225,6 +226,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy.WithAg
 
         logger.debug("Found {} buckets for {}.{}", buckets.size(), cfs.getKeyspaceName(), cfs.getTableName());
         return buckets;
+    }
+
+    public TableMetadata getMetadata()
+    {
+        return cfs.metadata();
     }
 
     @Override

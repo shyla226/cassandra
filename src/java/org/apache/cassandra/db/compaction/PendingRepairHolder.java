@@ -47,9 +47,9 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     private final List<PendingRepairManager> managers = new ArrayList<>();
     private final boolean isTransient;
 
-    public PendingRepairHolder(ColumnFamilyStore cfs, DestinationRouter router, boolean isTransient)
+    public PendingRepairHolder(ColumnFamilyStore cfs, CompactionStrategyFactory strategyFactory, DestinationRouter router, boolean isTransient)
     {
-        super(cfs, router);
+        super(cfs, strategyFactory, router);
         this.isTransient = isTransient;
     }
 
@@ -70,7 +70,7 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     {
         managers.clear();
         for (int i = 0; i < numTokenPartitions; i++)
-            managers.add(new PendingRepairManager(cfs, params, isTransient));
+            managers.add(new PendingRepairManager(cfs, strategyFactory, params, isTransient));
     }
 
     @Override
@@ -249,7 +249,7 @@ public class PendingRepairHolder extends AbstractStrategyHolder
         Preconditions.checkArgument(pendingRepair != null,
                                     "PendingRepairHolder can't create sstable writer without pendingRepair id");
         // to avoid creating a compaction strategy for the wrong pending repair manager, we get the index based on where the sstable is to be written
-        AbstractCompactionStrategy strategy = managers.get(router.getIndexForSSTableDirectory(descriptor)).getOrCreate(pendingRepair);
+        CompactionStrategy strategy = managers.get(router.getIndexForSSTableDirectory(descriptor)).getOrCreate(pendingRepair);
         return strategy.createSSTableMultiWriter(descriptor,
                                                  keyCount,
                                                  repairedAt,
@@ -261,17 +261,6 @@ public class PendingRepairHolder extends AbstractStrategyHolder
                                                  lifecycleNewTracker);
     }
 
-    @Override
-    public int getStrategyIndex(AbstractCompactionStrategy strategy)
-    {
-        for (int i = 0; i < managers.size(); i++)
-        {
-            if (managers.get(i).hasStrategy(strategy))
-                return i;
-        }
-        return -1;
-    }
-
     public boolean hasDataForSession(UUID sessionID)
     {
         return Iterables.any(managers, prm -> prm.hasDataForSession(sessionID));
@@ -281,5 +270,10 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     public boolean containsSSTable(SSTableReader sstable)
     {
         return Iterables.any(managers, prm -> prm.containsSSTable(sstable));
+    }
+
+    public int size()
+    {
+        return managers.size();
     }
 }

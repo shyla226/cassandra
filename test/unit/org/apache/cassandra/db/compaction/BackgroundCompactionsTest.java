@@ -48,14 +48,16 @@ public class BackgroundCompactionsTest
     private final String keyspace = "ks";
     private final String table = "table";
 
+    private TableMetadata metadata;
+
     @Mock
     private ColumnFamilyStore cfs;
 
     @Mock
-    private AbstractCompactionStrategy strategy;
+    private CompactionStrategy strategy;
 
     @Mock
-    private CompactionStrategyManager strategyManager;
+    private CompactionStrategyContainer strategyContainer;
 
     @Mock
     private CompactionLogger compactionLogger;
@@ -71,15 +73,15 @@ public class BackgroundCompactionsTest
     {
         MockitoAnnotations.initMocks(this);
 
-        TableMetadata metadata = TableMetadata.builder(keyspace, table)
-                                              .addPartitionKeyColumn("pk", AsciiType.instance)
-                                              .build();
+        metadata = TableMetadata.builder(keyspace, table)
+                                .addPartitionKeyColumn("pk", AsciiType.instance)
+                                .build();
 
         when(cfs.metadata()).thenReturn(metadata);
         when(cfs.getKeyspaceName()).thenReturn(keyspace);
         when(cfs.getTableName()).thenReturn(table);
-        when(cfs.getCompactionStrategyManager()).thenReturn(strategyManager);
-        when(strategyManager.compactionLogger()).thenReturn(compactionLogger);
+        when(cfs.getCompactionStrategy()).thenReturn(strategyContainer);
+        when(strategy.getCompactionLogger()).thenReturn(compactionLogger);
         when(compactionLogger.enabled()).thenReturn(true);
     }
 
@@ -106,7 +108,7 @@ public class BackgroundCompactionsTest
     @Test
     public void testNoCompaction()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(0, backgroundCompactions.getTotalCompactions());
 
@@ -121,14 +123,14 @@ public class BackgroundCompactionsTest
     @Test(expected = IllegalArgumentException.class)
     public void testNullPendingCompactions()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         backgroundCompactions.setPending(null);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testDuplicatePendingCompactions()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
 
         List<CompactionAggregate> pending = new ArrayList<>(0);
         for (int i = 0; i < 5; i++)
@@ -141,7 +143,7 @@ public class BackgroundCompactionsTest
     @Test
     public void testPendingCompactions()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
 
         List<CompactionAggregate> pending = new ArrayList<>(0);
         for (int i = 0; i < 5; i++)
@@ -166,7 +168,7 @@ public class BackgroundCompactionsTest
     {
         // Add some pending compactions, and then submit one of them, the most common case
 
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
 
         List<CompactionAggregate> pending = new ArrayList<>(0);
         for (int i = 0; i < 5; i++)
@@ -226,7 +228,7 @@ public class BackgroundCompactionsTest
         // but for which there is a matching aggregate, this would happen if two threads raced and created equivalent
         // but not identical pending aggregates
 
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
 
         List<CompactionAggregate> pending = new ArrayList<>(0);
         for (int i = 0; i < 5; i++)
@@ -286,7 +288,7 @@ public class BackgroundCompactionsTest
         // Submit a compaction that is not part of a pending aggregate, this normally happens for tombstone compactions,
         // in this case the pending aggregates are empty but a tombstone compaction is submitted
 
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
 
         backgroundCompactions.setPending(ImmutableList.of());
 
@@ -339,7 +341,7 @@ public class BackgroundCompactionsTest
         // Add som pending aggregates, then replace them with aggregates with different keys, verify that only
         // those with compactions are kept, partially overlap the keys between the old and new aggregates
 
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
 
         List<CompactionAggregate> pending = new ArrayList<>(0);
         int key = 0;
@@ -387,14 +389,14 @@ public class BackgroundCompactionsTest
     @Test(expected = IllegalArgumentException.class)
     public void testSetSubmittedNoId()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         backgroundCompactions.setSubmitted(null, Mockito.mock(CompactionAggregate.class));
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testSetSubmittedNoAggregate()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         backgroundCompactions.setSubmitted(UUID.randomUUID(), null);
     }
 
@@ -405,7 +407,7 @@ public class BackgroundCompactionsTest
         CompactionAggregate aggregate = mockAggregate(1, 1, 0);
         when(aggregate.getSelected()).thenReturn(CompactionPick.EMPTY);
 
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         backgroundCompactions.setSubmitted(uuid, aggregate);
         backgroundCompactions.setSubmitted(uuid, aggregate);
     }
@@ -413,14 +415,14 @@ public class BackgroundCompactionsTest
     @Test(expected = IllegalArgumentException.class)
     public void testSetInProgressNoProgress()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         backgroundCompactions.onInProgress(null);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testSetCompletedNoId()
     {
-        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
+        BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, metadata);
         backgroundCompactions.onCompleted(null);
     }
 }

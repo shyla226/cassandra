@@ -372,7 +372,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                 ? new AdaptiveController(new SystemTimeSource(), new SimulatedEnvironment(counters, valueSize), Ws[0], o, minSSTableSize >> 20, updateTimeSec, minW, maxW, minTargetSizeGB, gain, minCost)
                                 : new StaticController(new SimulatedEnvironment(counters, valueSize), Ws, o, minSSTableSize >> 20);
 
-        return new UnifiedCompactionStrategy(cfs, controller);
+        return new UnifiedCompactionStrategy(strategyFactory, controller);
     }
 
     private final static class CsvWriter
@@ -1275,7 +1275,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                     //Thread.sleep(5);
 
                     // then remove the old sstables
-                    strategy.getBackgroundCompactions().onCompleted(id);
+                    strategy.onCompleted(id);
                     counters.numCompactions.incrementAndGet();
                     counters.numCompactionsPending.decrementAndGet();
                     counters.numCompactedSSTables.addAndGet(candidates.size());

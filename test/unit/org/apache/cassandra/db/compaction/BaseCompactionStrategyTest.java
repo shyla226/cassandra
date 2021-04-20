@@ -68,7 +68,7 @@ public class BaseCompactionStrategyTest
     ColumnFamilyStore cfs;
 
     @Mock
-    CompactionStrategyManager strategyManager;
+    CompactionStrategyFactory strategyFactory;
 
     Tracker dataTracker;
 
@@ -105,14 +105,15 @@ public class BaseCompactionStrategyTest
         when(cfs.getTableName()).thenReturn(table);
         when(cfs.getTracker()).thenReturn(dataTracker);
         when(cfs.getPartitioner()).thenReturn(partitioner);
-        when(cfs.getCompactionStrategyManager()).thenReturn(strategyManager);
 
         // use a real compaction logger to execute that code too, even though we don't really check
         // the content of the files, at least we cover the code. The files will be overwritten next
         // time the test is run or by a gradle clean task, so they will not grow indefinitely
-        compactionLogger = new CompactionLogger(cfs, strategyManager);
+        compactionLogger = new CompactionLogger(cfs.metadata());
         compactionLogger.enable();
-        when(strategyManager.compactionLogger()).thenReturn(compactionLogger);
+
+        when(strategyFactory.getCfs()).thenReturn(cfs);
+        when(strategyFactory.getCompactionLogger()).thenReturn(compactionLogger);
     }
 
     SSTableReader mockSSTable(int level, long bytesOnDisk, long timestamp, double hotness, DecoratedKey first, DecoratedKey last)

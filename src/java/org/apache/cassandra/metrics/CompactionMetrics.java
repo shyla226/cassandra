@@ -80,7 +80,7 @@ public class CompactionMetrics
             for (String keyspaceName : Schema.instance.getKeyspaces())
             {
                 for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
-                    n += cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
+                    n += cfs.getCompactionStrategy().getEstimatedRemainingTasks();
             }
             // add number of currently running compactions
             return n + CompactionManager.instance.active.getTableOperations().size();
@@ -93,7 +93,7 @@ public class CompactionMetrics
             {
                 for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
                 {
-                    int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
+                    int taskNumber = cfs.getCompactionStrategy().getEstimatedRemainingTasks();
                     if (taskNumber > 0)
                     {
                         if (!resultMap.containsKey(keyspaceName))
@@ -181,7 +181,7 @@ public class CompactionMetrics
         for (String keyspaceName : Schema.instance.getKeyspaces())
         {
             for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
-                ret.addAll(cfs.getCompactionStrategyManager().getStrategyStatistics());
+                ret.addAll(cfs.getCompactionStrategy().getStatistics());
         }
         return ret;
     }

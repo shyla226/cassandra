@@ -28,7 +28,6 @@ import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -39,7 +38,7 @@ public class BackgroundCompactions implements CompactionObserver
     private static final Logger logger = LoggerFactory.getLogger(BackgroundCompactions.class);
 
     /** The parent strategy */
-    private final AbstractCompactionStrategy strategy;
+    private final CompactionStrategy strategy;
 
     /** The table metadata */
     private final TableMetadata metadata;
@@ -60,14 +59,11 @@ public class BackgroundCompactions implements CompactionObserver
     /**  The ongoing compactions grouped by unique operation ID. */
     private ConcurrentHashMap<UUID, CompactionPick> compactions = new ConcurrentHashMap<>();
 
-    BackgroundCompactions(AbstractCompactionStrategy strategy, ColumnFamilyStore cfs)
+    BackgroundCompactions(CompactionStrategy strategy, TableMetadata metadata)
     {
-        if (cfs.getCompactionStrategyManager() == null)
-            throw new IllegalStateException("Compaction strategy manager should be set in the CFS first");
-
         this.strategy = strategy;
-        this.metadata = cfs.metadata();
-        this.compactionLogger = cfs.getCompactionStrategyManager().compactionLogger();
+        this.metadata = metadata;
+        this.compactionLogger = strategy.getCompactionLogger();
         this.aggregatesMap = new TreeMap<>();
         this.aggregates = ImmutableList.of();
     }

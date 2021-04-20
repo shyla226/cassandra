@@ -140,7 +140,6 @@ public final class TableParams
 
     public void validate()
     {
-        compaction.validate();
         compression.validate();
 
         double minBloomFilterFpChanceValue = BloomCalculations.minSupportedBloomFilterFpChance();

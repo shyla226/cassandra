@@ -130,12 +130,14 @@ public abstract class AbstractStrategyHolder
     }
 
     protected final ColumnFamilyStore cfs;
+    protected final CompactionStrategyFactory strategyFactory;
     final DestinationRouter router;
     private int numTokenPartitions = -1;
 
-    AbstractStrategyHolder(ColumnFamilyStore cfs, DestinationRouter router)
+    AbstractStrategyHolder(ColumnFamilyStore cfs, CompactionStrategyFactory strategyFactory, DestinationRouter router)
     {
         this.cfs = cfs;
+        this.strategyFactory = strategyFactory;
         this.router = router;
     }
 
@@ -199,12 +201,6 @@ public abstract class AbstractStrategyHolder
                                                                 SerializationHeader header,
                                                                 Collection<Index.Group> indexGroups,
                                                                 LifecycleNewTracker lifecycleNewTracker);
-
-    /**
-     * Return the directory index the given compaction strategy belongs to, or -1
-     * if it's not held by this holder
-     */
-    public abstract int getStrategyIndex(AbstractCompactionStrategy strategy);
 
     public abstract boolean containsSSTable(SSTableReader sstable);
 }

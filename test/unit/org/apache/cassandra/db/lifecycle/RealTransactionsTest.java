@@ -30,6 +30,7 @@ import org.junit.Test;
 
 import org.junit.Assert;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -151,7 +152,7 @@ public class RealTransactionsTest extends SchemaLoader
         try (CompactionController controller = new CompactionController(cfs, txn.originals(), cfs.gcBefore(FBUtilities.nowInSeconds())))
         {
             try (SSTableRewriter rewriter = SSTableRewriter.constructKeepingOriginals(txn, false, 1000);
-                 AbstractCompactionStrategy.ScannerList scanners = cfs.getCompactionStrategyManager().getScanners(txn.originals());
+                 ScannerList scanners = cfs.getCompactionStrategy().getScanners(txn.originals());
                  CompactionIterator ci = new CompactionIterator(txn.opType(), scanners.scanners, controller, nowInSec, txn.opId())
             )
             {

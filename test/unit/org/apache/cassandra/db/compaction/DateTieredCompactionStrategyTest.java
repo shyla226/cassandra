@@ -322,7 +322,8 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         options.put(DateTieredCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, "MILLISECONDS");
         options.put(DateTieredCompactionStrategyOptions.MAX_SSTABLE_AGE_KEY, Double.toString((1d / (24 * 60 * 60))));
         options.put(DateTieredCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, "0");
-        DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(cfs, options);
+        CompactionStrategyFactory factory = new CompactionStrategyFactory(cfs);
+        DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(factory, options);
         for (SSTableReader sstable : cfs.getLiveSSTables())
             dtcs.addSSTable(sstable);
         dtcs.startup();
@@ -370,7 +371,8 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         }
         Map<String, String> options = new HashMap<>();
         options.put(SizeTieredCompactionStrategyOptions.MIN_SSTABLE_SIZE_KEY, "1");
-        DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(cfs, options);
+        CompactionStrategyFactory factory = new CompactionStrategyFactory(cfs);
+        DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(factory, options);
         for (SSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
             dtcs.addSSTable(sstable);
         AbstractCompactionTask task = dtcs.getNextBackgroundTask(0);

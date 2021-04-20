@@ -91,7 +91,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getMinSSTableSizeBytes()).thenReturn(m << 20);
         when(controller.getSurvivalFactor()).thenReturn(1.0);
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         final int numCompactions = 5;
         long minSize = m << 20; // MB to bytes
@@ -131,7 +131,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getMinSSTableSizeBytes()).thenReturn(minSize);
         when(controller.getSurvivalFactor()).thenReturn(1.0);
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         // put F sstables in the first bucket
         List<SSTableReader> ssTablesList = new LinkedList<>();
@@ -166,7 +166,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         Map<String, String> options = new HashMap<>();
         addSizeTieredOptions(options);
 
-        SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(cfs, options);
+        SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(strategyFactory, options);
 
         final int numCompactions = 5;
         long minSize = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE;
@@ -197,7 +197,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         Map<String, String> options = new HashMap<>();
         addSizeTieredOptions(options);
 
-        SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(cfs, options);
+        SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(strategyFactory, options);
 
         final int numCompactions = 5;
         long size = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE * 2;
@@ -227,7 +227,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         Map<String, String> options = new HashMap<>();
         addSizeTieredOptions(options);
 
-        SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(cfs, options);
+        SizeTieredCompactionStrategy strategy = new SizeTieredCompactionStrategy(strategyFactory, options);
 
         long minSize = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE;
         double hotness = 1000;
@@ -262,7 +262,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         Map<String, String> options = new HashMap<>();
         addTimeTieredOptions(options);
 
-        TimeWindowCompactionStrategy strategy = new TimeWindowCompactionStrategy(cfs, options);
+        TimeWindowCompactionStrategy strategy = new TimeWindowCompactionStrategy(strategyFactory, options);
 
         final int numCompactions = 5;
         long size = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE * 5;
@@ -290,7 +290,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         Map<String, String> options = new HashMap<>();
         addTimeTieredOptions(options);
 
-        TimeWindowCompactionStrategy strategy = new TimeWindowCompactionStrategy(cfs, options);
+        TimeWindowCompactionStrategy strategy = new TimeWindowCompactionStrategy(strategyFactory, options);
 
         final int numCompactions = 5;
         long size = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE * 5;
@@ -318,7 +318,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         Map<String, String> options = new HashMap<>();
         addTimeTieredOptions(options);
 
-        TimeWindowCompactionStrategy strategy = new TimeWindowCompactionStrategy(cfs, options);
+        TimeWindowCompactionStrategy strategy = new TimeWindowCompactionStrategy(strategyFactory, options);
 
         long size = SizeTieredCompactionStrategyOptions.DEFAULT_MIN_SSTABLE_SIZE * 10;
         double hotness = 1000;
@@ -369,7 +369,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         long maxSSTableSize = 160 << 20; // 160 MB in bytes
         addLeveledOptions(options, maxSSTableSize);
 
-        LeveledCompactionStrategy strategy = new LeveledCompactionStrategy(cfs, options);
+        LeveledCompactionStrategy strategy = new LeveledCompactionStrategy(strategyFactory, options);
 
         final int numLevels = 3;
         List<List<SSTableReader>> ssTablesByLevel = new ArrayList<>(numLevels);
@@ -440,7 +440,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                          0);
 
         CompactionProgress progress = mockCompletedCompactionProgress(candidates, id);
-        strategy.getBackgroundCompactions().onInProgress(progress);
+        strategy.onInProgress(progress);
 
         verifyStatistics(strategy,
                          1,
@@ -467,7 +467,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         long maxSSTableSize = 160 << 20; // 160 MB in bytes
         addLeveledOptions(options, maxSSTableSize);
 
-        LeveledCompactionStrategy strategy = new LeveledCompactionStrategy(cfs, options);
+        LeveledCompactionStrategy strategy = new LeveledCompactionStrategy(strategyFactory, options);
 
         int level = 1;
         long maxLevelSize = (long) (Math.pow(10, level) * maxSSTableSize);
@@ -564,7 +564,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
 
             // Now we simulate starting the compaction task
             CompactionProgress progress = mockCompletedCompactionProgress(candidates, id);
-            strategy.getBackgroundCompactions().onInProgress(progress);
+            strategy.onInProgress(progress);
 
             // The compaction has started and so we must updated the following expected values
             totRead += progress.uncompressedBytesRead();
@@ -591,7 +591,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         {
             Set<SSTableReader> compSSTables = pair.left;
             long totSSTablesLen = totUncompressedLength(compSSTables);
-            strategy.getBackgroundCompactions().onCompleted(pair.right);
+            strategy.onCompleted(pair.right);
 
             numCompactions--;
             numCompactionsInProgress--;
@@ -626,7 +626,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                    dataTracker.getCompacting().isEmpty());
     }
 
-    private void verifyStatistics(AbstractCompactionStrategy strategy,
+    private void verifyStatistics(CompactionStrategy strategy,
                                   int expectedCompactions,
                                   int expectedCompacting,
                                   int expectedSSTables,
@@ -636,7 +636,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                                   long expectedWrittenBytes,
                                   double expectedTotHotness)
     {
-        CompactionStrategyStatistics stats = strategy.getStatistics();
+        CompactionStrategyStatistics stats = strategy.getStatistics().get(0);
         System.out.println(stats.toString());
 
         assertEquals(keyspace, stats.keyspace());

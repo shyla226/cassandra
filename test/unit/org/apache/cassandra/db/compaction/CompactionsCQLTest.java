@@ -85,7 +85,7 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerMinorCompactionSTCS() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY)  WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':2};");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -97,7 +97,7 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerMinorCompactionLCS() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY) WITH compaction = {'class':'LeveledCompactionStrategy', 'sstable_size_in_mb':1, 'fanout_size':5};");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -110,7 +110,7 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerMinorCompactionDTCS() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY) WITH compaction = {'class':'DateTieredCompactionStrategy', 'min_threshold':2};");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1') using timestamp 1000"); // same timestamp = same window = minor compaction triggered
         flush();
         execute("insert into %s (id) values ('1') using timestamp 1000");
@@ -122,7 +122,7 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerMinorCompactionTWCS() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY) WITH compaction = {'class':'TimeWindowCompactionStrategy', 'min_threshold':2};");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -135,7 +135,7 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerNoMinorCompactionSTCSDisabled() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY)  WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':2, 'enabled':false};");
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -147,14 +147,13 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerMinorCompactionSTCSNodetoolEnabled() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY)  WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':2, 'enabled':false};");
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         getCurrentColumnFamilyStore().enableAutoCompaction();
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
 
         // Alter keyspace replication settings to force compaction strategy reload and check strategy is still enabled
         execute("alter keyspace "+keyspace()+" with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 }");
-        getCurrentColumnFamilyStore().getCompactionStrategyManager().maybeReloadDiskBoundaries();
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
 
         execute("insert into %s (id) values ('1')");
         flush();
@@ -167,9 +166,9 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerNoMinorCompactionSTCSNodetoolDisabled() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY)  WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':2, 'enabled':true};");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         getCurrentColumnFamilyStore().disableAutoCompaction();
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -181,9 +180,9 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerNoMinorCompactionSTCSAlterTable() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY)  WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':2, 'enabled':true};");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("ALTER TABLE %s WITH compaction = {'class': 'SizeTieredCompactionStrategy', 'enabled': false}");
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -195,9 +194,9 @@ public class CompactionsCQLTest extends CQLTester
     public void testTriggerMinorCompactionSTCSAlterTable() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY)  WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':2, 'enabled':false};");
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("ALTER TABLE %s WITH compaction = {'class': 'SizeTieredCompactionStrategy', 'min_threshold': 2, 'enabled': true}");
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         execute("insert into %s (id) values ('1')");
         flush();
         execute("insert into %s (id) values ('1')");
@@ -212,21 +211,21 @@ public class CompactionsCQLTest extends CQLTester
         Map<String, String> localOptions = new HashMap<>();
         localOptions.put("class", "DateTieredCompactionStrategy");
         getCurrentColumnFamilyStore().setCompactionParameters(localOptions);
-        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyManager(), DateTieredCompactionStrategy.class));
+        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyContainer(), DateTieredCompactionStrategy.class));
         // Invalidate disk boundaries to ensure that boundary invalidation will not cause the old strategy to be reloaded
         getCurrentColumnFamilyStore().invalidateDiskBoundaries();
         // altering something non-compaction related
         execute("ALTER TABLE %s WITH gc_grace_seconds = 1000");
         // should keep the local compaction strat
-        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyManager(), DateTieredCompactionStrategy.class));
+        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyContainer(), DateTieredCompactionStrategy.class));
         // Alter keyspace replication settings to force compaction strategy reload
         execute("alter keyspace "+keyspace()+" with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 }");
         // should keep the local compaction strat
-        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyManager(), DateTieredCompactionStrategy.class));
+        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyContainer(), DateTieredCompactionStrategy.class));
         // altering a compaction option
         execute("ALTER TABLE %s WITH compaction = {'class':'SizeTieredCompactionStrategy', 'min_threshold':3}");
         // will use the new option
-        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyManager(), SizeTieredCompactionStrategy.class));
+        assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyContainer(), SizeTieredCompactionStrategy.class));
     }
 
     @Test
@@ -237,12 +236,12 @@ public class CompactionsCQLTest extends CQLTester
         localOptions.put("class", "DateTieredCompactionStrategy");
         localOptions.put("enabled", "false");
         getCurrentColumnFamilyStore().setCompactionParameters(localOptions);
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
         localOptions.clear();
         localOptions.put("class", "DateTieredCompactionStrategy");
         // localOptions.put("enabled", "true"); - this is default!
         getCurrentColumnFamilyStore().setCompactionParameters(localOptions);
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
     }
 
 
@@ -254,10 +253,10 @@ public class CompactionsCQLTest extends CQLTester
         localOptions.put("class", "DateTieredCompactionStrategy");
 
         getCurrentColumnFamilyStore().disableAutoCompaction();
-        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertFalse(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
 
         getCurrentColumnFamilyStore().setCompactionParameters(localOptions);
-        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyManager().isEnabled());
+        assertTrue(getCurrentColumnFamilyStore().getCompactionStrategyContainer().isEnabled());
     }
 
 
@@ -416,7 +415,8 @@ public class CompactionsCQLTest extends CQLTester
             cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
         assertEquals(50, cfs.getLiveSSTables().size());
-        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getUnrepairedUnsafe().first();
+        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) ((CompactionStrategyManager) cfs.getCompactionStrategyContainer())
+                                                                    .getUnrepairedUnsafe().first();
         AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
         // we should be compacting all 50 sstables:
         assertEquals(50, act.transaction.originals().size());
@@ -450,7 +450,9 @@ public class CompactionsCQLTest extends CQLTester
 
         // mark the L1 sstable as compacting to make sure we trigger STCS in L0:
         LifecycleTransaction txn = cfs.getTracker().tryModify(l1sstable, OperationType.COMPACTION);
-        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getUnrepairedUnsafe().first();
+        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) ((CompactionStrategyManager) cfs.getCompactionStrategyContainer())
+                                                                    .getUnrepairedUnsafe()
+                                                                    .first();
         AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
         // note that max_threshold is 60 (more than the amount of L0 sstables), but MAX_COMPACTING_L0 is 32, which means we will trigger STCS with at most max_threshold sstables
         assertEquals(50, act.transaction.originals().size());
@@ -480,7 +482,9 @@ public class CompactionsCQLTest extends CQLTester
         }
         getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) getCurrentColumnFamilyStore().getCompactionStrategyManager().getUnrepairedUnsafe().first();
+        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) ((CompactionStrategyManager) getCurrentColumnFamilyStore().getCompactionStrategyContainer())
+                                                                    .getUnrepairedUnsafe()
+                                                                    .first();
         LeveledCompactionTask lcsTask;
         while (true)
         {
@@ -713,10 +717,10 @@ public class CompactionsCQLTest extends CQLTester
         assertEquals(expectTS, foundTombstone);
     }
 
-    public boolean verifyStrategies(CompactionStrategyManager manager, Class<? extends AbstractCompactionStrategy> expected)
+    public boolean verifyStrategies(CompactionStrategyContainer strategyContainer, Class<? extends AbstractCompactionStrategy> expected)
     {
         boolean found = false;
-        for (List<AbstractCompactionStrategy> strategies : manager.getStrategies())
+        for (List<CompactionStrategy> strategies : strategyContainer.getStrategies())
         {
             if (!strategies.stream().allMatch((strategy) -> strategy.getClass().equals(expected)))
                 return false;

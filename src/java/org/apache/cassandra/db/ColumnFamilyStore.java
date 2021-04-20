@@ -20,8 +20,6 @@ package org.apache.cassandra.db;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
@@ -224,7 +222,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private volatile DefaultValue<Integer> maxCompactionThreshold;
     private volatile DefaultValue<Double> crcCheckChance;
 
-    private final CompactionStrategyManager compactionStrategyManager;
+    private final CompactionStrategyFactory strategyFactory;
+    private volatile CompactionStrategyContainer strategyContainer;
 
     private final Directories directories;
 
@@ -276,7 +275,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             for (ColumnFamilyStore cfs : concatWithIndexes())
                 cfs.crcCheckChance = new DefaultValue(metadata().params.crcCheckChance);
 
-        compactionStrategyManager.maybeReload(metadata());
+        reloadCompactionStrategy(metadata().params.compaction, CompactionStrategyContainer.ReloadReason.METADATA_CHANGE);
 
         indexManager.reload();
 
@@ -288,6 +287,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             currentMemtable.metadataUpdated();
     }
 
+    /**
+     * Reload the compaction strategy using the given compaction parameters and reason.
+     */
+    private void reloadCompactionStrategy(CompactionParams compactionParams, CompactionStrategyContainer.ReloadReason reason)
+    {
+        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason);
+    }
+
     public static Runnable getBackgroundCompactionTaskSubmitter()
     {
         return () -> {
@@ -297,14 +304,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         };
     }
 
-    public Map<String, String> getCompactionParameters()
+    @VisibleForTesting
+    public CompactionStrategyFactory getCompactionFactory()
     {
-        return compactionStrategyManager.getCompactionParams().asMap();
+        return strategyFactory;
     }
 
-    public int getNextCompactionId()
+    public CompactionParams getCompactionParams()
     {
-        return compactionStrategyManager.getNextId();
+        return strategyContainer.getCompactionParams();
+    }
+
+    public Map<String, String> getCompactionParameters()
+    {
+        return getCompactionParams().asMap();
     }
 
     public String getCompactionParametersJson()
@@ -316,9 +329,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         try
         {
-            CompactionParams compactionParams = CompactionParams.fromMap(options);
-            compactionParams.validate();
-            compactionStrategyManager.setNewLocalCompactionStrategy(compactionParams);
+            reloadCompactionStrategy(CompactionParams.fromMap(options), CompactionStrategyContainer.ReloadReason.JMX_REQUEST);
         }
         catch (Throwable t)
         {
@@ -410,13 +421,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
 
         // compaction strategy should be created after the CFS has been prepared
-        compactionStrategyManager = new CompactionStrategyManager(this);
-        compactionStrategyManager.reload(metadata().params.compaction);
+        this.strategyFactory = new CompactionStrategyFactory(this);
+        this.strategyContainer = strategyFactory.createContainer();
 
         if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
         {
             logger.warn("Disabling compaction strategy by setting compaction thresholds to 0 is deprecated, set the compaction option 'enabled' to 'false' instead.");
-            this.compactionStrategyManager.disable();
+            this.strategyContainer.disable();
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes
@@ -545,12 +556,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, boolean isTransient, MetadataCollector metadataCollector, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
     {
-        return getCompactionStrategyManager().createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadataCollector, header, indexManager.listIndexGroups(), lifecycleNewTracker);
+        return getCompactionStrategy().createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadataCollector, header, indexManager.listIndexGroups(), lifecycleNewTracker);
     }
 
     public boolean supportsEarlyOpen()
     {
-        return compactionStrategyManager.supportsEarlyOpen();
+        return strategyContainer.supportsEarlyOpen();
     }
 
     /** call when dropping or renaming a CF. Performs mbean housekeeping and invalidates CFS to other operations */
@@ -578,7 +589,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
         }
 
-        compactionStrategyManager.shutdown();
+        strategyContainer.shutdown();
         SystemKeyspace.removeTruncationRecord(metadata.id);
 
         data.dropSSTables();
@@ -799,20 +810,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         logger.info("User Requested secondary index re-build for {}/{} indexes: {}", ksName, cfName, Joiner.on(',').join(idxNames));
         cfs.indexManager.rebuildIndexesBlocking(Sets.newHashSet(Arrays.asList(idxNames)));
-    }
-
-    public AbstractCompactionStrategy createCompactionStrategyInstance(CompactionParams compactionParams)
-    {
-        try
-        {
-            Constructor<? extends AbstractCompactionStrategy> constructor =
-                compactionParams.klass().getConstructor(ColumnFamilyStore.class, Map.class);
-            return constructor.newInstance(this, compactionParams.options());
-        }
-        catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | InstantiationException e)
-        {
-            throw new RuntimeException(e);
-        }
     }
 
     @Deprecated
@@ -1221,7 +1218,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
             cfs.replaceFlushed(memtable, sstables);
             reclaim(memtable);
-            cfs.compactionStrategyManager.compactionLogger.flush(sstables);
+            cfs.strategyFactory.getCompactionLogger().flush(sstables);
             logger.debug("Flushed to {} ({} sstables, {}), biggest {}, smallest {}",
                          sstables,
                          sstables.size(),
@@ -1691,12 +1688,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 UUID session = sst.getPendingRepair();
                 return session != null && sessions.contains(session);
             };
-            return runWithCompactionsDisabled(() -> compactionStrategyManager.releaseRepairData(sessions),
+            return runWithCompactionsDisabled(() -> strategyContainer.releaseRepairData(sessions),
                                               predicate, false, true, true);
         }
         else
         {
-            return compactionStrategyManager.releaseRepairData(sessions);
+            return strategyContainer.releaseRepairData(sessions);
         }
     }
 
@@ -2358,7 +2355,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             cfs.runWithCompactionsDisabled((Callable<Void>) () -> {
                 cfs.data.reset(memtableFactory.create(new AtomicReference<>(CommitLogPosition.NONE), cfs.metadata, cfs));
-                cfs.compactionStrategyManager.forceReload();
+                cfs.reloadCompactionStrategy(metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
                 return null;
             }, true, false);
         }
@@ -2548,7 +2545,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             for (ColumnFamilyStore cfs : toPause)
             {
                 successfullyPaused.ensureCapacity(successfullyPaused.size() + 1); // to avoid OOM:ing after pausing the strategies
-                cfs.getCompactionStrategyManager().pause();
+                cfs.getCompactionStrategy().pause();
                 successfullyPaused.add(cfs);
             }
             return () -> maybeFail(resumeAll(null, toPause));
@@ -2566,7 +2563,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             try
             {
-                cfs.getCompactionStrategyManager().resume();
+                cfs.getCompactionStrategy().resume();
             }
             catch (Throwable t)
             {
@@ -2580,8 +2577,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         Callable<LifecycleTransaction> callable = () -> {
             assert data.getCompacting().isEmpty() : data.getCompacting();
-            Iterable<SSTableReader> sstables = getLiveSSTables();
-            sstables = AbstractCompactionStrategy.filterSuspectSSTables(sstables);
+            Iterable<SSTableReader> sstables = Iterables.filter(getLiveSSTables(), sstable -> !sstable.isMarkedSuspect());
             LifecycleTransaction modifier = data.tryModify(sstables, operationType);
             assert modifier != null: "something marked things compacting while compactions are disabled";
             return modifier;
@@ -2604,7 +2600,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         // we don't use CompactionStrategy.pause since we don't want users flipping that on and off
         // during runWithCompactionsDisabled
-        compactionStrategyManager.disable();
+        strategyContainer.disable();
+    }
+
+    public boolean compactionShouldBeEnabled()
+    {
+        return strategyContainer.getCompactionParams().isEnabled();
     }
 
     public void enableAutoCompaction()
@@ -2619,7 +2620,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @VisibleForTesting
     public void enableAutoCompaction(boolean waitForFutures)
     {
-        compactionStrategyManager.enable();
+        strategyContainer.enable();
         List<Future<?>> futures = CompactionManager.instance.submitBackground(this);
         if (waitForFutures)
             FBUtilities.waitOnFutures(futures);
@@ -2627,26 +2628,54 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public boolean isAutoCompactionDisabled()
     {
-        return !this.compactionStrategyManager.isEnabled();
+        return !this.strategyContainer.isEnabled();
     }
 
-    /*
-     JMX getters and setters for the Default<T>s.
-       - get/set minCompactionThreshold
-       - get/set maxCompactionThreshold
-       - get     memsize
-       - get     memops
-       - get/set memtime
+    /**
+     * Return the compaction strategy for this CFS. Even though internally the strategy container
+     * implements the strategy, we would like to just expose {@link CompactionStrategy} externally.
+     * This is not currently possible for hte reasons explained in {@link this#getCompactionStrategyContainer()},
+     * so we expose the container as well, but using a separate method, marked as deprecated.
+     *
+     * @return the compaction strategy for this CFS
      */
-
-    public CompactionStrategyManager getCompactionStrategyManager()
+    public CompactionStrategy getCompactionStrategy()
     {
-        return compactionStrategyManager;
+        return strategyContainer;
     }
 
-    public CompactionLogger getCompactionLogger()
+    /**
+     * The reasons for exposing the compaction strategy container are the following:
+     *
+     * - Unit tests
+     * - Repair
+     *
+     * Eventually we would like to only expose the {@link CompactionStrategy}, so for new code call
+     * {@link this#getCompactionStrategy()} instead.
+     *
+     * @return the compaction strategy container
+     */
+    @Deprecated
+    @VisibleForTesting
+    public CompactionStrategyContainer getCompactionStrategyContainer()
     {
-        return compactionStrategyManager == null ? null : compactionStrategyManager.compactionLogger;
+        return strategyContainer;
+    }
+
+    /**
+     * This option determines if tombstones should only be removed when the sstable has been repaired.
+     * Because this option was introduced in patch releases (I'm guessing), the compaction parameters were
+     * abused. Eventually this option should be moved out of the compaction parameters. TODO: move it
+     * to the new compaction strategy interface.
+     *
+     * @return true if tombstones can only be removed if the sstable has been repaired
+     */
+    public boolean onlyPurgeRepairedTombstones()
+    {
+        // Here we need to ask the CSM for the parameters in case they were changed over JMX without changing the schema,
+        // for now the CSM has the up-to-date copy of the params
+        CompactionParams params = strategyContainer.getCompactionParams();
+        return Boolean.parseBoolean(params.options().get(CompactionStrategyOptions.ONLY_PURGE_REPAIRED_TOMBSTONES));
     }
 
     public void setCrcCheckChance(double crcCheckChance)
@@ -2845,17 +2874,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public int getUnleveledSSTables()
     {
-        return compactionStrategyManager.getUnleveledSSTables();
+        return strategyContainer.getUnleveledSSTables();
     }
 
     public int[] getSSTableCountPerLevel()
     {
-        return compactionStrategyManager.getSSTableCountPerLevel();
+        return strategyContainer.getSSTableCountPerLevel();
     }
 
     public int getLevelFanoutSize()
     {
-        return compactionStrategyManager.getLevelFanoutSize();
+        return strategyContainer.getLevelFanoutSize();
     }
 
     public static class ViewFragment

@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -45,7 +44,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.TaskSupplier;
@@ -61,11 +59,11 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.notifications.INotification;
-import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
@@ -73,7 +71,6 @@ import org.apache.cassandra.notifications.SSTableMetadataChanged;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.repair.consistent.admin.CleanupSummary;
 import org.apache.cassandra.schema.CompactionParams;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 
 import static org.apache.cassandra.db.compaction.AbstractStrategyHolder.GroupedSSTableContainer;
@@ -99,7 +96,7 @@ import static org.apache.cassandra.db.compaction.AbstractStrategyHolder.GroupedS
  *
  */
 
-public class CompactionStrategyManager implements INotificationConsumer
+class CompactionStrategyManager implements CompactionStrategyContainer
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionStrategyManager.class);
     public final CompactionLogger compactionLogger;
@@ -124,34 +121,36 @@ public class CompactionStrategyManager implements INotificationConsumer
 
     private final ImmutableList<AbstractStrategyHolder> holders;
 
-    /** This is used to generate a unique index for compaction strategies */
-    private final AtomicInteger idGenerator;
-
     private volatile CompactionParams params;
     private DiskBoundaries currentBoundaries;
     private volatile boolean enabled;
     private volatile boolean isActive = true;
 
     /*
-        We keep a copy of the schema compaction parameters here to be able to decide if we
-        should update the compaction strategy in maybeReload() due to an ALTER.
+        We keep a copy of the table metadata compaction parameters here to be able to decide if we
+        should update the compaction strategy due to a metadata change such as a schema changed
+        caused by an ALTER TABLE.
 
-        If a user changes the local compaction strategy and then later ALTERs a compaction parameter,
-        we will use the new compaction parameters.
+        If a user changes the local compaction strategy via JMX and then later ALTERs a compaction parameter,
+        we will use the new compaction parameters but we will not override the JMX parameters if compaction
+        was not changed by the ALTER.
      */
-    private volatile CompactionParams schemaCompactionParams;
+    private volatile CompactionParams metadataParams;
     private volatile boolean supportsEarlyOpen;
     private volatile int fanout;
     private volatile long maxSSTableSizeBytes;
     private volatile String name;
 
-    public CompactionStrategyManager(ColumnFamilyStore cfs)
+    public CompactionStrategyManager(CompactionStrategyFactory strategyFactory)
     {
-        this(cfs, cfs::getDiskBoundaries, cfs.getPartitioner().splitter().isPresent());
+        this(strategyFactory,
+             () -> strategyFactory.getCfs().getDiskBoundaries(),
+             strategyFactory.getCfs().getPartitioner().splitter().isPresent());
     }
 
     @VisibleForTesting
-    public CompactionStrategyManager(ColumnFamilyStore cfs, Supplier<DiskBoundaries> boundariesSupplier,
+    public CompactionStrategyManager(CompactionStrategyFactory strategyFactory,
+                                     Supplier<DiskBoundaries> boundariesSupplier,
                                      boolean partitionSSTablesByTokenRange)
     {
         AbstractStrategyHolder.DestinationRouter router = new AbstractStrategyHolder.DestinationRouter()
@@ -166,31 +165,23 @@ public class CompactionStrategyManager implements INotificationConsumer
                 return compactionStrategyIndexForDirectory(descriptor);
             }
         };
-        transientRepairs = new PendingRepairHolder(cfs, router, true);
-        pendingRepairs = new PendingRepairHolder(cfs, router, false);
-        repaired = new CompactionStrategyHolder(cfs, router, true);
-        unrepaired = new CompactionStrategyHolder(cfs, router, false);
+
+        cfs = strategyFactory.getCfs();
+
+        transientRepairs = new PendingRepairHolder(cfs, strategyFactory, router, true);
+        pendingRepairs = new PendingRepairHolder(cfs, strategyFactory, router, false);
+        repaired = new CompactionStrategyHolder(cfs, strategyFactory, router, true);
+        unrepaired = new CompactionStrategyHolder(cfs, strategyFactory, router, false);
         holders = ImmutableList.of(transientRepairs, pendingRepairs, repaired, unrepaired);
-        idGenerator = new AtomicInteger(0);
 
         cfs.getTracker().subscribe(this);
         logger.trace("{} subscribed to the data tracker.", this);
-        this.cfs = cfs;
-        this.compactionLogger = new CompactionLogger(cfs, this);
+
+        compactionLogger = strategyFactory.getCompactionLogger();
         this.boundariesSupplier = boundariesSupplier;
         this.partitionSSTablesByTokenRange = partitionSSTablesByTokenRange;
         params = cfs.metadata().params.compaction;
         enabled = params.isEnabled();
-    }
-
-    CompactionLogger compactionLogger()
-    {
-        return compactionLogger;
-    }
-
-    public int getNextId()
-    {
-        return idGenerator.incrementAndGet();
     }
 
     /**
@@ -198,6 +189,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      *
      * Returns a task for the compaction strategy that needs it the most (most estimated remaining tasks)
      */
+    @Override
     public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
     {
         maybeReloadDiskBoundaries();
@@ -247,8 +239,9 @@ public class CompactionStrategyManager implements INotificationConsumer
      * @return
      */
     @VisibleForTesting
+    @Override
     @SuppressWarnings("resource") // transaction is closed by AbstractCompactionTask::execute
-    AbstractCompactionTask findUpgradeSSTableTask()
+    public AbstractCompactionTask findUpgradeSSTableTask()
     {
         if (!isEnabled() || !DatabaseDescriptor.automaticSSTableUpgrade())
             return null;
@@ -273,16 +266,25 @@ public class CompactionStrategyManager implements INotificationConsumer
         return null;
     }
 
+    @Override
+    public CompactionLogger getCompactionLogger()
+    {
+        return compactionLogger;
+    }
+
+    @Override
     public boolean isEnabled()
     {
         return enabled && isActive;
     }
 
+    @Override
     public boolean isActive()
     {
         return isActive;
     }
 
+    @Override
     public void resume()
     {
         writeLock.lock();
@@ -301,6 +303,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      *
      * Separate call from enable/disable to not have to save the enabled-state externally
       */
+    @Override
     public void pause()
     {
         writeLock.lock();
@@ -315,7 +318,8 @@ public class CompactionStrategyManager implements INotificationConsumer
 
     }
 
-    private void startup()
+    @Override
+    public void startup()
     {
         writeLock.lock();
         try
@@ -327,7 +331,6 @@ public class CompactionStrategyManager implements INotificationConsumer
             }
             holders.forEach(AbstractStrategyHolder::startup);
             supportsEarlyOpen = repaired.first().supportsEarlyOpen();
-            fanout = (repaired.first() instanceof LeveledCompactionStrategy) ? ((LeveledCompactionStrategy) repaired.first()).getLevelFanoutSize() : LeveledCompactionStrategy.DEFAULT_LEVEL_FANOUT_SIZE;
             maxSSTableSizeBytes = repaired.first().getMaxSSTableBytes();
             name = repaired.first().getName();
         }
@@ -336,7 +339,7 @@ public class CompactionStrategyManager implements INotificationConsumer
             writeLock.unlock();
         }
 
-        if (repaired.first().logAll)
+        if (repaired.first().getOptions().isLogAll())
             compactionLogger.enable();
     }
 
@@ -347,7 +350,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      * @param sstable
      * @return
      */
-    public AbstractCompactionStrategy getCompactionStrategyFor(SSTableReader sstable)
+    AbstractCompactionStrategy getCompactionStrategyFor(SSTableReader sstable)
     {
         maybeReloadDiskBoundaries();
         return compactionStrategyFor(sstable);
@@ -435,6 +438,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         return transientRepairs;
     }
 
+    @Override
     public boolean hasDataForPendingRepair(UUID sessionID)
     {
         readLock.lock();
@@ -448,6 +452,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
+    @Override
     public void shutdown()
     {
         writeLock.lock();
@@ -456,42 +461,6 @@ public class CompactionStrategyManager implements INotificationConsumer
             isActive = false;
             holders.forEach(AbstractStrategyHolder::shutdown);
             compactionLogger.disable();
-        }
-        finally
-        {
-            writeLock.unlock();
-        }
-    }
-
-    public void maybeReload(TableMetadata metadata)
-    {
-        // compare the old schema configuration to the new one, ignore any locally set changes.
-        if (metadata.params.compaction.equals(schemaCompactionParams))
-            return;
-
-        writeLock.lock();
-        try
-        {
-            // compare the old schema configuration to the new one, ignore any locally set changes.
-            if (metadata.params.compaction.equals(schemaCompactionParams))
-                return;
-            reload(metadata.params.compaction);
-        }
-        finally
-        {
-            writeLock.unlock();
-        }
-    }
-
-    /**
-     * Version of the above forcing the strategy to always be reloaded. Used by tests that need to clear the state.
-     */
-    public void forceReload()
-    {
-        writeLock.lock();
-        try
-        {
-            reload(schemaCompactionParams);
         }
         finally
         {
@@ -522,7 +491,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         {
             if (!currentBoundaries.isOutOfDate())
                 return;
-            reload(params);
+            doReload(params, ReloadReason.DISK_BOUNDARIES_UPDATED);
         }
         finally
         {
@@ -530,43 +499,66 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
-    /**
-     * Reload the compaction strategies
-     *
-     * Called after changing configuration and at startup.
-     * @param newCompactionParams
-     */
-    public void reload(CompactionParams newCompactionParams)
+    @Override
+    public void reload(CompactionParams newCompactionParams, ReloadReason reason)
     {
-        boolean enabledWithJMX = enabled && !shouldBeEnabled();
-        boolean disabledWithJMX = !enabled && shouldBeEnabled();
-
-        if (currentBoundaries != null)
+        writeLock.lock();
+        try
         {
-            if (!newCompactionParams.equals(schemaCompactionParams))
-                logger.debug("Recreating compaction strategy - compaction parameters changed for {}.{}", cfs.keyspace.getName(), cfs.getTableName());
-            else if (currentBoundaries.isOutOfDate())
-                logger.debug("Recreating compaction strategy - disk boundaries are out of date for {}.{}.", cfs.keyspace.getName(), cfs.getTableName());
+            doReload(newCompactionParams, reason);
         }
+        finally
+        {
+            writeLock.unlock();
+        }
+    }
 
-        if (currentBoundaries == null || currentBoundaries.isOutOfDate())
+    private void doReload(CompactionParams compactionParams, ReloadReason reason)
+    {
+        // If we were called due to a metadata change but the compaction parameters are the same then
+        // don't reload since we risk overriding parameters set via jmx
+        if (reason == ReloadReason.METADATA_CHANGE && compactionParams.equals(metadataParams))
+            return;
+
+        boolean updateDiskBoundaries = reason == ReloadReason.FULL || reason == ReloadReason.DISK_BOUNDARIES_UPDATED;
+        boolean diskBoundariesNeedUpdating = updateDiskBoundaries && (currentBoundaries == null || currentBoundaries.isOutOfDate());
+        boolean paramsNeedUpdating = !compactionParams.equals(params);
+
+        boolean prevEnabledWithJMX = enabled && !params.isEnabled(); // previously enabled over JMX because params and enabled do not agree
+        boolean prevDisabledWithJMX = !enabled && params.isEnabled(); // previously disabled over JMX because params and enabled do not agree
+        boolean enabled = reason == ReloadReason.JMX_REQUEST ?
+                          compactionParams.isEnabled() : // for JXM requests we only consider the params
+                          !prevDisabledWithJMX && (compactionParams.isEnabled() || prevEnabledWithJMX); // otherwise we consider the params and the previous JMX requests
+
+        logger.debug("Recreating compaction strategy for {}.{}, reason: {}, params updated: {}, disk boundaries updated: {}, enabled: {}, params: {} -> {}",
+                     cfs.keyspace.getName(), cfs.getTableName(), reason, paramsNeedUpdating, diskBoundariesNeedUpdating, enabled, params, compactionParams);
+
+        if (diskBoundariesNeedUpdating)
             currentBoundaries = boundariesSupplier.get();
 
-        setStrategy(newCompactionParams);
-        schemaCompactionParams = cfs.metadata().params.compaction;
+        int numPartitions = getNumTokenPartitions();
+        for (AbstractStrategyHolder holder : holders)
+            holder.setStrategy(compactionParams, numPartitions);
 
-        if (disabledWithJMX || !shouldBeEnabled() && !enabledWithJMX)
-            disable();
-        else
+        params = compactionParams;
+
+        if (reason == ReloadReason.FULL)
+            metadataParams = cfs.metadata().params.compaction;
+
+        if (enabled)
             enable();
+        else
+            disable();
+
         startup();
     }
 
-    private Iterable<AbstractCompactionStrategy> getAllStrategies()
+    private Iterable<CompactionStrategy> getAllStrategies()
     {
         return Iterables.concat(Iterables.transform(holders, AbstractStrategyHolder::allStrategies));
     }
 
+    @Override
     public int getUnleveledSSTables()
     {
         maybeReloadDiskBoundaries();
@@ -576,7 +568,7 @@ public class CompactionStrategyManager implements INotificationConsumer
             if (repaired.first() instanceof LeveledCompactionStrategy)
             {
                 int count = 0;
-                for (AbstractCompactionStrategy strategy : getAllStrategies())
+                for (CompactionStrategy strategy : getAllStrategies())
                     count += ((LeveledCompactionStrategy) strategy).getLevelSize(0);
                 return count;
             }
@@ -588,11 +580,13 @@ public class CompactionStrategyManager implements INotificationConsumer
         return 0;
     }
 
+    @Override
     public int getLevelFanoutSize()
     {
-        return fanout;
+        return repaired.first().getLevelFanoutSize();
     }
 
+    @Override
     public int[] getSSTableCountPerLevel()
     {
         maybeReloadDiskBoundaries();
@@ -602,19 +596,22 @@ public class CompactionStrategyManager implements INotificationConsumer
             if (repaired.first() instanceof LeveledCompactionStrategy)
             {
                 int[] res = new int[LeveledGenerations.MAX_LEVEL_COUNT];
-                for (AbstractCompactionStrategy strategy : getAllStrategies())
+                for (CompactionStrategy strategy : getAllStrategies())
                 {
                     int[] repairedCountPerLevel = ((LeveledCompactionStrategy) strategy).getAllLevelSize();
                     res = sumArrays(res, repairedCountPerLevel);
                 }
                 return res;
             }
+            else
+            {
+                return new int[0];
+            }
         }
         finally
         {
             readLock.unlock();
         }
-        return null;
     }
 
     static int[] sumArrays(int[] a, int[] b)
@@ -694,6 +691,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      *
      * lives in matches the list index of the holder that's responsible for it
      */
+    @Override
     public List<GroupedSSTableContainer> groupSSTables(Iterable<SSTableReader> sstables)
     {
         List<GroupedSSTableContainer> classified = new ArrayList<>(holders.size());
@@ -805,6 +803,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
+    @Override
     public void enable()
     {
         writeLock.lock();
@@ -819,6 +818,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
+    @Override
     public void disable()
     {
         writeLock.lock();
@@ -841,7 +841,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      * @return
      */
     @SuppressWarnings("resource")
-    public AbstractCompactionStrategy.ScannerList maybeGetScanners(Collection<SSTableReader> sstables,  Collection<Range<Token>> ranges)
+    private ScannerList maybeGetScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
     {
         maybeReloadDiskBoundaries();
         List<ISSTableScanner> scanners = new ArrayList<>(sstables.size());
@@ -865,10 +865,11 @@ public class CompactionStrategyManager implements INotificationConsumer
         {
             readLock.unlock();
         }
-        return new AbstractCompactionStrategy.ScannerList(scanners);
+        return new ScannerList(scanners);
     }
 
-    public AbstractCompactionStrategy.ScannerList getScanners(Collection<SSTableReader> sstables,  Collection<Range<Token>> ranges)
+    @Override
+    public ScannerList getScanners(Collection<SSTableReader> sstables,  Collection<Range<Token>> ranges)
     {
         while (true)
         {
@@ -883,11 +884,21 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
-    public AbstractCompactionStrategy.ScannerList getScanners(Collection<SSTableReader> sstables)
+    public ScannerList getScanners(Collection<SSTableReader> sstables)
     {
         return getScanners(sstables, null);
     }
 
+    @Override
+    public Set<SSTableReader> getSSTables()
+    {
+        return getStrategies().stream()
+                              .flatMap(Collection::stream)
+                              .flatMap(strategy -> strategy.getSSTables().stream())
+                              .collect(Collectors.toSet());
+    }
+
+    @Override
     public Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> sstablesToGroup)
     {
         maybeReloadDiskBoundaries();
@@ -902,12 +913,14 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
+    @Override
     public long getMaxSSTableBytes()
     {
         return maxSSTableSizeBytes;
     }
 
-    public AbstractCompactionTask getCompactionTask(LifecycleTransaction txn, int gcBefore, long maxSSTableBytes)
+    @Override
+    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, int gcBefore, long maxSSTableBytes)
     {
         maybeReloadDiskBoundaries();
         readLock.lock();
@@ -920,7 +933,6 @@ public class CompactionStrategyManager implements INotificationConsumer
         {
             readLock.unlock();
         }
-
     }
 
     private void validateForCompaction(Iterable<SSTableReader> input)
@@ -950,6 +962,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
+    @Override
     public CompactionTasks getMaximalTasks(final int gcBefore, final boolean splitOutput)
     {
         maybeReloadDiskBoundaries();
@@ -983,6 +996,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      * @param gcBefore gc grace period, throw away tombstones older than this
      * @return a list of compaction tasks corresponding to the sstables requested
      */
+    @Override
     public CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, int gcBefore)
     {
         maybeReloadDiskBoundaries();
@@ -1003,38 +1017,37 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
+    @Override
     public int getEstimatedRemainingTasks()
     {
         return getStrategies(false).stream()
                                    .flatMap(list -> list.stream())
-                                   .map(AbstractCompactionStrategy::getEstimatedRemainingTasks)
+                                   .map(CompactionStrategy::getEstimatedRemainingTasks)
                                    .reduce(0, Integer::sum);
     }
 
-    int getTotalCompactions()
+    @Override
+    public int getTotalCompactions()
     {
         return getStrategies(false).stream()
                                    .flatMap(list -> list.stream())
-                                   .map(AbstractCompactionStrategy::getTotalCompactions)
+                                   .map(CompactionStrategy::getTotalCompactions)
                                    .reduce(0, Integer::sum);
     }
 
-    public boolean shouldBeEnabled()
-    {
-        return params.isEnabled();
-    }
-
+    @Override
     public String getName()
     {
         return name;
     }
 
-    public List<List<AbstractCompactionStrategy>> getStrategies()
+    @Override
+    public List<List<CompactionStrategy>> getStrategies()
     {
-        return getStrategies(true);
+        return getStrategies(true).stream().collect(Collectors.toList());
     }
 
-    private List<List<AbstractCompactionStrategy>> getStrategies(boolean checkBoundaries)
+    private List<List<CompactionStrategy>> getStrategies(boolean checkBoundaries)
     {
         if (checkBoundaries)
             maybeReloadDiskBoundaries();
@@ -1055,32 +1068,15 @@ public class CompactionStrategyManager implements INotificationConsumer
     /**
      * @return the statistics for the compaction strategies that have compactions in progress or pending
      */
-    public List<CompactionStrategyStatistics> getStrategyStatistics()
+    @Override
+    public List<CompactionStrategyStatistics> getStatistics()
     {
         return getStrategies(false).stream()
                                    .flatMap(list -> list.stream())
                                    .filter(strategy -> strategy.getTotalCompactions() > 0)
-                                   .map(AbstractCompactionStrategy::getStatistics)
+                                   .map(CompactionStrategy::getStatistics)
+                                   .flatMap(List::stream)
                                    .collect(Collectors.toList());
-    }
-
-    public void setNewLocalCompactionStrategy(CompactionParams params)
-    {
-        logger.info("Switching local compaction strategy from {} to {}}", this.params, params);
-        writeLock.lock();
-        try
-        {
-            setStrategy(params);
-            if (shouldBeEnabled())
-                enable();
-            else
-                disable();
-            startup();
-        }
-        finally
-        {
-            writeLock.unlock();
-        }
     }
 
     private int getNumTokenPartitions()
@@ -1088,24 +1084,13 @@ public class CompactionStrategyManager implements INotificationConsumer
         return partitionSSTablesByTokenRange ? currentBoundaries.directories.size() : 1;
     }
 
-    private void setStrategy(CompactionParams params)
-    {
-        int numPartitions = getNumTokenPartitions();
-        for (AbstractStrategyHolder holder : holders)
-            holder.setStrategy(params, numPartitions);
-        this.params = params;
-    }
-
+    @Override
     public CompactionParams getCompactionParams()
     {
         return params;
     }
 
-    public boolean onlyPurgeRepairedTombstones()
-    {
-        return Boolean.parseBoolean(params.options().get(AbstractCompactionStrategy.ONLY_PURGE_REPAIRED_TOMBSTONES));
-    }
-
+    @Override
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor,
                                                        long keyCount,
                                                        long repairedAt,
@@ -1137,64 +1122,18 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
-    public boolean isRepaired(AbstractCompactionStrategy strategy)
-    {
-        return repaired.getStrategyIndex(strategy) >= 0;
-    }
-
-    public List<String> getStrategyFolders(AbstractCompactionStrategy strategy)
-    {
-        readLock.lock();
-        try
-        {
-            Directories.DataDirectory[] locations = cfs.getDirectories().getWriteableLocations();
-            if (partitionSSTablesByTokenRange)
-            {
-                for (AbstractStrategyHolder holder : holders)
-                {
-                    int idx = holder.getStrategyIndex(strategy);
-                    if (idx >= 0)
-                        return Collections.singletonList(locations[idx].location.getAbsolutePath());
-                }
-            }
-            List<String> folders = new ArrayList<>(locations.length);
-            for (Directories.DataDirectory location : locations)
-            {
-                folders.add(location.location.getAbsolutePath());
-            }
-            return folders;
-        }
-        finally
-        {
-            readLock.unlock();
-        }
-    }
-
+    @Override
     public boolean supportsEarlyOpen()
     {
         return supportsEarlyOpen;
-    }
-
-    @VisibleForTesting
-    List<PendingRepairManager> getPendingRepairManagers()
-    {
-        maybeReloadDiskBoundaries();
-        readLock.lock();
-        try
-        {
-            return Lists.newArrayList(pendingRepairs.getManagers());
-        }
-        finally
-        {
-            readLock.unlock();
-        }
     }
 
     /**
      * Mutates sstable repairedAt times and notifies listeners of the change with the writeLock held. Prevents races
      * with other processes between when the metadata is changed and when sstables are moved between strategies.
       */
-    public void mutateRepaired(Collection<SSTableReader> sstables, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
+    @Override
+    public int mutateRepaired(Collection<SSTableReader> sstables, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
     {
         Set<SSTableReader> changed = new HashSet<>();
 
@@ -1221,6 +1160,23 @@ public class CompactionStrategyManager implements INotificationConsumer
                 writeLock.unlock();
             }
         }
+        return changed.size();
+    }
+
+    @Override
+    public Set<UUID> pendingRepairs()
+    {
+        readLock.lock();
+        try
+        {
+            Set<UUID> ids = new HashSet<>();
+            pendingRepairs.getManagers().forEach(p -> ids.addAll(p.getSessions()));
+            return ids;
+        }
+        finally
+        {
+            readLock.unlock();
+        }
     }
 
     private static void verifyMetadata(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient)
@@ -1233,6 +1189,7 @@ public class CompactionStrategyManager implements INotificationConsumer
             throw new IllegalStateException(String.format("Failed setting isTransient to %b on %s (isTransient is %b)", isTransient, sstable, sstable.isTransient()));
     }
 
+    @Override
     public CleanupSummary releaseRepairData(Collection<UUID> sessions)
     {
         List<CleanupTask> cleanupTasks = new ArrayList<>();
@@ -1253,5 +1210,21 @@ public class CompactionStrategyManager implements INotificationConsumer
             summary = CleanupSummary.add(summary, task.cleanup());
 
         return summary;
+    }
+
+    //
+    // CompactionObserver - because the strategies observe compactions, for CSM this is currently a no-op
+    //
+
+    @Override
+    public void onInProgress(CompactionProgress progress)
+    {
+
+    }
+
+    @Override
+    public void onCompleted(UUID id)
+    {
+
     }
 }

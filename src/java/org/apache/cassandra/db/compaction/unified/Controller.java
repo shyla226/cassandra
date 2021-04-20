@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -32,7 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
+import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.DefaultNameFactory;
@@ -192,7 +193,7 @@ public abstract class Controller
     }
 
     /**
-     * The strategy will call this method each time {@link AbstractCompactionStrategy#getNextBackgroundTask(int)} is called.
+     * The strategy will call this method each time {@link CompactionStrategy#getNextBackgroundTask(int)} is called.
      */
     public void onStrategyBackgroundTaskRequest()
     {
@@ -291,7 +292,7 @@ public abstract class Controller
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
-        // options was already copied by the caller by calling AbstractCompactionStrategy.validateOptions(options)
+        options = new HashMap<>(options);
 
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.remove(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
         options.remove(Controller.MINIMAL_SSTABLE_SIZE_OPTION_MB);

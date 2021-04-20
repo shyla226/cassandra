@@ -28,7 +28,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
+import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.utils.FBUtilities;
@@ -62,7 +62,7 @@ public class CostsCalculator
     private final MovingAverageDelta bytesInserted;
     private final MovingAverage numSSTables;
     private final MovingAverage spaceUsed;
-    private final AbstractCompactionStrategy strategy;
+    private final UnifiedCompactionStrategy strategy;
 
     private final ReentrantReadWriteLock lock;
     private final ReentrantReadWriteLock.ReadLock readLock;
@@ -71,7 +71,7 @@ public class CostsCalculator
 
     CostsCalculator(Environment env,
                     TimeSource timeSource,
-                    AbstractCompactionStrategy strategy,
+                    UnifiedCompactionStrategy strategy,
                     ScheduledExecutorService executorService,
                     double survivalFactor)
     {
@@ -80,7 +80,7 @@ public class CostsCalculator
 
     CostsCalculator(Environment env,
                     TimeSource timeSource,
-                    AbstractCompactionStrategy strategy,
+                    UnifiedCompactionStrategy strategy,
                     ScheduledExecutorService executorService,
                     double survivalFactor,
                     double readMultiplier,

@@ -914,7 +914,7 @@ public abstract class CompactionAggregate
      * @return the statistics about this compactions
      */
     static CompactionStrategyStatistics getStatistics(TableMetadata metadata,
-                                                      AbstractCompactionStrategy strategy,
+                                                      CompactionStrategy strategy,
                                                       Collection<CompactionAggregate> aggregates)
     {
         List<Pair<Long, CompactionAggregateStatistics>> statistcs = new ArrayList<>(aggregates.size());

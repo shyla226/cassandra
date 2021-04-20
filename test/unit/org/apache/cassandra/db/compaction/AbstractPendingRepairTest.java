@@ -47,7 +47,8 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
     protected final String tbl = "tbl";
     protected TableMetadata cfm;
     protected ColumnFamilyStore cfs;
-    protected CompactionStrategyManager csm;
+    protected CompactionStrategyFactory strategyFactory;
+    protected CompactionStrategyContainer compactionStrategyContainer;
     protected static ActiveRepairService ARS;
 
     private int nextSSTableKey = 0;
@@ -71,7 +72,8 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         cfm = CreateTableStatement.parse(String.format("CREATE TABLE %s.%s (k INT PRIMARY KEY, v INT)", ks, tbl), ks).build();
         SchemaLoader.createKeyspace(ks, KeyspaceParams.simple(1), cfm);
         cfs = Schema.instance.getColumnFamilyStoreInstance(cfm.id);
-        csm = cfs.getCompactionStrategyManager();
+        strategyFactory = cfs.getCompactionFactory();
+        compactionStrategyContainer = cfs.getCompactionStrategyContainer();
         nextSSTableKey = 0;
         cfs.disableAutoCompaction();
     }
@@ -94,7 +96,9 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         SSTableReader sstable = diff.iterator().next();
         if (orphan)
         {
-            csm.getUnrepairedUnsafe().allStrategies().forEach(acs -> acs.removeSSTable(sstable));
+            compactionStrategyContainer.getStrategies()
+                                       .get(1)
+                                       .forEach(acs -> ((AbstractCompactionStrategy) acs).removeSSTable(sstable));
         }
         return sstable;
     }

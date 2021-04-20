@@ -21,18 +21,17 @@ package org.apache.cassandra.db.compaction;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
-import java.lang.ref.WeakReference;
 import java.nio.file.*;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -47,8 +46,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Throwables;
@@ -60,26 +59,6 @@ import org.apache.cassandra.utils.Throwables;
 public class CompactionLogger
 {
     private static final DateFormat dateFormatter = new SimpleDateFormat("HH:mm:ss.SSS");
-
-    public interface Strategy
-    {
-        JsonNode sstable(SSTableReader sstable);
-
-        JsonNode options();
-
-        static Strategy none = new Strategy()
-        {
-            public JsonNode sstable(SSTableReader sstable)
-            {
-                return null;
-            }
-
-            public JsonNode options()
-            {
-                return null;
-            }
-        };
-    }
 
     /**
      * This will produce the compaction strategy's starting information.
@@ -121,140 +100,124 @@ public class CompactionLogger
         void close();
     }
 
-    private interface CompactionStrategyAndTableFunction
-    {
-        JsonNode apply(AbstractCompactionStrategy strategy, SSTableReader sstable);
-    }
-
     private static final JsonNodeFactory json = JsonNodeFactory.instance;
     private static final Logger logger = LoggerFactory.getLogger(CompactionLogger.class);
 
     private static final ExecutorService loggerService = Executors.newFixedThreadPool(1, new NamedThreadFactory("compaction-logger"));
     private static final Writer jsonWriter = new CompactionLogSerializer("compaction", "log", loggerService);
 
-    private final WeakReference<ColumnFamilyStore> cfsRef;
-    private final WeakReference<CompactionStrategyManager> csmRef;
-    private final Map<AbstractCompactionStrategy, Writer> csvWriters = new MapMaker().makeMap();
+    private final String keyspace;
+    private final String table;
+    private final AtomicInteger identifier = new AtomicInteger(0);
+    private final Map<CompactionStrategy, String> compactionStrategyMapping = new MapMaker().weakKeys().makeMap();
+    private final Map<CompactionStrategy, Writer> csvWriters = new MapMaker().makeMap();
     private final AtomicBoolean enabled = new AtomicBoolean(false);
 
-    CompactionLogger(ColumnFamilyStore cfs, CompactionStrategyManager csm)
+    CompactionLogger(TableMetadata metadata)
     {
-        csmRef = new WeakReference<>(csm);
-        cfsRef = new WeakReference<>(cfs);
+        this.keyspace = metadata.keyspace;
+        this.table = metadata.name;
+    }
+
+    void strategyCreated(CompactionStrategy strategy)
+    {
+        compactionStrategyMapping.computeIfAbsent(strategy, s -> String.valueOf(identifier.getAndIncrement()));
     }
 
     /**
-     * Visit all the strategies in the {@link CompactionStrategyManager} reference, if available.
+     * Visit all the strategies.
      *
      * @param consumer a consumer function that receives all the strategies one by one
      */
-    private void visitStrategies(Consumer<AbstractCompactionStrategy> consumer)
+    private void visitStrategies(Consumer<CompactionStrategy> consumer)
     {
-        CompactionStrategyManager csm = csmRef.get();
-        if (csm == null)
-            return;
-        csm.getStrategies()
-           .forEach(l -> l.forEach(consumer));
+        compactionStrategyMapping.keySet().forEach(consumer);
     }
 
     /**
-     * Rely on {@link this#visitStrategies(Consumer)} to visit all the strategies in the {@link CompactionStrategyManager}
-     * reference and add the properties extracted by the function passed in to a json node that is returned.
+     * Rely on {@link this#visitStrategies(Consumer)} to visit all the strategies
+     * and add the properties extracted by the function passed in to a json node that is returned.
      *
      * @param select a function that given a strategy returns a json node
      *
      * @return a json node containing information on all the strategies returned by the strategy manager and the function passed in.
      */
-    private ArrayNode getStrategiesJsonNode(Function<AbstractCompactionStrategy, JsonNode> select)
+    private ArrayNode getStrategiesJsonNode(Function<CompactionStrategy, JsonNode> select)
     {
         ArrayNode node = json.arrayNode();
         visitStrategies(acs -> node.add(select.apply(acs)));
         return node;
     }
 
-    private ArrayNode sstableMap(Collection<SSTableReader> sstables, CompactionStrategyAndTableFunction csatf)
+    private ArrayNode sstableMap(Collection<SSTableReader> sstables)
     {
-        CompactionStrategyManager csm = csmRef.get();
         ArrayNode node = json.arrayNode();
-        if (csm == null)
-            return node;
-        sstables.forEach(t -> node.add(csatf.apply(csm.getCompactionStrategyFor(t), t)));
+        sstables.forEach(t -> node.add(describeSSTable(t)));
         return node;
     }
 
-    private JsonNode formatSSTables(AbstractCompactionStrategy strategy)
+    private String getId(CompactionStrategy strategy)
+    {
+        return compactionStrategyMapping.getOrDefault(strategy, "-1"); // there should always be a strategy because of strategyCreated()
+    }
+
+    private JsonNode formatSSTables(CompactionStrategy strategy)
     {
         ArrayNode node = json.arrayNode();
-        CompactionStrategyManager csm = csmRef.get();
-        ColumnFamilyStore cfs = cfsRef.get();
-        if (csm == null || cfs == null)
-            return node;
-        for (SSTableReader sstable : cfs.getLiveSSTables())
-        {
-            if (csm.getCompactionStrategyFor(sstable) == strategy)
-                node.add(formatSSTable(strategy, sstable));
-        }
+        for (SSTableReader sstable : strategy.getSSTables())
+            node.add(formatSSTable(sstable));
+
         return node;
     }
 
-    private JsonNode formatSSTable(AbstractCompactionStrategy strategy, SSTableReader sstable)
+    private JsonNode formatSSTable(SSTableReader sstable)
     {
         ObjectNode node = json.objectNode();
         node.put("generation", sstable.descriptor.generation);
         node.put("version", sstable.descriptor.version.getVersion());
         node.put("size", sstable.onDiskLength());
-        JsonNode logResult = strategy.strategyLogger().sstable(sstable);
-        if (logResult != null)
-            node.set("details", logResult);
+
+        // The details are only relevant or available for some strategies, e.g. LCS or Date tiered but
+        // it doesn't hurt to log them all the time in order to simplify things
+        ObjectNode details = json.objectNode();
+        details.put("level", sstable.getSSTableLevel());
+        details.put("min_token", sstable.first.getToken().toString());
+        details.put("max_token", sstable.last.getToken().toString());
+        details.put("min_timestamp", sstable.getMinTimestamp());
+        details.put("max_timestamp", sstable.getMaxTimestamp());
+
+        node.put("details", details);
+
         return node;
     }
 
-    private JsonNode getStrategyDetails(AbstractCompactionStrategy strategy)
+    private JsonNode getStrategyDetails(CompactionStrategy strategy)
     {
         ObjectNode node = json.objectNode();
-        CompactionStrategyManager csm = csmRef.get();
-        if (csm == null)
-            return node;
-        node.put("strategyId", strategy.id());
+        node.put("strategyId", getId(strategy));
         node.put("type", strategy.getName());
         node.set("tables", formatSSTables(strategy));
-        node.put("repaired", csm.isRepaired(strategy));
-        List<String> folders = csm.getStrategyFolders(strategy);
-        ArrayNode folderNode = json.arrayNode();
-        for (String folder : folders)
-        {
-            folderNode.add(folder);
-        }
-        node.set("folders", folderNode);
-
-        JsonNode logResult = strategy.strategyLogger().options();
-        if (logResult != null)
-            node.set("options", logResult);
         return node;
     }
 
-    private JsonNode getStrategyId(AbstractCompactionStrategy strategy)
+    private JsonNode getStrategyId(CompactionStrategy strategy)
     {
         ObjectNode node = json.objectNode();
-        node.put("strategyId", strategy.id());
+        node.put("strategyId", getId(strategy));
         return node;
     }
 
-    private JsonNode describeSSTable(AbstractCompactionStrategy strategy, SSTableReader sstable)
+    private JsonNode describeSSTable(SSTableReader sstable)
     {
         ObjectNode node = json.objectNode();
-        node.put("strategyId", strategy.id());
-        node.set("table", formatSSTable(strategy, sstable));
+        node.put("table", formatSSTable(sstable));
         return node;
     }
 
     private void maybeAddSchemaAndTimeInfo(ObjectNode node)
     {
-        ColumnFamilyStore cfs = cfsRef.get();
-        if (cfs == null)
-            return;
-        node.put("keyspace", cfs.getKeyspaceName());
-        node.put("table", cfs.getTableName());
+        node.put("keyspace", keyspace);
+        node.put("table", table);
         node.put("time", System.currentTimeMillis());
     }
 
@@ -301,7 +264,7 @@ public class CompactionLogger
             ObjectNode node = json.objectNode();
             node.put("type", "flush");
             maybeAddSchemaAndTimeInfo(node);
-            node.set("tables", sstableMap(sstables, this::describeSSTable));
+            node.set("tables", sstableMap(sstables));
             jsonWriter.write(node, this::getEventJsonNode, this);
         }
     }
@@ -315,20 +278,20 @@ public class CompactionLogger
             maybeAddSchemaAndTimeInfo(node);
             node.put("start", String.valueOf(startTime));
             node.put("end", String.valueOf(endTime));
-            node.set("input", sstableMap(input, this::describeSSTable));
-            node.set("output", sstableMap(output, this::describeSSTable));
+            node.set("input", sstableMap(input));
+            node.set("output", sstableMap(output));
             jsonWriter.write(node, this::getEventJsonNode, this);
         }
     }
 
-    public void pending(AbstractCompactionStrategy strategy, int remaining)
+    public void pending(CompactionStrategy strategy, int remaining)
     {
         if (remaining != 0 && enabled.get())
         {
             ObjectNode node = json.objectNode();
             node.put("type", "pending");
             maybeAddSchemaAndTimeInfo(node);
-            node.put("strategyId", strategy.id());
+            node.put("strategyId", getId(strategy));
             node.put("pending", remaining);
             jsonWriter.write(node, this::getEventJsonNode, this);
         }
@@ -337,7 +300,7 @@ public class CompactionLogger
     /**
      * Write the strategy statistics formatted as CSV.
      **/
-    public void statistics(AbstractCompactionStrategy strategy, String event, CompactionStrategyStatistics statistics)
+    public void statistics(CompactionStrategy strategy, String event, CompactionStrategyStatistics statistics)
     {
         if (logger.isTraceEnabled())
             logger.trace("Compaction statistics for strategy {} and event {}: {}", strategy, event, statistics);
@@ -350,7 +313,7 @@ public class CompactionLogger
             writer.write(String.join(",", Iterables.concat(ImmutableList.of(currentTime(), event), data)) + System.lineSeparator());
     }
 
-    private Writer getCsvWriter(AbstractCompactionStrategy strategy, Collection<String> header)
+    private Writer getCsvWriter(CompactionStrategy strategy, Collection<String> header)
     {
         Writer writer = csvWriters.get(strategy);
         if (writer != null)
@@ -359,9 +322,9 @@ public class CompactionLogger
         // TODO - should we add the repair status?
         String fileName = String.format("compaction-%s-%s-%s-%s",
                                         strategy.getName(),
-                                        strategy.getMetadata().keyspace,
-                                        strategy.getMetadata().name,
-                                        strategy.id());
+                                        keyspace,
+                                        table,
+                                        getId(strategy));
 
         writer = new CompactionLogSerializer(fileName, "csv", loggerService);
         if (csvWriters.putIfAbsent(strategy, writer) == null)
