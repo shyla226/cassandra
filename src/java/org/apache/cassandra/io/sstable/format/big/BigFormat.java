@@ -183,7 +183,7 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "nc";
+        public static final String current_version = "na";
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
@@ -195,7 +195,6 @@ public class BigFormat implements SSTableFormat
 
         // na (4.0-rc1): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
         // nb (4.0.0): originating host id
-        // nc (4.1.0): improved min/max
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
@@ -205,8 +204,6 @@ public class BigFormat implements SSTableFormat
         private final boolean hasCommitLogIntervals;
         private final boolean hasAccurateMinMax;
         private final boolean hasOriginatingHostId;
-        private final boolean hasImprovedMinMax;
-        private final boolean hasPartitionLevelDeletionPresenceMarker;
         public final boolean hasMaxCompressedLength;
         private final boolean hasPendingRepair;
         private final boolean hasMetadataChecksum;
@@ -229,8 +226,6 @@ public class BigFormat implements SSTableFormat
             hasCommitLogIntervals = version.compareTo("mc") >= 0;
             hasAccurateMinMax = version.compareTo("md") >= 0;
             hasOriginatingHostId = version.matches("(m[e-z])|(n[b-z])");
-            hasImprovedMinMax = version.compareTo("nc") >= 0;
-            hasPartitionLevelDeletionPresenceMarker = version.compareTo("nc") >= 0;
             hasMaxCompressedLength = version.compareTo("na") >= 0;
             hasPendingRepair = version.compareTo("na") >= 0;
             hasIsTransient = version.compareTo("na") >= 0;
@@ -289,13 +284,13 @@ public class BigFormat implements SSTableFormat
         @Override
         public boolean hasImprovedMinMax()
         {
-            return hasImprovedMinMax;
+            return false;
         }
 
         @Override
         public boolean hasPartitionLevelDeletionsPresenceMarker()
         {
-            return hasPartitionLevelDeletionPresenceMarker;
+            return false;
         }
 
         @Override
@@ -339,7 +334,6 @@ public class BigFormat implements SSTableFormat
             return false;
         }
 
-        // TODO TBD
         @Override
         public boolean hasMaxColumnValueLengths()
         {
