@@ -183,7 +183,7 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "nc";
+        public static final String current_version = "na";
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
@@ -284,13 +284,13 @@ public class BigFormat implements SSTableFormat
         @Override
         public boolean hasImprovedMinMax()
         {
-            return hasImprovedMinMax;
+            return false;
         }
 
         @Override
         public boolean hasPartitionLevelDeletionsPresenceMarker()
         {
-            return hasPartitionLevelDeletionPresenceMarker;
+            return false;
         }
 
         @Override
@@ -334,7 +334,6 @@ public class BigFormat implements SSTableFormat
             return false;
         }
 
-        // TODO TBD
         @Override
         public boolean hasMaxColumnValueLengths()
         {
