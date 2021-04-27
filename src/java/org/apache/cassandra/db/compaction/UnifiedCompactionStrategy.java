@@ -20,34 +20,36 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Ordering;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.ShardedMultiWriter;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Splitter;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -68,117 +70,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 {
     private static final Logger logger = LoggerFactory.getLogger(UnifiedCompactionStrategy.class);
 
-    /**
-     * An equivalence class is a function that takes an sstable and returns a property of this
-     * sstable that defines the equivalence class. For example, the repair status or disk
-     * index may define equivalence classes. See the concrete equivalence classes below.
-     *
-     * @param <T> The type of the property that defines the equivalence class
-     */
-    private interface EquivalenceClass<T> extends Comparator<SSTableReader> {
-
-        @Override
-        int compare(SSTableReader a, SSTableReader b);
-
-        /** Return a name that describes the equivalence class */
-        String name(SSTableReader ssTableReader);
-    };
-
-    /**
-     * Group sstables by their repair state: repaired, unrepaired, pending repair with a specific UUID (one group per pending repair).
-     */
-    private static final class RepairEquivClass implements EquivalenceClass<Boolean>
-    {
-        @Override
-        public int compare(SSTableReader a, SSTableReader b)
-        {
-            // This is the same as name(apply(a)).compareTo(name(apply(b)))
-            int af = a.isRepaired() ? 1 : !a.isPendingRepair() ? 2 : 0;
-            int bf = b.isRepaired() ? 1 : !b.isPendingRepair() ? 2 : 0;
-            if (af != 0 || bf != 0)
-                return Integer.compare(af, bf);
-            return a.pendingRepair().compareTo(b.pendingRepair());
-        }
-
-        @Override
-        public String name(SSTableReader ssTableReader)
-        {
-            if (ssTableReader.isRepaired())
-                return "repaired";
-            else if (!ssTableReader.isPendingRepair())
-                return "unrepaired";
-            else
-                return "pending_repair_" + ssTableReader.pendingRepair();
-        }
-    }
-
-    /**
-     * Group sstables by their disk index.
-     */
-    private static final class DiskIndexEquivClass implements EquivalenceClass<Integer>
-    {
-        private final DiskBoundaries boundaries;
-
-        DiskIndexEquivClass(DiskBoundaries boundaries)
-        {
-            this.boundaries = boundaries;
-        }
-
-        @Override
-        public int compare(SSTableReader a, SSTableReader b)
-        {
-            return Integer.compare(boundaries.getDiskIndexFromKey(a), boundaries.getDiskIndexFromKey(b));
-        }
-
-        @Override
-        public String name(SSTableReader ssTableReader)
-        {
-            return "disk_" + boundaries.getDiskIndexFromKey(ssTableReader);
-        }
-    }
-
-    /**
-     * Group sstables by their shard. If the data set size is larger than the shared size in the compaction options,
-     * then we create an equivalence class based by shard. Each sstable ends up in a shard based on their first
-     * key. Each shard is calculated by splitting the local token ranges into a number of shards, where the number
-     * of shards is calculated as ceil(data_size / shard size);
-     */
-    private static final class ShardEquivClass implements EquivalenceClass<Integer>
-    {
-        private final List<PartitionPosition> boundaries;
-
-        ShardEquivClass(List<PartitionPosition> boundaries)
-        {
-            this.boundaries = boundaries;
-        }
-
-        private int getPositionIndex(DecoratedKey key)
-        {
-            int pos = Collections.binarySearch(boundaries, key);
-            assert pos < 0; // boundaries are .minkeybound and .maxkeybound so they should never be equal
-            return -pos - 1;
-        }
-
-        @Override
-        public int compare(SSTableReader a, SSTableReader b)
-        {
-            return Integer.compare(getPositionIndex(a.getFirst()), getPositionIndex(b.getFirst()));
-        }
-
-        @Override
-        public String name(SSTableReader ssTableReader)
-        {
-            return "shard_" + getPositionIndex(ssTableReader.getFirst());
-        }
-    }
-
-    // TODO - missing equivalence classes:
-
-    // - by time window to emulate TWCS, in this case only the latest shard will use size based buckets, the older
-    //   shards will get major compactions
-
     /** The controller can be changed at any time to change the strategy behavior */
     private Controller controller;
+
+    private volatile ArenaSelector arenaSelector;
 
     public UnifiedCompactionStrategy(CompactionStrategyFactory factory, Map<String, String> options)
     {
@@ -204,15 +99,15 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @Override
     public void startup()
     {
-        perform(() -> super.startup(),
-                           () -> controller.startup(this, ScheduledExecutors.scheduledTasks));
+        perform(super::startup,
+                () -> controller.startup(this, ScheduledExecutors.scheduledTasks));
     }
 
     @Override
     public void shutdown()
     {
-        perform(() -> super.shutdown(),
-                           controller::shutdown);
+        perform(super::shutdown,
+                controller::shutdown);
     }
 
     @Override
@@ -283,7 +178,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                       indexGroups,
                                       lifecycleNewTracker,
                                       controller.getMinSstableSizeBytes(),
-                                      getBoundaries());
+                                      getShardBoundaries());
     }
 
     /**
@@ -297,13 +192,118 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (controller.getNumShards() <= 1)
             return new CompactionTask(cfs, transaction, gcBefore, false, this);
 
-        return new UnifiedCompactionTask(cfs, this, transaction, gcBefore, controller.getMinSstableSizeBytes(), getBoundaries());
+        return new UnifiedCompactionTask(cfs, this, transaction, gcBefore, controller.getMinSstableSizeBytes(), getShardBoundaries());
+    }
+
+    private void maybeUpdateSelector()
+    {
+        if (arenaSelector != null && !arenaSelector.diskBoundaries.isOutOfDate())
+            return; // the disk boundaries (and thus the local ranges too) have not changed since the last time we calculated
+
+        synchronized (this)
+        {
+            if (arenaSelector != null && !arenaSelector.diskBoundaries.isOutOfDate())
+                return; // another thread beat us to the update
+
+            DiskBoundaries currentBoundaries = cfs.getDiskBoundaries();
+            List<PartitionPosition> shardBoundaries = computeShardBoundaries(currentBoundaries.getLocalRanges(),
+                                                                             currentBoundaries.getPositions(),
+                                                                             controller.getNumShards(),
+                                                                             cfs.getPartitioner().splitter());
+            arenaSelector = new ArenaSelector(currentBoundaries, shardBoundaries);
+            // Note: this can just as well be done without the synchronization (races would be benign, just doing some
+            // redundant work). For the current usages of this blocking is fine and expected to perform no worse.
+        }
+    }
+
+    /**
+     * We want to split the local token range in shards, aiming for close to equal share for each shard.
+     * If there are no disk boundaries, we just split the token space equally, but multiple disks have been defined
+     * (each with its own share of the local range), we can't have shards spanning disk boundaries. This means that
+     * shards need to be selected within the disk's portion of the local ranges.
+     *
+     * As an example of what this means, consider a 3-disk node and 10 shards. The range is split equally between
+     * disks, but we can only split shards within a disk range, thus we end up with 6 shards taking 1/3*1/3=1/9 of the
+     * token range, and 4 smaller shards taking 1/3*1/4=1/12 of the token range.
+     */
+    @VisibleForTesting
+    static List<PartitionPosition> computeShardBoundaries(SortedLocalRanges localRanges, List<PartitionPosition> diskBoundaries, int numShards, Optional<Splitter> splitter)
+    {
+        if (!splitter.isPresent())
+            return diskBoundaries;
+        if (diskBoundaries == null || diskBoundaries.size() <= 1)
+            return localRanges.split(numShards);
+
+        if (numShards <= diskBoundaries.size())
+            return diskBoundaries;
+
+        return splitPerDiskRanges(localRanges,
+                                  diskBoundaries,
+                                  getRangesTotalSize(localRanges.getRanges()),
+                                  numShards,
+                                  splitter.get());
+    }
+
+    /**
+     * Split the per-disk ranges and generate the required number of shard boundaries.
+     * This works by accumulating the size after each disk's share, multiplying by shardNum/totalSize and rounding to
+     * produce an integer number of total shards needed by the disk boundary, which in turns defines how many need to be
+     * added for this disk.
+     *
+     * For example, for a total size of 1, 2 disks (each of 0.5 share) and 3 shards, this will:
+     * -process disk 1:
+     * -- calculate 1/2 as the accumulated size
+     * -- map this to 3/2 and round to 2 shards
+     * -- split the disk's ranges into two equally-sized shards
+     * -process disk 2:
+     * -- calculate 1 as the accumulated size
+     * -- map it to 3 and round to 3 shards
+     * -- assign the disk's ranges to one shard
+     *
+     * The resulting shards will not be of equal size and works best if the disk shares are distributed evenly (which
+     * the current code always ensures).
+     */
+    private static List<PartitionPosition> splitPerDiskRanges(SortedLocalRanges localRanges,
+                                                              List<PartitionPosition> diskBoundaries,
+                                                              double totalSize,
+                                                              int numShards,
+                                                              Splitter splitter)
+    {
+        double perShard = totalSize / numShards;
+        List<PartitionPosition> shardBoundaries = new ArrayList<>(numShards);
+        double processedSize = 0;
+        Token left = diskBoundaries.get(0).getToken().getPartitioner().getMinimumToken();
+        for (PartitionPosition boundary : diskBoundaries)
+        {
+            Token right = boundary.getToken();
+            List<Splitter.WeightedRange> disk = localRanges.subrange(new Range<>(left, right));
+
+            processedSize += getRangesTotalSize(disk);
+            int targetCount = (int) Math.round(processedSize / perShard);
+            List<Token> splits = splitter.splitOwnedRanges(Math.max(targetCount - shardBoundaries.size(), 1), disk, Splitter.SplitType.ALWAYS_SPLIT).boundaries;
+            shardBoundaries.addAll(Collections2.transform(splits, Token::maxKeyBound));
+            // The splitting always results in maxToken as the last boundary. Replace it with the disk's upper bound.
+            shardBoundaries.set(shardBoundaries.size() - 1, boundary);
+
+            left = right;
+        }
+        assert shardBoundaries.size() == numShards;
+        return shardBoundaries;
+    }
+
+    private static double getRangesTotalSize(List<Splitter.WeightedRange> ranges)
+    {
+        double totalSize = 0;
+        for (Splitter.WeightedRange range : ranges)
+            totalSize += range.left().size(range.right());
+        return totalSize;
     }
 
     @VisibleForTesting
-    List<PartitionPosition> getBoundaries()
+    List<PartitionPosition> getShardBoundaries()
     {
-        return cfs.getLocalRanges().split(controller.getNumShards());
+        maybeUpdateSelector();
+        return arenaSelector.shardBoundaries;
     }
 
     private Collection<CompactionAggregate> getNextAggregates()
@@ -376,25 +376,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     }
 
     /**
-     * @return the list of equivalence classes according to which we should group sstables before applying the buckets.
-     */
-    private Collection<EquivalenceClass<?>> makeEquivalenceClasses()
-    {
-        ImmutableList.Builder<EquivalenceClass<?>> ret = ImmutableList.builderWithExpectedSize(3);
-
-        ret.add(new RepairEquivClass());
-
-        DiskBoundaries diskBoundaries = cfs.getDiskBoundaries();
-        if (diskBoundaries.getNumBoundaries() > 1)
-            ret.add(new DiskIndexEquivClass(diskBoundaries));
-
-        if (controller.getNumShards() > 1)
-            ret.add(new ShardEquivClass(getBoundaries()));
-
-        return ret.build();
-    }
-
-    /**
      * Group candidate sstables (non suspect and not already compacting) into one or more compaction shards. Each
      * compaction shard is obtained by comparing using a compound comparator for the equivalence classes.
      *
@@ -406,11 +387,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // add all non suspect and non compacting sstables to the candidates, no-early open so all live sstables
         // should be canonical but review what happens when we switch over from a legacy strategy that supports early open
 
-        final Collection<EquivalenceClass<?>> equivalenceClasses = makeEquivalenceClasses();
-        final Ordering<SSTableReader> comparator = Ordering.compound(equivalenceClasses);
-        Map<SSTableReader, Shard> tables = new TreeMap<>(comparator);
+        final ArenaSelector arenaSelector = this.arenaSelector;
+        Map<SSTableReader, Shard> tables = new TreeMap<>(arenaSelector);
         for (SSTableReader table : nonSuspectAndNotIn(dataTracker.getLiveSSTables(), dataTracker.getCompacting()))
-            tables.computeIfAbsent(table, t -> new Shard(equivalenceClasses, comparator))
+            tables.computeIfAbsent(table, t -> new Shard(arenaSelector))
                   .add(table);
 
         return tables.values();
@@ -419,6 +399,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @VisibleForTesting
     Map<Shard, List<Bucket>> getShardsWithBuckets()
     {
+        maybeUpdateSelector();
         Collection<Shard> shards = getCompactionShards();
         Map<Shard, List<Bucket>> ret = new LinkedHashMap<>(); // should preserve the order of shards
 
@@ -485,14 +466,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     final static class Shard implements Comparable<Shard>
     {
         final List<SSTableReader> sstables;
-        final List<EquivalenceClass<?>> equivalenceClasses;
-        final Comparator<SSTableReader> comparator;
+        final ArenaSelector selector;
 
-        Shard(Iterable<EquivalenceClass<?>> equivalenceClasses, Comparator<SSTableReader> comparator)
+        Shard(ArenaSelector selector)
         {
             this.sstables = new ArrayList<>();
-            this.equivalenceClasses = ImmutableList.copyOf(equivalenceClasses);
-            this.comparator = comparator;
+            this.selector = selector;
         }
 
         void add(SSTableReader ssTableReader)
@@ -503,13 +482,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         public String name()
         {
             SSTableReader t = sstables.get(0);
-            return String.join("-", Iterables.transform(equivalenceClasses, e -> e.name(t)));
+            return selector.name(t);
         }
 
         @Override
         public int compareTo(Shard o)
         {
-            return comparator.compare(this.sstables.get(0), o.sstables.get(0));
+            return selector.compare(this.sstables.get(0), o.sstables.get(0));
         }
 
         @Override

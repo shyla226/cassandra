@@ -81,7 +81,9 @@ public class BaseCompactionStrategyTest
     @Mock
     DiskBoundaries diskBoundaries;
 
-    @Mock
+    // Returned by diskBoundaries.getPositions() and modified by UnifiedCompactionStrategyTest
+    protected List<PartitionPosition> diskBoundaryPositions = null;
+
     SortedLocalRanges localRanges;
 
     Map<SSTableReader, Integer> diskIndexes;
@@ -127,12 +129,14 @@ public class BaseCompactionStrategyTest
             assertNotNull("Splitter is required with multiple compaction shards", splitter);
 
         diskIndexes = new HashMap<>();
+        localRanges = SortedLocalRanges.forTesting(cfs, ImmutableList.of(new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken()))));
 
         when(cfs.metadata()).thenReturn(metadata);
         when(cfs.getKeyspaceName()).thenReturn(keyspace);
         when(cfs.getTableName()).thenReturn(table);
         when(cfs.getDiskBoundaries()).thenReturn(diskBoundaries);
         when(cfs.getLocalRanges()).thenReturn(localRanges);
+        when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
         when(cfs.getTracker()).thenReturn(dataTracker);
         when(cfs.getPartitioner()).thenReturn(partitioner);
 
@@ -147,16 +151,7 @@ public class BaseCompactionStrategyTest
 
         when(diskBoundaries.getNumBoundaries()).thenAnswer(invocation -> diskIndexes.size());
         when(diskBoundaries.getDiskIndexFromKey(any(SSTableReader.class))).thenAnswer(invocation -> diskIndexes.getOrDefault(invocation.getArgument(0), 0));
-
-        List<Token> boundaries = numShards > 1
-                                 ? splitter.splitOwnedRanges(numShards,
-                                                             ImmutableList.of(new Splitter.WeightedRange(1.0,
-                                                                                                         new Range<>(partitioner.getMinimumToken(),
-                                                                                                                     partitioner.getMaximumToken()))),
-                                                             Splitter.SplitType.ALWAYS_SPLIT).boundaries
-                                 : ImmutableList.of(partitioner.getMaximumToken());
-        List<PartitionPosition> shards = boundaries.stream().map(Token::maxKeyBound).collect(Collectors.toList());
-        when(localRanges.split(anyInt())).thenReturn(shards);
+        when(diskBoundaries.getPositions()).thenAnswer(invocationOnMock -> diskBoundaryPositions);
     }
 
     /**
@@ -237,7 +232,7 @@ public class BaseCompactionStrategyTest
         when(ret.getFirst()).thenReturn(first);
         when(ret.getLast()).thenReturn(last);
         when(ret.isMarkedSuspect()).thenReturn(false);
-        when(ret.isRepaired()).thenReturn(true);
+        when(ret.isRepaired()).thenReturn(repaired);
         when(ret.getRepairedAt()).thenReturn(repairedAt);
         when(ret.getPendingRepair()).thenReturn(pendingRepair);
         when(ret.getColumnFamilyName()).thenReturn(table);

@@ -1376,7 +1376,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
             // The minimum sstable size and the compaction boundaries as dictated by the strategy
             long minSStableSize = strategy.getController().getMinSstableSizeBytes();
-            List<PartitionPosition> boundaries = strategy.getBoundaries();
+            List<PartitionPosition> boundaries = strategy.getShardBoundaries();
 
             // If we didn't have a minimum sstable size, each shard would get an sstable segment of this size and the number of
             // sstables would be the number of shards, but because we have a minimum sstable size, we need to put a cap of minSStableSize

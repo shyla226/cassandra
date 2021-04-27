@@ -201,6 +201,38 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return intersectionOneWrapping(that, this);
     }
 
+    /**
+     * Returns the intersection of this range with the provided one, assuming neither are wrapping.
+     *
+     * @param that the other range to return the intersection with. It must not be wrapping.
+     * @return the intersection of {@code this} and {@code that}, or {@code null} if both ranges don't intersect.
+     */
+    public Range<T> intersectionNonWrapping(Range<T> that)
+    {
+        assert !isWrapAround() && !that.isWrapAround() : this + " and " + that;
+
+        if (left.compareTo(that.left) < 0)
+        {
+            if (right.isMinimum() || (!that.right.isMinimum() && right.compareTo(that.right) >= 0))
+                return that;  // this contains that.
+
+            if (right.compareTo(that.left) <= 0)
+                return null;  // this is fully before that.
+
+            return new Range<>(that.left, right);
+        }
+        else
+        {
+            if (that.right.isMinimum() || (!right.isMinimum() && that.right.compareTo(right) >= 0))
+                return this;  // that contains this.
+
+            if (that.right.compareTo(left) <= 0)
+                return null;  // that is fully before this.
+
+            return new Range<>(left, that.right);
+        }
+    }
+
     private static <T extends RingPosition<T>> Set<Range<T>> intersectionBothWrapping(Range<T> first, Range<T> that)
     {
         Set<Range<T>> intersection = new HashSet<Range<T>>(2);

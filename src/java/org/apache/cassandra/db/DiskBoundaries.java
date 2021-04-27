@@ -33,7 +33,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 public class DiskBoundaries
 {
     @Nullable public final List<Directories.DataDirectory> directories;
-    @Nullable public final ImmutableList<PartitionPosition> positions;
+    @Nullable private final ImmutableList<PartitionPosition> positions;
     public final SortedLocalRanges localRanges;
     final int directoriesVersion;
     private final ColumnFamilyStore cfs;
@@ -185,5 +185,17 @@ public class DiskBoundaries
     public SortedLocalRanges getLocalRanges()
     {
         return localRanges;
+    }
+
+    /**
+     * Returns a non-modifiable list of the disk boundary positions. This will be null if the token space is not split
+     * for the disks, this is not normally the case).
+     *
+     * Extracted as a method (instead of direct access to the final field) to permit mocking in tests.
+     */
+    @Nullable
+    public List<PartitionPosition> getPositions()
+    {
+        return positions;
     }
 }

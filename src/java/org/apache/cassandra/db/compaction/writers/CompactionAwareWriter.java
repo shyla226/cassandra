@@ -84,7 +84,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         pendingRepair = CompactionTask.getPendingRepair(nonExpiredSSTables);
         isTransient = CompactionTask.getIsTransient(nonExpiredSSTables);
         DiskBoundaries db = cfs.getDiskBoundaries();
-        diskBoundaries = db.positions;
+        diskBoundaries = db.getPositions();
         locations = db.directories;
         locationIndex = -1;
     }

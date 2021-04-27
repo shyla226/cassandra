@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,15 +29,20 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
@@ -78,9 +84,21 @@ import static org.mockito.Mockito.when;
  * - W > 0 then T = F and F = 2 + W (tiered merge policy)
  * - W = 0 then T = F = 2 (middle ground)
  */
+@RunWith(Parameterized.class)
 public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 {
     private final static long ONE_MB = 1 << 20;
+
+    // Multiple disks can be used both with and without disk boundaries. We want to test both cases.
+
+    @Parameterized.Parameters
+    public static Iterable<Object[]> params()
+    {
+        return Arrays.asList(new Object[][] { {false}, {true} });
+    }
+
+    @Parameterized.Parameter
+    public boolean useDiskBoundaries = true;
 
     @BeforeClass
     public static void setUpClass()
@@ -247,7 +265,9 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         ByteBuffer bb = ByteBuffer.allocate(0);
 
         sstables.forEach((size, num) -> {
-            Token first = min.increaseSlightly();
+            // Generate a key inside the shard, but make sure it's not too close to the boundaries to compensate for
+            // rounding differences between splitting directly and splitting first by disk and then by shard.
+            Token first = min.getPartitioner().split(min, max, 0.01 + random.nextDouble() * 0.98);
 
             for (int i = 0; i < num; i++)
             {
@@ -268,25 +288,36 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         return arena;
     }
 
-    private List<PartitionPosition> makeBoundaries(int numShards)
+    private List<PartitionPosition> makeBoundaries(int numShards, int numDisks)
     {
         IPartitioner partitioner = cfs.getPartitioner();
+        assert numShards >= 1;
+        assert numDisks >= 1;
 
-        if (numShards <= 1)
+        if (numShards * numDisks == 1)
             return ImmutableList.of(partitioner.getMaximumToken().maxKeyBound());
 
         Splitter splitter = partitioner.splitter().orElse(null);
         assertNotNull("The partitioner must support a splitter", splitter);
 
+        int numBoundaries = useDiskBoundaries ? numDisks * numShards : numShards;
         Splitter.WeightedRange range = new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken()));
-        return splitter.splitOwnedRanges(numShards, ImmutableList.of(range), Splitter.SplitType.ALWAYS_SPLIT)
-               .boundaries
-               .stream()
-               .map(Token::maxKeyBound)
-               .collect(Collectors.toList());
+        final List<PartitionPosition> shards = splitter.splitOwnedRanges(numBoundaries, ImmutableList.of(range), Splitter.SplitType.ALWAYS_SPLIT)
+                                               .boundaries
+                                               .stream()
+                                               .map(Token::maxKeyBound)
+                                               .collect(Collectors.toList());
+        if (useDiskBoundaries)
+        {
+            diskBoundaryPositions = new ArrayList<>(numDisks);
+            for (int i = 0; i < numDisks; ++i)
+                diskBoundaryPositions.add(shards.get((i + 1) * numShards - 1));
+        }
+        return shards;
     }
 
     private List<ArenaSpecs> mockArenas(int diskIndex,
+                                        int diskCount,
                                         boolean repaired,
                                         UUID pendingRepair,
                                         List<PartitionPosition> boundaries,
@@ -295,8 +326,15 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     {
         List<ArenaSpecs> arenasList = new ArrayList<>();
 
-        Token min = partitioner.getMinimumToken();
-        for (PartitionPosition boundary : boundaries)
+        int numShards = boundaries.size() / diskCount;
+        List<PartitionPosition> shardPositions = useDiskBoundaries
+                                                 ? boundaries.subList(diskIndex * numShards, (diskIndex + 1) * numShards)
+                                                 : boundaries;
+        Token min = useDiskBoundaries && diskIndex > 0
+                    ? boundaries.get(diskIndex * numShards - 1).getToken()
+                    : partitioner.getMinimumToken();
+
+        for (PartitionPosition boundary : shardPositions)
         {
             Token max = boundary.getToken();
 
@@ -323,7 +361,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testAllArenasOneBucket_NoShards()
     {
-        testAllArenasOneBucket(0);
+        testAllArenasOneBucket(1);
     }
 
     @Test
@@ -337,20 +375,20 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final int m = 2; // minimal sorted run size in MB
         final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
 
-        List<PartitionPosition> boundaries = makeBoundaries(numShards);
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 2);
         List<ArenaSpecs> arenasList = new ArrayList<>();
 
         Map<Long, Integer> sstables = mapFromPair(Pair.create(4 * ONE_MB, 4));
         int[] buckets = new int[]{4};
 
         UUID pendingRepair = UUID.randomUUID();
-        arenasList.addAll(mockArenas(0, false, pendingRepair, boundaries, sstables, buckets)); // pending repair
+        arenasList.addAll(mockArenas(0, 2, false, pendingRepair, boundaries, sstables, buckets)); // pending repair
 
-        arenasList.addAll(mockArenas(0, false, pendingRepair, boundaries, sstables, buckets)); // unrepaired
-        arenasList.addAll(mockArenas(1, false, null, boundaries, sstables, buckets)); // unrepaired, next disk
+        arenasList.addAll(mockArenas(0, 2, false, pendingRepair, boundaries, sstables, buckets)); // unrepaired
+        arenasList.addAll(mockArenas(1, 2, false, null, boundaries, sstables, buckets)); // unrepaired, next disk
 
-        arenasList.addAll(mockArenas(0, true, null, boundaries, sstables, buckets)); // repaired
-        arenasList.addAll(mockArenas(1, true, null, boundaries, sstables, buckets)); // repaired, next disk
+        arenasList.addAll(mockArenas(0, 2, true, null, boundaries, sstables, buckets)); // repaired
+        arenasList.addAll(mockArenas(1, 2, true, null, boundaries, sstables, buckets)); // repaired, next disk
 
         testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
     }
@@ -358,7 +396,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testRepairedOneDiskOneBucket_NoShards()
     {
-        testRepairedOneDiskOneBucket(0);
+        testRepairedOneDiskOneBucket(1);
     }
 
     @Test
@@ -375,15 +413,15 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Map<Long, Integer> sstables = mapFromPair(Pair.create(4 * ONE_MB, 4));
         int[] buckets = new int[]{4};
 
-        List<PartitionPosition> boundaries = makeBoundaries(numShards);
-        List<ArenaSpecs> arenas = mockArenas(0, true, null, boundaries, sstables, buckets);
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 1);
+        List<ArenaSpecs> arenas = mockArenas(0, 1, true, null, boundaries, sstables, buckets);
         testGetBucketsMultipleArenas(arenas, W, m, boundaries);
     }
 
     @Test
     public void testRepairedTwoDisksOneBucket_NoShards()
     {
-        testRepairedTwoDisksOneBucket(0);
+        testRepairedTwoDisksOneBucket(1);
     }
 
     @Test
@@ -400,11 +438,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Map<Long, Integer> sstables = mapFromPair(Pair.create(4 * ONE_MB, 4));
         int[] buckets = new int[]{4};
 
-        List<PartitionPosition> boundaries = makeBoundaries(numShards);
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 2);
         List<ArenaSpecs> arenas = new ArrayList<>();
 
-        arenas.addAll(mockArenas(0, true, null, boundaries, sstables, buckets));
-        arenas.addAll(mockArenas(1, true, null, boundaries, sstables, buckets));
+        arenas.addAll(mockArenas(0, 2, true, null, boundaries, sstables, buckets));
+        arenas.addAll(mockArenas(1, 2, true, null, boundaries, sstables, buckets));
 
         testGetBucketsMultipleArenas(arenas, W, m, boundaries);
     }
@@ -412,7 +450,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testRepairedMultipleDisksMultipleBuckets_NoShards()
     {
-        testRepairedMultipleDisksMultipleBuckets(0);
+        testRepairedMultipleDisksMultipleBuckets(1);
     }
 
     @Test
@@ -426,7 +464,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final int m = 2; // minimal sorted run size in MB
         final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
 
-        List<PartitionPosition> boundaries = makeBoundaries(numShards);
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 6);
         List<ArenaSpecs> arenasList = new ArrayList<>();
 
         Map<Long, Integer> sstables1 = mapFromPair(Pair.create(2 * ONE_MB, 4), Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 4));
@@ -438,9 +476,9 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         for (int i = 0; i < 6; i++)
         {
             if (i % 2 == 0)
-                arenasList.addAll(mockArenas(i, true, null, boundaries, sstables1, buckets1));
+                arenasList.addAll(mockArenas(i, 6, true, null, boundaries, sstables1, buckets1));
             else
-                arenasList.addAll(mockArenas(i, true, null, boundaries, sstables2, buckets2));
+                arenasList.addAll(mockArenas(i, 6, true, null, boundaries, sstables2, buckets2));
 
         }
 
@@ -450,7 +488,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testRepairedUnrepairedOneDiskMultipleBuckets_NoShards()
     {
-        testRepairedUnrepairedOneDiskMultipleBuckets(0);
+        testRepairedUnrepairedOneDiskMultipleBuckets(1);
     }
 
     @Test
@@ -464,7 +502,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final int m = 2; // minimal sorted run size in MB
         final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
 
-        List<PartitionPosition> boundaries = makeBoundaries(numShards);
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 1);
         List<ArenaSpecs> arenasList = new ArrayList<>();
 
         Map<Long, Integer> sstables1 = mapFromPair(Pair.create(2 * ONE_MB, 4), Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 4));
@@ -473,8 +511,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Map<Long, Integer> sstables2 = mapFromPair(Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 8));
         int[] buckets2 = new int[]{0,4,8};
 
-        arenasList.addAll(mockArenas(0, true, null, boundaries, sstables2, buckets2)); // repaired
-        arenasList.addAll(mockArenas(0, false, null, boundaries, sstables1, buckets1)); // unrepaired
+        arenasList.addAll(mockArenas(0, 1, true, null, boundaries, sstables2, buckets2)); // repaired
+        arenasList.addAll(mockArenas(0, 1, false, null, boundaries, sstables1, buckets1)); // unrepaired
 
         testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
     }
@@ -482,7 +520,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testRepairedUnrepairedTwoDisksMultipleBuckets_NoShards()
     {
-        testRepairedUnrepairedTwoDisksMultipleBuckets(0);
+        testRepairedUnrepairedTwoDisksMultipleBuckets(1);
     }
 
     @Test
@@ -496,7 +534,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final int m = 2; // minimal sorted run size in MB
         final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
 
-        List<PartitionPosition> boundaries = makeBoundaries(numShards);
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 2);
         List<ArenaSpecs> arenasList = new ArrayList<>();
 
         Map<Long, Integer> sstables1 = mapFromPair(Pair.create(2 * ONE_MB, 4), Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 4));
@@ -505,11 +543,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Map<Long, Integer> sstables2 = mapFromPair(Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 8));
         int[] buckets2 = new int[]{0,4,8};
 
-        arenasList.addAll(mockArenas(0, true, null, boundaries, sstables2, buckets2));  // repaired, first disk
-        arenasList.addAll(mockArenas(1, true, null, boundaries, sstables1, buckets1));  // repaired, second disk
+        arenasList.addAll(mockArenas(0, 2, true, null, boundaries, sstables2, buckets2));  // repaired, first disk
+        arenasList.addAll(mockArenas(1, 2, true, null, boundaries, sstables1, buckets1));  // repaired, second disk
 
-        arenasList.addAll(mockArenas(0, false, null, boundaries, sstables1, buckets1));  // unrepaired, first disk
-        arenasList.addAll(mockArenas(1, false, null, boundaries, sstables2, buckets2));  // unrepaired, second disk
+        arenasList.addAll(mockArenas(0, 2, false, null, boundaries, sstables1, buckets1));  // unrepaired, first disk
+        arenasList.addAll(mockArenas(1, 2, false, null, boundaries, sstables2, buckets2));  // unrepaired, second disk
 
         testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
     }
@@ -524,7 +562,6 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getSurvivalFactor()).thenReturn(1.0);
 
         when(controller.getNumShards()).thenReturn(shards.size());
-        when(localRanges.split(anyInt())).thenReturn(shards);
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
@@ -545,5 +582,105 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             for (int i = 0; i < currentArenaSpecs.expectedBuckets.length; i++)
                 assertEquals(currentArenaSpecs.expectedBuckets[i], buckets.get(i).sstables.size());
         }
+    }
+
+    @Test
+    public void testShardBoundaries()
+    {
+        // no shards
+        testShardBoundaries(ints(100), 1, 1, ints(10, 50));
+        // split on disks at minimum
+        testShardBoundaries(ints(30, 100), 1, 2, ints(10, 50));
+        testShardBoundaries(ints(20, 30, 40, 50, 100), 1, 5, ints(10, 51, 61, 70));
+
+        // no disks
+        testShardBoundaries(ints(30, 100), 2, 1, ints(10, 50));
+        testShardBoundaries(ints(20, 30, 40, 50, 100), 5, 1, ints(10, 51, 61, 70));
+
+        // split
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 80, 100), 9, 3, ints(0, 90));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(0, 51, 61, 100));
+        testShardBoundaries(ints(10, 20, 30, 40, 60, 70, 80, 90, 100), 9, 3, ints(0, 49, 59, 100));
+        testShardBoundaries(ints(12, 23, 33, 45, 56, 70, 80, 90, 100), 9, 3, ints(0, 9, 11, 20, 21, 39, 41, 50, 51, 60, 64, 68, 68, 100));
+
+        // uneven
+        testShardBoundaries(ints(11, 22, 33, 42, 50, 58, 67, 78, 89, 100), 10, 3, ints(0, 100));
+        testShardBoundaries(ints(8, 17, 25, 38, 50, 58, 67, 75, 88, 100), 10, 4, ints(0, 100));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 80, 90, 100), 10, 5, ints(0, 100));
+        testShardBoundaries(ints(8, 17, 33, 42, 50, 58, 67, 83, 92, 100), 10, 6, ints(0, 100));
+        testShardBoundaries(ints(14, 21, 29, 43, 50, 57, 71, 79, 86, 100), 10, 7, ints(0, 100));
+        testShardBoundaries(ints(13, 19, 25, 38, 50, 63, 69, 75, 88, 100), 10, 8, ints(0, 100));
+        testShardBoundaries(ints(11, 22, 33, 44, 50, 56, 67, 78, 89, 100), 10, 9, ints(0, 100));
+
+        // uneven again, where x0 are the disk boundaries and the others are inserted shard boundaries
+        testShardBoundaries(ints(3, 7, 10, 12, 15, 18, 20, 23, 27, 100), 10, 3, ints(0, 30));
+        testShardBoundaries(ints(3, 7, 10, 15, 20, 23, 27, 30, 35, 100), 10, 4, ints(0, 40));
+        testShardBoundaries(ints(5, 10, 15, 20, 25, 30, 35, 40, 45, 100), 10, 5, ints(0, 50));
+        testShardBoundaries(ints(5, 10, 20, 25, 30, 35, 40, 50, 55, 100), 10, 6, ints(0, 60));
+        testShardBoundaries(ints(10, 15, 20, 30, 35, 40, 50, 55, 60, 100), 10, 7, ints(0, 70));
+        testShardBoundaries(ints(10, 15, 20, 30, 40, 50, 60, 65, 70, 100), 10, 8, ints(0, 80));
+        testShardBoundaries(ints(10, 20, 30, 40, 45, 50, 60, 70, 80, 100), 10, 9, ints(0, 90));
+    }
+
+    @Test
+    public void testShardBoundariesWraparound()
+    {
+        // no shards
+        testShardBoundaries(ints(100), 1, 1, ints(50, 10));
+        // split on disks at minimum
+        testShardBoundaries(ints(70, 100), 1, 2, ints(50, 10));
+        testShardBoundaries(ints(10, 20, 30, 70, 100), 1, 5, ints(91, 31, 61, 71));
+        // no disks
+        testShardBoundaries(ints(70, 100), 2, 1, ints(50, 10));
+        testShardBoundaries(ints(10, 20, 30, 70, 100), 5, 1, ints(91, 31, 61, 71));
+        // split
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 90, 100), 9, 3, ints(81, 71));
+        testShardBoundaries(ints(10, 20, 30, 40, 60, 70, 80, 90, 100), 9, 3, ints(51, 41));
+        testShardBoundaries(ints(10, 30, 40, 50, 60, 70, 80, 90, 100), 9, 3, ints(21, 11));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 90, 100), 9, 3, ints(89, 79));
+        testShardBoundaries(ints(10, 20, 30, 40, 60, 70, 80, 90, 100), 9, 3, ints(59, 49));
+        testShardBoundaries(ints(10, 30, 40, 50, 60, 70, 80, 90, 100), 9, 3, ints(29, 19));
+
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(91, 51, 61, 91));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(21, 51, 61, 21));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(71, 51, 61, 71));
+    }
+
+    private int[] ints(int... values)
+    {
+        return values;
+    }
+
+    private void testShardBoundaries(int[] expected, int numShards, int numDisks, int[] rangeBounds)
+    {
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        List<Splitter.WeightedRange> ranges = new ArrayList<>();
+        for (int i = 0; i < rangeBounds.length; i += 2)
+            ranges.add(new Splitter.WeightedRange(1.0, new Range<>(getToken(rangeBounds[i + 0]), getToken(rangeBounds[i + 1]))));
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTesting(cfs, ranges);
+        System.out.println(sortedRanges.getRanges());
+
+        List<PartitionPosition> diskBoundaries = sortedRanges.split(numDisks);
+        System.out.println(diskBoundaries);
+
+        int[] result = UnifiedCompactionStrategy.computeShardBoundaries(sortedRanges, diskBoundaries, numShards, partitioner.splitter())
+                                                .stream()
+                                                .map(PartitionPosition::getToken)
+                                                .mapToInt(this::fromToken)
+                                                .toArray();
+
+        Assert.assertArrayEquals("Disks " + numDisks + " shards " + numShards + " expected " + Arrays.toString(expected) + " was " + Arrays.toString(result), expected, result);
+    }
+
+    private Token getToken(int x)
+    {
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), x * 0.01);
+    }
+
+    private int fromToken(Token t)
+    {
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        return (int) Math.round(partitioner.getMinimumToken().size(t) * 100.0);
     }
 }

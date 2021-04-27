@@ -179,7 +179,7 @@ public abstract class Splitter
      */
     public SplitResult splitOwnedRanges(int parts, List<WeightedRange> weightedRanges, SplitType splitType)
     {
-        if (weightedRanges.isEmpty() || parts == 1)
+        if (weightedRanges.isEmpty() || parts <= 1)
             return new SplitResult(Collections.singletonList(partitioner.getMaximumToken()), false);
 
         BigInteger totalTokens = BigInteger.ZERO;
@@ -358,6 +358,11 @@ public abstract class Splitter
         public Range<Token> range()
         {
             return range;
+        }
+
+        public double weight()
+        {
+            return weight;
         }
 
         public String toString()

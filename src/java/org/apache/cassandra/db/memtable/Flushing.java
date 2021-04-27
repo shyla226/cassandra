@@ -61,7 +61,7 @@ public class Flushing
                                  cfs.name);
 
         DiskBoundaries diskBoundaries = cfs.getDiskBoundaries();
-        List<PartitionPosition> boundaries = diskBoundaries.positions;
+        List<PartitionPosition> boundaries = diskBoundaries.getPositions();
         List<Directories.DataDirectory> locations = diskBoundaries.directories;
         if (boundaries == null)
         {
