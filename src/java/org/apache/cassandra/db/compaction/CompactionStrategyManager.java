@@ -491,7 +491,7 @@ class CompactionStrategyManager implements CompactionStrategyContainer
         {
             if (!currentBoundaries.isOutOfDate())
                 return;
-            doReload(params, ReloadReason.DISK_BOUNDARIES_UPDATED);
+            doReload(this, params, ReloadReason.DISK_BOUNDARIES_UPDATED);
         }
         finally
         {
@@ -500,12 +500,12 @@ class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public void reload(CompactionParams newCompactionParams, ReloadReason reason)
+    public void reload(CompactionStrategyContainer previous, CompactionParams newCompactionParams, ReloadReason reason)
     {
         writeLock.lock();
         try
         {
-            doReload(newCompactionParams, reason);
+            doReload(previous, newCompactionParams, reason);
         }
         finally
         {
@@ -513,26 +513,20 @@ class CompactionStrategyManager implements CompactionStrategyContainer
         }
     }
 
-    private void doReload(CompactionParams compactionParams, ReloadReason reason)
+    private void doReload(CompactionStrategyContainer previous, CompactionParams compactionParams, ReloadReason reason)
     {
         // If we were called due to a metadata change but the compaction parameters are the same then
-        // don't reload since we risk overriding parameters set via jmx
+        // don't reload since we risk overriding parameters set via JMX
         if (reason == ReloadReason.METADATA_CHANGE && compactionParams.equals(metadataParams))
             return;
 
-        boolean diskBoundariesNeedUpdating = currentBoundaries == null || currentBoundaries.isOutOfDate();
-        boolean paramsNeedUpdating = !compactionParams.equals(params);
-
-        boolean prevEnabledWithJMX = enabled && !params.isEnabled(); // previously enabled over JMX because params and enabled do not agree
-        boolean prevDisabledWithJMX = !enabled && params.isEnabled(); // previously disabled over JMX because params and enabled do not agree
-        boolean enabled = reason == ReloadReason.JMX_REQUEST ?
-                          compactionParams.isEnabled() : // for JXM requests we only consider the params
-                          !prevDisabledWithJMX && (compactionParams.isEnabled() || prevEnabledWithJMX); // otherwise we consider the params and the previous JMX requests
+        boolean updateDiskBoundaries = currentBoundaries == null || currentBoundaries.isOutOfDate();
+        boolean enabled = CompactionStrategyFactory.enableCompactionOnReload(previous, compactionParams, reason);
 
         logger.debug("Recreating compaction strategy for {}.{}, reason: {}, params updated: {}, disk boundaries updated: {}, enabled: {}, params: {} -> {}",
-                     cfs.keyspace.getName(), cfs.getTableName(), reason, paramsNeedUpdating, diskBoundariesNeedUpdating, enabled, params, compactionParams);
+                     cfs.keyspace.getName(), cfs.getTableName(), reason, !compactionParams.equals(params), updateDiskBoundaries, enabled, params, compactionParams);
 
-        if (diskBoundariesNeedUpdating)
+        if (updateDiskBoundaries)
             currentBoundaries = boundariesSupplier.get();
 
         int numPartitions = getNumTokenPartitions();

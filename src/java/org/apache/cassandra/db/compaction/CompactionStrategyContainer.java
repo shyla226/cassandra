@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import javax.annotation.Nonnull;
+
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.repair.consistent.admin.CleanupSummary;
@@ -70,18 +72,22 @@ public interface CompactionStrategyContainer extends CompactionStrategy, INotifi
     };
 
     /**
-     * Reload the strategy container taking into account the new compaction parameters and the reason for reloading.
+     * Reload the strategy container taking into account the state of the previous strategy container instance
+     * ({@code this}, in case we're not reloading after switching between containers), the new compaction parameters,
+     * and the reason for reloading.
      * <p/>
      * Depending on the reason, different actions are taken, for example the schema parameters are not updated over
      * JMX and the decision on whether to enable or disable compaction depends only on the parameters over JMX, but
-     * also on the previous JMX directive in case of a full reload. Also, the disk boundaries are not updated over JXM.
+     * also on the previous JMX directive in case of a full reload. Also, the disk boundaries are not updated over JMX.
      * <p/>
      * See the implementations of this method for more details.
      *
+     * @param previous the strategy container instance which state needs to be inherited/taken into account, in many
+     *                 cases the same as {@code this}, but never {@code null}.
      * @param compactionParams the new compaction parameters
      * @param reason the reason for reloading
      */
-    void reload(CompactionParams compactionParams, ReloadReason reason);
+    void reload(@Nonnull CompactionStrategyContainer previous, CompactionParams compactionParams, ReloadReason reason);
 
     /**
      * Return the compaction parameters. These are not necessarily the same as the ones specified in the schema, they

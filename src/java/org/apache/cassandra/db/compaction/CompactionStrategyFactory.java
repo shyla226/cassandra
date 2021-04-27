@@ -22,6 +22,8 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.schema.CompactionParams;
 
@@ -40,61 +42,62 @@ public class CompactionStrategyFactory
     }
 
     /**
-     * Create a strategy container.
+     * Reload the existing strategy container, possibly creating a new one if required.
+     *
+     * @param current the current strategy container, or {@code null} if this is the first time we're loading a
+     *                compaction strategy
+     * @param compactionParams the new compaction parameters
+     * @param reason the reason for reloading
+     *
+     * @return Either a new strategy container or the current one, but reloaded with the given compaction parameters.
      */
-    public CompactionStrategyContainer createContainer()
-    {
-        return createContainer(cfs.metadata().params.compaction,
-                               CompactionStrategyContainer.ReloadReason.FULL);
-    }
-
-    private CompactionStrategyContainer createContainer(CompactionParams params, CompactionStrategyContainer.ReloadReason reason)
+    public CompactionStrategyContainer reload(@Nullable CompactionStrategyContainer current,
+                                              CompactionParams compactionParams,
+                                              CompactionStrategyContainer.ReloadReason reason)
     {
         CompactionStrategyContainer ret;
 
-        if (params.klass() == UnifiedCompactionStrategy.class)
+        // 1. If UCS is being requested, recreate the container, potentially inheriting the enabled state of the
+        // current container.
+        if (compactionParams.klass() == UnifiedCompactionStrategy.class)
         {
-            ret = new UnifiedCompactionContainer(this);
-        }
-        else
-        {
-            ret = new CompactionStrategyManager(this);
-            ret.reload(params, reason);
+            ret = new UnifiedCompactionContainer(this, enableCompactionOnReload(current, compactionParams, reason));
+            cfs.getTracker().subscribe(ret);
+            return ret;
         }
 
+
+        // 2. Otherwise non-UCS strategy is being requested, and the returned container should be a
+        // CompactionStrategyManager.
+        // 2.a. If we're not switching from UCS, we can just reload the current container (which should already be a
+        // CompactionStrategyManager).
+        if (current instanceof CompactionStrategyManager)
+        {
+            current.reload(current, compactionParams, reason);
+            return current;
+        }
+
+        // 2.b. Otherwise create a new CompactionStrategyManager instance and reload it, in order to potentially
+        // inherit some settings from the current container (if such exists).
+        ret = new CompactionStrategyManager(this);
+        ret.reload(current != null ? current : ret, compactionParams, reason);
         cfs.getTracker().subscribe(ret);
         return ret;
     }
 
-    /**
-     * Reload the existing strategy container, possibly creating a new one if required.
-     *
-     * @param current the current strategy container
-     * @param compactionParams the new compaction parameters
-     * @param reason the reason for reloading
-     *
-     * @return a new strategy container or the current one, but reloaded
-     */
-    public CompactionStrategyContainer reload(CompactionStrategyContainer current,
-                                              CompactionParams compactionParams,
-                                              CompactionStrategyContainer.ReloadReason reason)
+    static boolean enableCompactionOnReload(@Nullable CompactionStrategyContainer previous,
+                                            CompactionParams compactionParams,
+                                            CompactionStrategyContainer.ReloadReason reason)
     {
-        if (compactionParams.klass() == UnifiedCompactionStrategy.class)
-        {
-            return createContainer(compactionParams, reason);
-        }
-        else
-        {
-            if (current instanceof CompactionStrategyManager)
-            {
-                current.reload(compactionParams, reason);
-                return current;
-            }
-            else
-            {
-                return createContainer(compactionParams, reason);
-            }
-        }
+        // If this is a JMX request, we only consider the params passed by it
+        if (reason == CompactionStrategyContainer.ReloadReason.JMX_REQUEST)
+            return compactionParams.isEnabled();
+        // If the enabled state flag and the params of the previous container differ, compaction was forcefully
+        // enabled/disabled by JMX/nodetool, and we should inherit that setting through the enabled state flag
+        if (previous != null && previous.isEnabled() != previous.getCompactionParams().isEnabled())
+            return previous.isEnabled();
+
+        return compactionParams.isEnabled();
     }
 
     public CompactionLogger getCompactionLogger()

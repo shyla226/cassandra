@@ -167,7 +167,7 @@ public class CompactionStrategyManagerTest
         CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory,
                                                                       mockBoundaryManager::getBoundaries,
                                                                       true);
-        csm.reload(cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
+        csm.reload(csm, cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
 
         // Check that SSTables are assigned to the correct Compaction Strategy
         for (SSTableReader reader : cfs.getLiveSSTables())
@@ -373,7 +373,7 @@ public class CompactionStrategyManagerTest
                                                        localRanges, 10);
 
         CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory, () -> boundaries, true);
-        csm.reload(cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
+        csm.reload(csm, cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
 
         List<GroupedSSTableContainer> grouped = csm.groupSSTables(Iterables.concat( transientRepairs, pendingRepair, repaired, unrepaired));
 

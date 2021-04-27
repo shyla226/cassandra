@@ -52,14 +52,14 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
 
     AtomicBoolean enabled;
 
-    UnifiedCompactionContainer(CompactionStrategyFactory factory)
+    UnifiedCompactionContainer(CompactionStrategyFactory factory, boolean enabled)
     {
         cfs = factory.getCfs();
         params = cfs.metadata().params.compaction;
         strategy = new UnifiedCompactionStrategy(factory, params.options());
-        enabled = new AtomicBoolean(params.isEnabled());
+        this.enabled = new AtomicBoolean(enabled);
 
-        if (params.isEnabled())
+        if (enabled)
             strategy.startup();
 
         factory.getCompactionLogger().strategyCreated(strategy);
@@ -97,7 +97,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public void reload(CompactionParams compactionParams, ReloadReason reason)
+    public void reload(CompactionStrategyContainer previous, CompactionParams compactionParams, ReloadReason reason)
     {
         throw new UnsupportedOperationException("Not supported, create a new container");
     }
