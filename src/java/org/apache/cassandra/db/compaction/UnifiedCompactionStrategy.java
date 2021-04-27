@@ -355,14 +355,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return dataTracker.getLiveSSTables();
     }
 
-    @Override
-    public boolean supportsEarlyOpen()
-    {
-        // Hopefully we won't need to support early open since shards will keep sstables in the order of GBs,
-        // we should probably test though
-        return false;
-    }
-
     @VisibleForTesting
     public int getW(int index)
     {
