@@ -111,7 +111,7 @@ public class ViewFilteringTest extends CQLTester
         }
     }
 
-    private void dropView(String name) throws Throwable
+    private void dropMaterializedView(String name) throws Throwable
     {
         executeNet(version, "DROP MATERIALIZED VIEW " + name);
         views.remove(name);
@@ -332,12 +332,12 @@ public class ViewFilteringTest extends CQLTester
         assertRowCount(execute("SELECT * FROM mv_test5"), 0);
         assertRowCount(execute("SELECT * FROM mv_test6"), 0);
 
-        dropView("mv_test1");
-        dropView("mv_test2");
-        dropView("mv_test3");
-        dropView("mv_test4");
-        dropView("mv_test5");
-        dropView("mv_test6");
+        dropMaterializedView("mv_test1");
+        dropMaterializedView("mv_test2");
+        dropMaterializedView("mv_test3");
+        dropMaterializedView("mv_test4");
+        dropMaterializedView("mv_test5");
+        dropMaterializedView("mv_test6");
         dropTable("DROP TABLE %s");
     }
 
@@ -1188,7 +1188,7 @@ public class ViewFilteringTest extends CQLTester
                                     row(0, 1, 1, 0)
             );
 
-            dropView("mv_test" + i);
+            dropMaterializedView("mv_test" + i);
             dropTable("DROP TABLE %s");
         }
     }
@@ -1296,7 +1296,7 @@ public class ViewFilteringTest extends CQLTester
                                     row(0, 1, 1, 0)
             );
 
-            dropView("mv_test" + i);
+            dropMaterializedView("mv_test" + i);
             dropTable("DROP TABLE %s");
         }
     }
@@ -1413,7 +1413,7 @@ public class ViewFilteringTest extends CQLTester
                                     row(0, 1, 1, 0)
             );
 
-            dropView("mv_test" + i);
+            dropMaterializedView("mv_test" + i);
             dropTable("DROP TABLE %s");
         }
     }
@@ -1526,7 +1526,7 @@ public class ViewFilteringTest extends CQLTester
                                     row(0, 1, 1, 0)
             );
 
-            dropView("mv_test" + i);
+            dropMaterializedView("mv_test" + i);
             dropTable("DROP TABLE %s");
         }
     }
@@ -1651,7 +1651,7 @@ public class ViewFilteringTest extends CQLTester
                                     row(4, 4, 1, 1)
             );
 
-            dropView("mv_test" + i);
+            dropMaterializedView("mv_test" + i);
             dropTable("DROP TABLE %s");
         }
     }
@@ -1744,7 +1744,7 @@ public class ViewFilteringTest extends CQLTester
             execute("DELETE FROM %s WHERE a = ?", 1);
             assertEmpty(execute("SELECT a, b, c, d FROM mv_test" + i));
 
-            dropView("mv_test" + i);
+            dropMaterializedView("mv_test" + i);
             dropTable("DROP TABLE %s");
         }
     }
@@ -1873,7 +1873,7 @@ public class ViewFilteringTest extends CQLTester
 
         try {
             createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND d = 1 PRIMARY KEY (a, b, c)");
-            dropView("mv_test");
+            dropMaterializedView("mv_test");
         } catch(Exception e) {
             throw new RuntimeException("MV creation with non primary column restrictions failed.", e);
         }
@@ -1978,7 +1978,7 @@ public class ViewFilteringTest extends CQLTester
                                 row(0, 1, 1, 0)
         );
 
-        dropView("mv_test");
+        dropMaterializedView("mv_test");
         dropTable("DROP TABLE %s");
     }
 
