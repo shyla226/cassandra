@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -261,7 +262,9 @@ public class CompactionStrategyContainerPendingRepairTest extends AbstractPendin
         Assert.assertFalse(sstable.isRepaired());
 
         cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        Assert.assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
@@ -302,7 +305,9 @@ public class CompactionStrategyContainerPendingRepairTest extends AbstractPendin
         Assert.assertFalse(sstable.isRepaired());
 
         cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        Assert.assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
@@ -339,7 +344,9 @@ public class CompactionStrategyContainerPendingRepairTest extends AbstractPendin
         Assert.assertFalse(unrepairedContains(sstable));
 
         cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        Assert.assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
@@ -370,7 +377,9 @@ public class CompactionStrategyContainerPendingRepairTest extends AbstractPendin
         Assert.assertFalse(unrepairedContains(sstable));
 
         cfs.getCompactionStrategyContainer().enable(); // enable compaction to fetch next background task
-        AbstractCompactionTask compactionTask = compactionStrategyContainer.getNextBackgroundTask(FBUtilities.nowInSeconds());
+        Collection<AbstractCompactionTask> compactionTasks = compactionStrategyContainer.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        Assert.assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         Assert.assertNotNull(compactionTask);
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 

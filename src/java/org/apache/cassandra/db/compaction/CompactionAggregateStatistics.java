@@ -38,6 +38,8 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemoryPerSecond;
  */
 public class CompactionAggregateStatistics implements Serializable
 {
+    public static final String NO_SHARD = "";
+
     protected static final Collection<String> HEADER = ImmutableList.of("Tot. sstables", "Size (bytes)", "Compactions", "Comp. Sstables", "Read (bytes/sec)", "Write (bytes/sec)");
 
     /** The number of compactions that are either pending or in progress */
@@ -136,6 +138,13 @@ public class CompactionAggregateStatistics implements Serializable
     public double writeThroughput()
     {
         return writeThroughput;
+    }
+
+    /** The name of the shard, empty if the compaction is not sharded (the default). */
+    @JsonProperty
+    public String shard()
+    {
+        return NO_SHARD;
     }
 
     @Override

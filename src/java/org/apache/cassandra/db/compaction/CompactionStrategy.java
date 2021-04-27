@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -37,7 +36,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
 /**
- * The common interface between legacy compaction strategies (those that extend {@link AbstractCompactionStrategy}
+ * The common interface between legacy compaction strategies (those that extend {@link LegacyAbstractCompactionStrategy}
  * and the new compaction strategy, {@link UnifiedCompactionStrategy}.
  */
 public interface CompactionStrategy extends CompactionObserver
@@ -72,11 +71,11 @@ public interface CompactionStrategy extends CompactionObserver
     /**
      * @param gcBefore throw away tombstones older than this
      *
-     * @return the next background/minor compaction task to run; null if nothing to do.
+     * @return the next background/minor compaction tasks to run; empty if nothing to do.
      *
      * Is responsible for marking its sstables as compaction-pending.
      */
-    AbstractCompactionTask getNextBackgroundTask(int gcBefore);
+    Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore);
 
     /**
      * @param gcBefore throw away tombstones older than this

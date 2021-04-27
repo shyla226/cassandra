@@ -533,6 +533,8 @@ public class Tracker
     public void subscribe(INotificationConsumer consumer)
     {
         subscribers.add(consumer);
+        if (logger.isTraceEnabled())
+            logger.trace("{} subscribed to the data tracker.", consumer);
     }
 
     public void unsubscribe(INotificationConsumer consumer)

@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
 {
-    private static final Collection<String> HEADER = ImmutableList.copyOf(Iterables.concat(ImmutableList.of("Bucket", "W", "o", "T", "F", "min size", "max size"),
+    private static final Collection<String> HEADER = ImmutableList.copyOf(Iterables.concat(ImmutableList.of("Bucket", "W", "T", "F", "min size", "max size"),
                                                                                            CompactionAggregateStatistics.HEADER,
                                                                                            ImmutableList.of("Tot/Read/Written")));
 
@@ -62,6 +62,9 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
     /** The maximum size for a sorted run that belongs to this bucket */
     private final long maxSizeBytes;
 
+    /** The name of the shard */
+    private final String shard;
+
     /** Total uncompressed bytes of the sstables */
     protected final long tot;
 
@@ -78,6 +81,7 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
                                 int F,
                                 long minSizeBytes,
                                 long maxSizeBytes,
+                                String shard,
                                 int numCompactions,
                                 int numCompactionsInProgress,
                                 int numSSTables,
@@ -99,6 +103,7 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
         this.F = F;
         this.minSizeBytes = minSizeBytes;
         this.maxSizeBytes = maxSizeBytes;
+        this.shard = shard;
         this.tot = tot;
         this.read = read;
         this.written = written;
@@ -111,7 +116,7 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
         return bucket;
     }
 
-    /** The survival factor o */
+    /** The survival factor o, currently always one */
     @JsonProperty
     public double o()
     {
@@ -174,6 +179,14 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
         return written;
     }
 
+    /** The name of the shard, empty if the compaction is not sharded (the default). */
+    @JsonProperty
+    @Override
+    public String shard()
+    {
+        return shard;
+    }
+
     @Override
     protected Collection<String> header()
     {
@@ -186,7 +199,6 @@ public class UnifiedCompactionStatistics extends CompactionAggregateStatistics
         List<String> data = new ArrayList<>(HEADER.size());
         data.add(Integer.toString(bucket()));
         data.add(Integer.toString(W));
-        data.add(String.format("%.6f", o));
         data.add(Integer.toString(T));
         data.add(Integer.toString(F));
         data.add(FBUtilities.prettyPrintMemory(minSizeBytes));

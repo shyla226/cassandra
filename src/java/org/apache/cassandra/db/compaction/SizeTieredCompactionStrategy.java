@@ -41,9 +41,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.Pair;
 
-import static com.google.common.collect.Iterables.filter;
-
-public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.WithAggregates
+public class SizeTieredCompactionStrategy extends LegacyAbstractCompactionStrategy.WithAggregates
 {
     private static final Logger logger = LoggerFactory.getLogger(SizeTieredCompactionStrategy.class);
 

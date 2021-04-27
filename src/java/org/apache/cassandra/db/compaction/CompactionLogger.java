@@ -110,7 +110,7 @@ public class CompactionLogger
     private final String table;
     private final AtomicInteger identifier = new AtomicInteger(0);
     private final Map<CompactionStrategy, String> compactionStrategyMapping = new MapMaker().weakKeys().makeMap();
-    private final Map<CompactionStrategy, Writer> csvWriters = new MapMaker().makeMap();
+    private final Map<CompactionStrategy, Map<String, Writer>> csvWriters = new MapMaker().makeMap();
     private final AtomicBoolean enabled = new AtomicBoolean(false);
 
     CompactionLogger(TableMetadata metadata)
@@ -248,7 +248,7 @@ public class CompactionLogger
             node.set("strategies", getStrategiesJsonNode(this::getStrategyId));
             jsonWriter.write(node, this::getEventJsonNode, this);
 
-            visitStrategies(strategy -> csvWriters.computeIfPresent(strategy, (s, w) -> { w.close(); return null; }));
+            visitStrategies(strategy -> csvWriters.computeIfPresent(strategy, (s, writers) -> { writers.values().forEach(Writer::close); return null; }));
         }
     }
 
@@ -308,26 +308,41 @@ public class CompactionLogger
         if (!enabled.get())
             return;
 
-        Writer writer = getCsvWriter(strategy, statistics.getHeader());
-        for (Collection<String> data : statistics.getData())
-            writer.write(String.join(",", Iterables.concat(ImmutableList.of(currentTime(), event), data)) + System.lineSeparator());
+        for (CompactionAggregateStatistics aggregateStatistics : statistics.aggregates())
+        {
+            Writer writer = getCsvWriter(strategy, statistics.getHeader(), aggregateStatistics);
+            writer.write(String.join(",", Iterables.concat(ImmutableList.of(currentTime(), event), aggregateStatistics.data())) + System.lineSeparator());
+        }
     }
 
-    private Writer getCsvWriter(CompactionStrategy strategy, Collection<String> header)
+    private Writer getCsvWriter(CompactionStrategy strategy, Collection<String> header, CompactionAggregateStatistics statistics)
     {
-        Writer writer = csvWriters.get(strategy);
+        Map<String, Writer> writers = csvWriters.get(strategy);
+        if (writers == null)
+        {
+            writers = new MapMaker().makeMap();
+            if (csvWriters.putIfAbsent(strategy, writers) != null)
+            {
+                writers = csvWriters.get(strategy);
+            }
+        }
+
+        String shard = statistics.shard();
+        Writer writer = writers.get(shard);
         if (writer != null)
             return writer;
 
-        // TODO - should we add the repair status?
         String fileName = String.format("compaction-%s-%s-%s-%s",
                                         strategy.getName(),
                                         keyspace,
                                         table,
                                         getId(strategy));
 
+        if (!shard.isEmpty())
+            fileName += '-' + shard;
+
         writer = new CompactionLogSerializer(fileName, "csv", loggerService);
-        if (csvWriters.putIfAbsent(strategy, writer) == null)
+        if (writers.putIfAbsent(shard, writer) == null)
         {
             writer.write(String.join(",", Iterables.concat(ImmutableList.of("Timestamp", "Event"), header)) + System.lineSeparator());
             return writer;
@@ -335,7 +350,7 @@ public class CompactionLogger
         else
         {
             writer.close();
-            return csvWriters.get(strategy);
+            return writers.get(shard);
         }
     }
 

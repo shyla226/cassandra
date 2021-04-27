@@ -35,7 +35,6 @@ import com.google.common.collect.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -44,7 +43,7 @@ import org.apache.cassandra.schema.CompactionParams;
 
 import static com.google.common.collect.Iterables.filter;
 
-public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.WithAggregates
+public class TimeWindowCompactionStrategy extends LegacyAbstractCompactionStrategy.WithAggregates
 {
     private static final Logger logger = LoggerFactory.getLogger(TimeWindowCompactionStrategy.class);
 

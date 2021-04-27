@@ -130,7 +130,7 @@ public class CompactionsBytemanTest extends CQLTester
         assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(cfs));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(cfs));
         assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
     }
 

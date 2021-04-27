@@ -29,7 +29,6 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
@@ -43,7 +42,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 
 public class CompactionStrategyHolder extends AbstractStrategyHolder
 {
-    private final List<AbstractCompactionStrategy> strategies = new ArrayList<>();
+    private final List<LegacyAbstractCompactionStrategy> strategies = new ArrayList<>();
     private final boolean isRepaired;
 
     public CompactionStrategyHolder(ColumnFamilyStore cfs, CompactionStrategyFactory strategyFactory, DestinationRouter router, boolean isRepaired)
@@ -89,24 +88,24 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public AbstractCompactionStrategy getStrategyFor(SSTableReader sstable)
+    public LegacyAbstractCompactionStrategy getStrategyFor(SSTableReader sstable)
     {
         Preconditions.checkArgument(managesSSTable(sstable), "Attempting to get compaction strategy from wrong holder");
         return strategies.get(router.getIndexForSSTable(sstable));
     }
 
     @Override
-    public Iterable<AbstractCompactionStrategy> allStrategies()
+    public Iterable<LegacyAbstractCompactionStrategy> allStrategies()
     {
         return strategies;
     }
 
     @Override
-    public Collection<TaskSupplier> getBackgroundTaskSuppliers(int gcBefore)
+    public Collection<TasksSupplier> getBackgroundTaskSuppliers(int gcBefore)
     {
-        List<TaskSupplier> suppliers = new ArrayList<>(strategies.size());
+        List<TasksSupplier> suppliers = new ArrayList<>(strategies.size());
         for (CompactionStrategy strategy : strategies)
-            suppliers.add(new TaskSupplier(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTask(gcBefore)));
+            suppliers.add(new TasksSupplier(strategy.getEstimatedRemainingTasks(), () -> strategy.getNextBackgroundTasks(gcBefore)));
 
         return suppliers;
     }

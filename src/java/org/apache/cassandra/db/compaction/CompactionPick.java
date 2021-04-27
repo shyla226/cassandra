@@ -53,6 +53,9 @@ class CompactionPick
     /** The average size in bytes for the sstables in this compaction */
     final long avgSizeInBytes;
 
+    /** The total size on disk for the sstables in this compaction */
+    final long totSizeInBytes;
+
     /** The unique compaction id, this is only available when a compaction is submitted */
     @Nullable
     volatile UUID id;
@@ -65,12 +68,13 @@ class CompactionPick
     /** Set to true when the compaction has completed */
     volatile boolean completed;
 
-    private CompactionPick(long parent, Collection<SSTableReader> sstables, double hotness, long avgSizeInBytes)
+    private CompactionPick(long parent, Collection<SSTableReader> sstables, double hotness, long avgSizeInBytes, long totSizeInBytes)
     {
         this.parent = parent;
         this.sstables = new CopyOnWriteArraySet<>(sstables);
         this.hotness = hotness;
         this.avgSizeInBytes = avgSizeInBytes;
+        this.totSizeInBytes = totSizeInBytes;
     }
 
     /**
@@ -78,7 +82,7 @@ class CompactionPick
      */
     static CompactionPick create(long parent, Collection<SSTableReader> sstables)
     {
-        return create(parent, sstables, CompactionAggregate.getTotHotness(sstables), CompactionAggregate.getAvgSizeBytes(sstables));
+        return create(parent, sstables, CompactionAggregate.getTotHotness(sstables), CompactionAggregate.getAvgSizeBytes(sstables), CompactionAggregate.getTotSizeBytes(sstables));
     }
 
     /**
@@ -86,15 +90,15 @@ class CompactionPick
      */
     static CompactionPick create(long parent, Collection<SSTableReader> sstables, double hotness)
     {
-        return create(parent, sstables, hotness, CompactionAggregate.getAvgSizeBytes(sstables));
+        return create(parent, sstables, hotness, CompactionAggregate.getAvgSizeBytes(sstables), CompactionAggregate.getTotSizeBytes(sstables));
     }
 
     /**
      * Create a pending compaction candidate with the given parameters.
      */
-    static CompactionPick create(long parent, Collection<SSTableReader> sstables, double hotness, long avgSizeInBytes)
+    static CompactionPick create(long parent, Collection<SSTableReader> sstables, double hotness, long avgSizeInBytes, long totSizeInBytes)
     {
-        return new CompactionPick(parent, sstables, hotness, avgSizeInBytes);
+        return new CompactionPick(parent, sstables, hotness, avgSizeInBytes, totSizeInBytes);
     }
 
     /**
@@ -102,7 +106,7 @@ class CompactionPick
      */
     static CompactionPick create(long parent, CompactionPick pick)
     {
-        return new CompactionPick(parent, pick.sstables, pick.hotness, pick.avgSizeInBytes);
+        return new CompactionPick(parent, pick.sstables, pick.hotness, pick.avgSizeInBytes, pick.totSizeInBytes);
     }
 
     public double hotness()
@@ -161,11 +165,11 @@ class CompactionPick
      */
     CompactionPick withAddedSSTables(Collection<SSTableReader> sstables)
     {
-        ImmutableList.Builder builder = ImmutableList.builder();
+        ImmutableList.Builder<SSTableReader> builder = ImmutableList.builder();
         builder.addAll(this.sstables);
         builder.addAll(sstables);
 
-        return new CompactionPick(parent, builder.build(), CompactionAggregate.getTotHotness(sstables), CompactionAggregate.getAvgSizeBytes(sstables));
+        return new CompactionPick(parent, builder.build(), CompactionAggregate.getTotHotness(sstables), CompactionAggregate.getAvgSizeBytes(sstables), CompactionAggregate.getTotSizeBytes(sstables));
     }
 
     /**

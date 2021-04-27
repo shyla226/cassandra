@@ -181,12 +181,12 @@ public class CompactionManager implements CompactionManagerMBean
      * It's okay to over-call (within reason) if a call is unnecessary, it will
      * turn into a no-op in the bucketing/candidate-scan phase.
      */
-    public List<Future<?>> submitBackground(final ColumnFamilyStore cfs)
+    public CompletableFuture<?> submitBackground(final ColumnFamilyStore cfs)
     {
         if (cfs.isAutoCompactionDisabled())
         {
             logger.trace("Autocompaction is disabled");
-            return Collections.emptyList();
+            return CompletableFuture.completedFuture(null);
         }
 
         /**
@@ -200,7 +200,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             logger.trace("Background compaction is still running for {}.{} ({} remaining). Skipping",
                          cfs.keyspace.getName(), cfs.name, count);
-            return Collections.emptyList();
+            return CompletableFuture.completedFuture(null);
         }
 
         logger.trace("Scheduling a background task check for {}.{} with {}",
@@ -208,13 +208,53 @@ public class CompactionManager implements CompactionManagerMBean
                      cfs.name,
                      cfs.getCompactionStrategy().getName());
 
-        List<Future<?>> futures = new ArrayList<>(1);
-        Future<?> fut = executor.submitIfRunning(new BackgroundCompactionCandidate(cfs), "background task");
-        if (!fut.isCancelled())
-            futures.add(fut);
-        else
-            compactingCF.remove(cfs);
-        return futures;
+        CompactionStrategy strategy = cfs.getCompactionStrategy();
+
+        return CompletableFuture.supplyAsync(() -> strategy.getNextBackgroundTasks(getDefaultGcBefore(cfs, FBUtilities.nowInSeconds())), executor)
+                                .thenCompose(tasks -> {
+                                    if (executor.isShutdown())
+                                    {
+                                        logger.info("Executor has been shut down, not submitting background compaction tasks for {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
+                                        CompletableFuture ret = new CompletableFuture();
+                                        ret.completeExceptionally(new CancellationException("Compaction executor no longer running"));
+                                        return ret;
+                                    }
+
+                                    CompletableFuture upgradeFut = null;
+                                    if (tasks.isEmpty() && DatabaseDescriptor.automaticSSTableUpgrade())
+                                        upgradeFut = maybeRunUpgradeTask(cfs, cfs.getCompactionStrategyContainer());
+
+                                    if (tasks.isEmpty() && upgradeFut == null)
+                                        return CompletableFuture.completedFuture(null);
+
+                                    compactingCF.add(cfs);
+                                    CompletableFuture<?> fut;
+                                    // either there are compaction tasks or an upgrade task
+                                    if (tasks.isEmpty())
+                                    {
+                                        fut = upgradeFut;
+                                    }
+                                    else
+                                    {
+                                        CompletableFuture futures[] = new CompletableFuture[tasks.size()];
+                                        int i = 0;
+                                        for (AbstractCompactionTask task : tasks)
+                                        {
+                                            futures[i++] = runCompactionTask(cfs, task);
+                                        }
+                                        fut = CompletableFuture.allOf(futures);
+                                    }
+
+                                    return fut.handle((ignored, err) -> {
+                                        compactingCF.remove(cfs);
+                                        if (err != null)
+                                            logger.debug("Got exception when running background compaction tasks:", err);
+                                        else
+                                            submitBackground(cfs);
+
+                                        return null;
+                                    });
+                                });
     }
 
     public boolean isCompacting(Iterable<ColumnFamilyStore> cfses, Predicate<SSTableReader> sstablePredicate)
@@ -266,80 +306,40 @@ public class CompactionManager implements CompactionManagerMBean
         executor.awaitTermination(timeout, unit);
     }
 
-    // the actual sstables to compact are not determined until we run the BCT; that way, if new sstables
-    // are created between task submission and execution, we execute against the most up-to-date information
     @VisibleForTesting
-    class BackgroundCompactionCandidate implements Runnable
+    protected CompletableFuture<?> maybeRunUpgradeTask(ColumnFamilyStore cfs, CompactionStrategyContainer strategy)
     {
-        private final ColumnFamilyStore cfs;
-
-        BackgroundCompactionCandidate(ColumnFamilyStore cfs)
+        logger.debug("Checking for upgrade tasks {}.{}", cfs.keyspace.getName(), cfs.getTableName());
+        if (currentlyBackgroundUpgrading.incrementAndGet() <= DatabaseDescriptor.maxConcurrentAutoUpgradeTasks())
         {
-            compactingCF.add(cfs);
-            this.cfs = cfs;
-        }
-
-        public void run()
-        {
-            boolean ranCompaction = false;
-            try
+            AbstractCompactionTask upgradeTask = strategy.findUpgradeSSTableTask();
+            if (upgradeTask != null)
             {
-                logger.trace("Checking {}.{}", cfs.keyspace.getName(), cfs.name);
-                if (!cfs.isValid())
-                {
-                    logger.trace("Aborting compaction for dropped CF");
-                    return;
-                }
-
-                CompactionStrategyContainer strategy = cfs.getCompactionStrategyContainer();
-                AbstractCompactionTask task = strategy.getNextBackgroundTask(getDefaultGcBefore(cfs, FBUtilities.nowInSeconds()));
-                if (task == null)
-                {
-                    if (DatabaseDescriptor.automaticSSTableUpgrade())
-                        ranCompaction = maybeRunUpgradeTask(strategy);
-                }
-                else
-                {
-                    task.execute(active);
-                    ranCompaction = true;
-                }
+                return runCompactionTask(cfs, upgradeTask)
+                       .whenComplete((res, err) -> currentlyBackgroundUpgrading.decrementAndGet());
             }
-            finally
-            {
-                compactingCF.remove(cfs);
-            }
-            if (ranCompaction) // only submit background if we actually ran a compaction - otherwise we end up in an infinite loop submitting noop background tasks
-                submitBackground(cfs);
-        }
-
-        boolean maybeRunUpgradeTask(CompactionStrategyContainer strategy)
-        {
-            logger.debug("Checking for upgrade tasks {}.{}", cfs.keyspace.getName(), cfs.getTableName());
-            try
-            {
-                if (currentlyBackgroundUpgrading.incrementAndGet() <= DatabaseDescriptor.maxConcurrentAutoUpgradeTasks())
-                {
-                    AbstractCompactionTask upgradeTask = strategy.findUpgradeSSTableTask();
-                    if (upgradeTask != null)
-                    {
-                        upgradeTask.execute(active);
-                        return true;
-                    }
-                }
-            }
-            finally
+            else
             {
                 currentlyBackgroundUpgrading.decrementAndGet();
+                return null;
             }
-            logger.trace("No tasks available");
-            return false;
         }
+
+        logger.trace("No tasks available");
+        return null;
     }
 
-    @VisibleForTesting
-    public BackgroundCompactionCandidate getBackgroundCompactionCandidate(ColumnFamilyStore cfs)
+    private CompletableFuture<?> runCompactionTask(ColumnFamilyStore cfs, AbstractCompactionTask task)
     {
-        return new BackgroundCompactionCandidate(cfs);
+        return CompletableFuture.runAsync(() -> {
+            if (!cfs.isValid())
+            {
+                logger.trace("Aborting compaction for dropped CF {}.{}", cfs.keyspace.getName(), cfs.name);
+                return;
+            }
+
+            task.execute(active);
+        }, executor);
     }
 
     /**
@@ -651,7 +651,7 @@ public class CompactionManager implements CompactionManagerMBean
 
             public Map<Integer, List<SSTableReader>> groupByDiskIndex(Set<SSTableReader> needsRelocation)
             {
-                return needsRelocation.stream().collect(Collectors.groupingBy((s) -> diskBoundaries.getDiskIndex(s)));
+                return needsRelocation.stream().collect(Collectors.groupingBy((s) -> diskBoundaries.getDiskIndexFromKey(s)));
             }
 
             private boolean inCorrectLocation(SSTableReader sstable)

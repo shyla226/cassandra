@@ -45,7 +45,9 @@ import static org.mockito.Mockito.when;
 public class ControllerTest
 {
     static final double epsilon = 0.00000001;
-    static final int minSSTableSizeMB = 2;
+    static final int dataSizeGB = 512;
+    static final int numShards = 4; // pick it so that dataSizeGB is exactly divisible or tests will break
+    static final int sstableSizeMB = 2;
 
     @Mock
     ColumnFamilyStore cfs;
@@ -83,19 +85,24 @@ public class ControllerTest
 
         when(executorService.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(fut);
 
-        when(env.flushSize()).thenReturn((double) (minSSTableSizeMB << 20));
+        when(env.flushSize()).thenReturn((double) (sstableSizeMB << 20));
     }
 
     Controller testFromOptions(boolean adaptive, Map<String, String> options)
     {
         options.put(Controller.ADAPTIVE_OPTION, Boolean.toString(adaptive));
-        options.put(Controller.MINIMAL_SSTABLE_SIZE_OPTION_MB, Integer.toString(minSSTableSizeMB));
+        options.put(Controller.DATASET_SIZE_OPTION_GB, Integer.toString(dataSizeGB));
+        options.put(Controller.NUM_SHARDS_OPTION, Integer.toString(numShards));
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION_MB, Integer.toString(sstableSizeMB));
 
         Controller controller = Controller.fromOptions(cfs, options);
         assertNotNull(controller);
         assertNotNull(controller.toString());
 
-        assertEquals((long) minSSTableSizeMB << 20, controller.getMinSSTableSizeBytes());
+        assertEquals((long) sstableSizeMB << 20, controller.getMinSstableSizeBytes());
+        assertEquals((long) dataSizeGB << 30, controller.getDataSetSizeBytes());
+        assertEquals(numShards, controller.getNumShards());
+        assertEquals(((long) dataSizeGB << 30) / numShards, controller.getShardSizeBytes());
         assertFalse(controller.isRunning());
         assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(), epsilon);
         assertNull(controller.getCalculator());
@@ -106,7 +113,9 @@ public class ControllerTest
     void testValidateOptions(Map<String, String> options, boolean adaptive)
     {
         options.put(Controller.ADAPTIVE_OPTION, Boolean.toString(adaptive));
-        options.put(Controller.MINIMAL_SSTABLE_SIZE_OPTION_MB, Integer.toString(minSSTableSizeMB));
+        options.put(Controller.DATASET_SIZE_OPTION_GB, Integer.toString(dataSizeGB));
+        options.put(Controller.NUM_SHARDS_OPTION, Integer.toString(numShards));
+        options.put(Controller.MIN_SSTABLE_SIZE_OPTION_MB, Integer.toString(sstableSizeMB));
 
         options = Controller.validateOptions(options);
         assertTrue(options.toString(), options.isEmpty());
@@ -116,7 +125,10 @@ public class ControllerTest
     {
         assertNotNull(controller);
 
-        assertEquals((long) minSSTableSizeMB << 20, controller.getMinSSTableSizeBytes());
+        assertEquals((long) dataSizeGB << 30, controller.getDataSetSizeBytes());
+        assertEquals(numShards, controller.getNumShards());
+        assertEquals(((long) dataSizeGB << 30) / numShards, controller.getShardSizeBytes());
+        assertEquals((long) sstableSizeMB << 20, controller.getMinSstableSizeBytes());
         assertFalse(controller.isRunning());
         assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(), epsilon);
         assertNull(controller.getCalculator());

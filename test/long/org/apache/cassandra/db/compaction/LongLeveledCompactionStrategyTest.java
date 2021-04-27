@@ -89,17 +89,12 @@ public class LongLeveledCompactionStrategyTest
         {
             while (true)
             {
-                final AbstractCompactionTask nextTask = lcs.getNextBackgroundTask(Integer.MIN_VALUE);
-                if (nextTask == null)
+                final Collection<AbstractCompactionTask> nextTasks = lcs.getNextBackgroundTasks(Integer.MIN_VALUE);
+                if (nextTasks.isEmpty())
                     break;
-                tasks.add(new Runnable()
-                {
-                    public void run()
-                    {
-                        nextTask.execute();
-                    }
-                });
+                tasks.addAll(nextTasks.stream().map(t -> (Runnable) () -> t.execute()).collect(Collectors.toList()));
             }
+
             if (tasks.isEmpty())
                 break;
 

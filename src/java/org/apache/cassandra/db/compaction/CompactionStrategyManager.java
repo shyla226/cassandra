@@ -46,7 +46,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.AbstractStrategyHolder.TaskSupplier;
+import org.apache.cassandra.db.compaction.AbstractStrategyHolder.TasksSupplier;
 import org.apache.cassandra.db.compaction.PendingRepairManager.CleanupTask;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -174,9 +174,6 @@ class CompactionStrategyManager implements CompactionStrategyContainer
         unrepaired = new CompactionStrategyHolder(cfs, strategyFactory, router, false);
         holders = ImmutableList.of(transientRepairs, pendingRepairs, repaired, unrepaired);
 
-        cfs.getTracker().subscribe(this);
-        logger.trace("{} subscribed to the data tracker.", this);
-
         compactionLogger = strategyFactory.getCompactionLogger();
         this.boundariesSupplier = boundariesSupplier;
         this.partitionSSTablesByTokenRange = partitionSSTablesByTokenRange;
@@ -187,46 +184,49 @@ class CompactionStrategyManager implements CompactionStrategyContainer
     /**
      * Return the next background task
      *
-     * Returns a task for the compaction strategy that needs it the most (most estimated remaining tasks)
-     */
+     * Legacy strategies will always return one task but we wrap this in a collection because the
+     * {@link UnifiedCompactionStrategy} needs to return one task per shard.
+     *
+     * @return the task for the compaction strategy that needs it the most (most estimated remaining tasks)     */
     @Override
-    public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
+    public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
         maybeReloadDiskBoundaries();
         readLock.lock();
         try
         {
             if (!isEnabled())
-                return null;
+                return ImmutableList.of();
 
             int numPartitions = getNumTokenPartitions();
 
             // first try to promote/demote sstables from completed repairs
-            AbstractCompactionTask repairFinishedTask;
-            repairFinishedTask = pendingRepairs.getNextRepairFinishedTask();
-            if (repairFinishedTask != null)
-                return repairFinishedTask;
+            Collection<AbstractCompactionTask> repairFinishedTasks;
+            repairFinishedTasks = pendingRepairs.getNextRepairFinishedTasks();
+            if (!repairFinishedTasks.isEmpty())
+                return repairFinishedTasks;
 
-            repairFinishedTask = transientRepairs.getNextRepairFinishedTask();
-            if (repairFinishedTask != null)
-                return repairFinishedTask;
+            repairFinishedTasks = transientRepairs.getNextRepairFinishedTasks();
+            if (!repairFinishedTasks.isEmpty())
+                return repairFinishedTasks;
 
             // sort compaction task suppliers by remaining tasks descending
-            List<TaskSupplier> suppliers = new ArrayList<>(numPartitions * holders.size());
+            List<TasksSupplier> suppliers = new ArrayList<>(numPartitions * holders.size());
             for (AbstractStrategyHolder holder : holders)
                 suppliers.addAll(holder.getBackgroundTaskSuppliers(gcBefore));
 
             Collections.sort(suppliers);
 
-            // return the first non-null task
-            for (TaskSupplier supplier : suppliers)
+            // return the first non-empty list, we could enhance it to return all tasks of all
+            // suppliers but this would change existing behavior
+            for (TasksSupplier supplier : suppliers)
             {
-                AbstractCompactionTask task = supplier.getTask();
-                if (task != null)
-                    return task;
+                Collection<AbstractCompactionTask> tasks = supplier.getTasks();
+                if (!tasks.isEmpty())
+                    return tasks;
             }
 
-            return null;
+            return ImmutableList.of();
         }
         finally
         {
@@ -350,14 +350,14 @@ class CompactionStrategyManager implements CompactionStrategyContainer
      * @param sstable
      * @return
      */
-    AbstractCompactionStrategy getCompactionStrategyFor(SSTableReader sstable)
+    LegacyAbstractCompactionStrategy getCompactionStrategyFor(SSTableReader sstable)
     {
         maybeReloadDiskBoundaries();
         return compactionStrategyFor(sstable);
     }
 
     @VisibleForTesting
-    AbstractCompactionStrategy compactionStrategyFor(SSTableReader sstable)
+    LegacyAbstractCompactionStrategy compactionStrategyFor(SSTableReader sstable)
     {
         // should not call maybeReloadDiskBoundaries because it may be called from within lock
         readLock.lock();
@@ -393,7 +393,7 @@ class CompactionStrategyManager implements CompactionStrategyContainer
             if (!partitionSSTablesByTokenRange)
                 return 0;
 
-            return currentBoundaries.getDiskIndex(sstable);
+            return currentBoundaries.getDiskIndexFromKey(sstable);
         }
         finally
         {
@@ -752,7 +752,7 @@ class CompactionStrategyManager implements CompactionStrategyContainer
      */
     private void handleMetadataChangedNotification(SSTableReader sstable, StatsMetadata oldMetadata)
     {
-        AbstractCompactionStrategy acs = getCompactionStrategyFor(sstable);
+        LegacyAbstractCompactionStrategy acs = getCompactionStrategyFor(sstable);
         acs.metadataChanged(oldMetadata, sstable);
     }
 

@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -68,7 +69,7 @@ class PendingRepairManager
     private final CompactionStrategyFactory strategyFactory;
     private final CompactionParams params;
     private final boolean isTransient;
-    private volatile ImmutableMap<UUID, AbstractCompactionStrategy> strategies = ImmutableMap.of();
+    private volatile ImmutableMap<UUID, LegacyAbstractCompactionStrategy> strategies = ImmutableMap.of();
 
     /**
      * Indicates we're being asked to do something with an sstable that isn't marked pending repair
@@ -89,27 +90,27 @@ class PendingRepairManager
         this.isTransient = isTransient;
     }
 
-    private ImmutableMap.Builder<UUID, AbstractCompactionStrategy> mapBuilder()
+    private ImmutableMap.Builder<UUID, LegacyAbstractCompactionStrategy> mapBuilder()
     {
         return ImmutableMap.builder();
     }
 
-    AbstractCompactionStrategy get(UUID id)
+    LegacyAbstractCompactionStrategy get(UUID id)
     {
         return strategies.get(id);
     }
 
-    AbstractCompactionStrategy get(SSTableReader sstable)
+    LegacyAbstractCompactionStrategy get(SSTableReader sstable)
     {
         assert sstable.isPendingRepair();
         return get(sstable.getSSTableMetadata().pendingRepair);
     }
 
-    AbstractCompactionStrategy getOrCreate(UUID id)
+    LegacyAbstractCompactionStrategy getOrCreate(UUID id)
     {
         checkPendingID(id);
         assert id != null;
-        AbstractCompactionStrategy strategy = get(id);
+        LegacyAbstractCompactionStrategy strategy = get(id);
         if (strategy == null)
         {
             synchronized (this)
@@ -135,7 +136,7 @@ class PendingRepairManager
         }
     }
 
-    AbstractCompactionStrategy getOrCreate(SSTableReader sstable)
+    LegacyAbstractCompactionStrategy getOrCreate(SSTableReader sstable)
     {
         return getOrCreate(sstable.getSSTableMetadata().pendingRepair);
     }
@@ -151,7 +152,7 @@ class PendingRepairManager
 
     synchronized void removeSSTable(SSTableReader sstable)
     {
-        for (Map.Entry<UUID, AbstractCompactionStrategy> entry : strategies.entrySet())
+        for (Map.Entry<UUID, LegacyAbstractCompactionStrategy> entry : strategies.entrySet())
         {
             entry.getValue().removeSSTable(sstable);
             removeSessionIfEmpty(entry.getKey());
@@ -205,7 +206,7 @@ class PendingRepairManager
 
         for (Map.Entry<UUID, Pair<Set<SSTableReader>, Set<SSTableReader>>> entry : groups.entrySet())
         {
-            AbstractCompactionStrategy strategy = getOrCreate(entry.getKey());
+            LegacyAbstractCompactionStrategy strategy = getOrCreate(entry.getKey());
             Set<SSTableReader> groupRemoved = entry.getValue().left;
             Set<SSTableReader> groupAdded = entry.getValue().right;
 
@@ -243,7 +244,7 @@ class PendingRepairManager
     int getEstimatedRemainingTasks()
     {
         int tasks = 0;
-        for (Map.Entry<UUID, AbstractCompactionStrategy> entry : strategies.entrySet())
+        for (Map.Entry<UUID, LegacyAbstractCompactionStrategy> entry : strategies.entrySet())
         {
             tasks += getEstimatedRemainingTasks(entry.getKey(), entry.getValue());
         }
@@ -256,7 +257,7 @@ class PendingRepairManager
     int getMaxEstimatedRemainingTasks()
     {
         int tasks = 0;
-        for (Map.Entry<UUID, AbstractCompactionStrategy> entry : strategies.entrySet())
+        for (Map.Entry<UUID, LegacyAbstractCompactionStrategy> entry : strategies.entrySet())
         {
             tasks = Math.max(tasks, getEstimatedRemainingTasks(entry.getKey(), entry.getValue()));
         }
@@ -267,7 +268,7 @@ class PendingRepairManager
     private RepairFinishedCompactionTask getRepairFinishedCompactionTask(UUID sessionID)
     {
         Preconditions.checkState(canCleanup(sessionID));
-        AbstractCompactionStrategy compactionStrategy = get(sessionID);
+        LegacyAbstractCompactionStrategy compactionStrategy = get(sessionID);
         if (compactionStrategy == null)
             return null;
         Set<SSTableReader> sstables = compactionStrategy.getSSTables();
@@ -352,26 +353,26 @@ class PendingRepairManager
         return count;
     }
 
-    synchronized AbstractCompactionTask getNextRepairFinishedTask()
+    synchronized Collection<AbstractCompactionTask> getNextRepairFinishedTasks()
     {
         for (UUID sessionID : strategies.keySet())
         {
             if (canCleanup(sessionID))
             {
-                return getRepairFinishedCompactionTask(sessionID);
+                return ImmutableList.of(getRepairFinishedCompactionTask(sessionID));
             }
         }
-        return null;
+        return ImmutableList.of();
     }
 
-    synchronized AbstractCompactionTask getNextBackgroundTask(int gcBefore)
+    synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
         if (strategies.isEmpty())
-            return null;
+            return ImmutableList.of();
 
         Map<UUID, Integer> numTasks = new HashMap<>(strategies.size());
         ArrayList<UUID> sessions = new ArrayList<>(strategies.size());
-        for (Map.Entry<UUID, AbstractCompactionStrategy> entry : strategies.entrySet())
+        for (Map.Entry<UUID, LegacyAbstractCompactionStrategy> entry : strategies.entrySet())
         {
             if (canCleanup(entry.getKey()))
             {
@@ -382,13 +383,13 @@ class PendingRepairManager
         }
 
         if (sessions.isEmpty())
-            return null;
+            return ImmutableList.of();
 
         // we want the session with the most compactions at the head of the list
         sessions.sort((o1, o2) -> numTasks.get(o2) - numTasks.get(o1));
 
         UUID sessionID = sessions.get(0);
-        return get(sessionID).getNextBackgroundTask(gcBefore);
+        return get(sessionID).getNextBackgroundTasks(gcBefore);
     }
 
     synchronized Collection<AbstractCompactionTask> getMaximalTasks(int gcBefore, boolean splitOutput)
@@ -397,7 +398,7 @@ class PendingRepairManager
             return null;
 
         List<AbstractCompactionTask> maximalTasks = new ArrayList<>(strategies.size());
-        for (Map.Entry<UUID, AbstractCompactionStrategy> entry : strategies.entrySet())
+        for (Map.Entry<UUID, LegacyAbstractCompactionStrategy> entry : strategies.entrySet())
         {
             if (canCleanup(entry.getKey()))
             {
@@ -413,7 +414,7 @@ class PendingRepairManager
         return !maximalTasks.isEmpty() ? maximalTasks : null;
     }
 
-    Collection<AbstractCompactionStrategy> getStrategies()
+    Collection<LegacyAbstractCompactionStrategy> getStrategies()
     {
         return strategies.values();
     }

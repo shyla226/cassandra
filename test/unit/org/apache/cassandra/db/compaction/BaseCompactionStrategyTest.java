@@ -21,11 +21,13 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import org.apache.commons.math3.random.JDKRandomGenerator;
@@ -35,6 +37,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.dht.IPartitioner;
@@ -49,6 +54,9 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 
+import static org.junit.Assert.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
@@ -70,6 +78,14 @@ public class BaseCompactionStrategyTest
     @Mock
     CompactionStrategyFactory strategyFactory;
 
+    @Mock
+    DiskBoundaries diskBoundaries;
+
+    @Mock
+    SortedLocalRanges localRanges;
+
+    Map<SSTableReader, Integer> diskIndexes;
+
     Tracker dataTracker;
 
     long repairedAt;
@@ -77,6 +93,8 @@ public class BaseCompactionStrategyTest
     CompactionLogger compactionLogger;
 
     IPartitioner partitioner;
+
+    Splitter splitter;
 
     protected static void setUpClass()
     {
@@ -90,6 +108,11 @@ public class BaseCompactionStrategyTest
 
     protected void setUp()
     {
+        setUp(1);
+    }
+
+    protected void setUp(int numShards)
+    {
         MockitoAnnotations.initMocks(this);
 
         TableMetadata metadata = TableMetadata.builder(keyspace, table)
@@ -99,10 +122,17 @@ public class BaseCompactionStrategyTest
         dataTracker = Tracker.newDummyTracker();
         repairedAt = System.currentTimeMillis();
         partitioner = DatabaseDescriptor.getPartitioner();
+        splitter = partitioner.splitter().orElse(null);
+        if (numShards > 1)
+            assertNotNull("Splitter is required with multiple compaction shards", splitter);
+
+        diskIndexes = new HashMap<>();
 
         when(cfs.metadata()).thenReturn(metadata);
         when(cfs.getKeyspaceName()).thenReturn(keyspace);
         when(cfs.getTableName()).thenReturn(table);
+        when(cfs.getDiskBoundaries()).thenReturn(diskBoundaries);
+        when(cfs.getLocalRanges()).thenReturn(localRanges);
         when(cfs.getTracker()).thenReturn(dataTracker);
         when(cfs.getPartitioner()).thenReturn(partitioner);
 
@@ -114,16 +144,61 @@ public class BaseCompactionStrategyTest
 
         when(strategyFactory.getCfs()).thenReturn(cfs);
         when(strategyFactory.getCompactionLogger()).thenReturn(compactionLogger);
+
+        when(diskBoundaries.getNumBoundaries()).thenAnswer(invocation -> diskIndexes.size());
+        when(diskBoundaries.getDiskIndexFromKey(any(SSTableReader.class))).thenAnswer(invocation -> diskIndexes.getOrDefault(invocation.getArgument(0), 0));
+
+        List<Token> boundaries = numShards > 1
+                                 ? splitter.splitOwnedRanges(numShards,
+                                                             ImmutableList.of(new Splitter.WeightedRange(1.0,
+                                                                                                         new Range<>(partitioner.getMinimumToken(),
+                                                                                                                     partitioner.getMaximumToken()))),
+                                                             Splitter.SplitType.ALWAYS_SPLIT).boundaries
+                                 : ImmutableList.of(partitioner.getMaximumToken());
+        List<PartitionPosition> shards = boundaries.stream().map(Token::maxKeyBound).collect(Collectors.toList());
+        when(localRanges.split(anyInt())).thenReturn(shards);
+    }
+
+    /**
+     * Add sstables to the tracker, which is enough for {@link UnifiedCompactionStrategy}, but for
+     * {@link LegacyAbstractCompactionStrategy} we also need to add the sstables directly to the strategy.
+     */
+    void addSSTablesToStrategy(AbstractCompactionStrategy strategy, Iterable<SSTableReader> sstables)
+    {
+        dataTracker.addInitialSSTables(sstables);
+
+        if (strategy instanceof LegacyAbstractCompactionStrategy)
+        {
+            LegacyAbstractCompactionStrategy legacyStrategy = (LegacyAbstractCompactionStrategy) strategy;
+            for (SSTableReader sstable : sstables)
+                legacyStrategy.addSSTable(sstable);
+        }
+    }
+
+    /**
+     * Remove sstables from the tracker, which should be enough for {@link UnifiedCompactionStrategy}, but for
+     * {@link LegacyAbstractCompactionStrategy} we also need to remove the sstables directly from the strategy.
+     */
+    void removeSSTablesFromStrategy(AbstractCompactionStrategy strategy, Set<SSTableReader> sstables)
+    {
+        dataTracker.removeCompactingUnsafe(sstables);
+
+        if (strategy instanceof LegacyAbstractCompactionStrategy)
+        {
+            LegacyAbstractCompactionStrategy legacyStrategy = (LegacyAbstractCompactionStrategy) strategy;
+            for (SSTableReader sstable : sstables)
+                legacyStrategy.removeSSTable(sstable);
+        }
     }
 
     SSTableReader mockSSTable(int level, long bytesOnDisk, long timestamp, double hotness, DecoratedKey first, DecoratedKey last)
     {
-        return mockSSTable(level, bytesOnDisk, timestamp, hotness, first, last, false);
+        return mockSSTable(level, bytesOnDisk, timestamp, hotness, first, last, false, 0, true, null);
     }
 
     SSTableReader mockSSTable(long bytesOnDisk, long timestamp, DecoratedKey first, DecoratedKey last)
     {
-        return mockSSTable(0, bytesOnDisk, timestamp, 0, first, last, false);
+        return mockSSTable(0, bytesOnDisk, timestamp, 0, first, last, false, 0, true, null);
     }
 
     SSTableReader mockSSTable(ICardinality cardinality, long timestamp, int valueSize)
@@ -133,12 +208,21 @@ public class BaseCompactionStrategyTest
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
         DecoratedKey last = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
 
-        SSTableReader ret = mockSSTable(0, bytesOnDisk, timestamp, 0, first, last, true);
+        SSTableReader ret = mockSSTable(0, bytesOnDisk, timestamp, 0, first, last, true, 0, true, null);
         when(ret.keyCardinalityEstimator()).thenReturn(cardinality);
         return ret;
     }
 
-    private SSTableReader mockSSTable(int level, long bytesOnDisk, long timestamp, double hotness, DecoratedKey first, DecoratedKey last, boolean stubOnly)
+    SSTableReader mockSSTable(int level,
+                              long bytesOnDisk,
+                              long timestamp,
+                              double hotness,
+                              DecoratedKey first,
+                              DecoratedKey last,
+                              boolean stubOnly,
+                              int diskIndex,
+                              boolean repaired,
+                              UUID pendingRepair)
     {
         // stubOnly will save tons of memory but we'll make it impossible to verify invocations later on
         SSTableReader ret = Mockito.mock(SSTableReader.class, stubOnly ? withSettings().stubOnly() : withSettings());
@@ -155,15 +239,21 @@ public class BaseCompactionStrategyTest
         when(ret.isMarkedSuspect()).thenReturn(false);
         when(ret.isRepaired()).thenReturn(true);
         when(ret.getRepairedAt()).thenReturn(repairedAt);
+        when(ret.getPendingRepair()).thenReturn(pendingRepair);
         when(ret.getColumnFamilyName()).thenReturn(table);
-        when(ret.getGeneration()).thenReturn(0);
-        when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s",
-                                                      FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last));
-
+        when(ret.getGeneration()).thenReturn(diskIndex);
+        when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s, disk index: %d, repaired: %b, pend. repair: %b",
+                                                      FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last, diskIndex, repaired, pendingRepair));
+        diskIndexes.put(ret, diskIndex);
         return ret;
     }
 
     List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp)
+    {
+        return mockSSTables(numSSTables, bytesOnDisk, hotness, timestamp, 0, true,null);
+    }
+
+    List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp, int diskIndex, boolean repaired, UUID pendingRepair)
     {
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
         DecoratedKey last = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
@@ -173,7 +263,7 @@ public class BaseCompactionStrategyTest
         {
             long b = (long)(bytesOnDisk * 0.8 + bytesOnDisk * 0.05 * random.nextDouble()); // leave 5% variability
             double h = hotness * 0.8 + hotness * 0.05 * random.nextDouble(); // leave 5% variability
-            sstables.add(mockSSTable(0, b, timestamp, h, first, last));
+            sstables.add(mockSSTable(0, b, timestamp, h, first, last, false, diskIndex, repaired, pendingRepair));
         }
 
         return sstables;
@@ -189,7 +279,8 @@ public class BaseCompactionStrategyTest
         Splitter splitter = partitioner.splitter().get();
         List<Token> boundaries = splitter.splitOwnedRanges(numSSTables,
                                                            ImmutableList.of(weightedRange),
-                                                           false);
+                                                           Splitter.SplitType.ALWAYS_SPLIT)
+                                 .boundaries;
         boundaries.add(0, partitioner.getMinimumToken());
         ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
 

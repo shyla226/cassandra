@@ -53,7 +53,7 @@ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAggregates
+public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.WithAggregates
 {
     private static final Logger logger = LoggerFactory.getLogger(LeveledCompactionStrategy.class);
     static final String SSTABLE_SIZE_OPTION = "sstable_size_in_mb";

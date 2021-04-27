@@ -52,6 +52,7 @@ import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.GroupedSSTableContainer;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
@@ -63,13 +64,16 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
+import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.when;
 
 public class CompactionStrategyManagerTest
 {
@@ -216,18 +220,17 @@ public class CompactionStrategyManagerTest
         CountDownLatch latch = new CountDownLatch(1);
         AtomicInteger upgradeTaskCount = new AtomicInteger(0);
         MockCFSForCSM mock = new MockCFSForCSM(cfs, latch, upgradeTaskCount);
+        CompactionStrategyContainer strategyContainer = mock.getCompactionStrategyContainer();
 
-        CompactionManager.BackgroundCompactionCandidate r = CompactionManager.instance.getBackgroundCompactionCandidate(mock);
-        CompactionStrategyManager mgr = (CompactionStrategyManager) mock.getCompactionStrategyContainer();
         // basic idea is that we start a thread which will be able to get in to the currentlyBackgroundUpgrading-guarded
         // code in CompactionManager, then we try to run a bunch more of the upgrade tasks which should return false
         // due to the currentlyBackgroundUpgrading count being >= max_concurrent_auto_upgrade_tasks
-        Thread t = new Thread(() -> r.maybeRunUpgradeTask(mgr));
+        Thread t = new Thread(() -> CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
         t.start();
         Thread.sleep(100); // let the thread start and grab the task
         assertEquals(1, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertFalse(r.maybeRunUpgradeTask(mgr));
+        assertNull(CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
+        assertNull(CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
         latch.countDown();
         t.join();
         assertEquals(1, upgradeTaskCount.get()); // we should only call findUpgradeSSTableTask once when concurrency = 1
@@ -248,22 +251,20 @@ public class CompactionStrategyManagerTest
         CountDownLatch latch = new CountDownLatch(1);
         AtomicInteger upgradeTaskCount = new AtomicInteger();
         MockCFSForCSM mock = new MockCFSForCSM(cfs, latch, upgradeTaskCount);
-
-        CompactionManager.BackgroundCompactionCandidate r = CompactionManager.instance.getBackgroundCompactionCandidate(mock);
-        CompactionStrategyManager mgr = (CompactionStrategyManager) mock.getCompactionStrategyContainer();
+        CompactionStrategyContainer strategyContainer = mock.getCompactionStrategyContainer();
 
         // basic idea is that we start 2 threads who will be able to get in to the currentlyBackgroundUpgrading-guarded
         // code in CompactionManager, then we try to run a bunch more of the upgrade task which should return false
         // due to the currentlyBackgroundUpgrading count being >= max_concurrent_auto_upgrade_tasks
-        Thread t = new Thread(() -> r.maybeRunUpgradeTask(mgr));
+        Thread t = new Thread(() -> CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
         t.start();
-        Thread t2 = new Thread(() -> r.maybeRunUpgradeTask(mgr));
+        Thread t2 = new Thread(() -> CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
         t2.start();
         Thread.sleep(100); // let the threads start and grab the task
         assertEquals(2, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertFalse(r.maybeRunUpgradeTask(mgr));
+        assertNull(CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
+        assertNull(CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
+        assertNull(CompactionManager.instance.maybeRunUpgradeTask(mock, strategyContainer));
         assertEquals(2, CompactionManager.instance.currentlyBackgroundUpgrading.get());
         latch.countDown();
         t.join();
@@ -363,9 +364,13 @@ public class CompactionStrategyManagerTest
         cfs.getCompactionStrategyContainer().mutateRepaired(pendingRepair, 0, UUID.randomUUID(), false);
         cfs.getCompactionStrategyContainer().mutateRepaired(repaired, 1000, null, false);
 
+
+        SortedLocalRanges localRanges = Mockito.mock(SortedLocalRanges.class);
+        when(localRanges.getRingVersion()).thenReturn(10L);
+
         DiskBoundaries boundaries = new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(),
                                                        Lists.newArrayList(forKey(100), forKey(200), forKey(300)),
-                                                       10, 10);
+                                                       localRanges, 10);
 
         CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory, () -> boundaries, true);
         csm.reload(cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
@@ -471,9 +476,7 @@ public class CompactionStrategyManagerTest
         return index;
     }
 
-
-
-    class MockBoundaryManager
+    private class MockBoundaryManager
     {
         private final ColumnFamilyStore cfs;
         private Integer[] positions;
@@ -501,7 +504,9 @@ public class CompactionStrategyManagerTest
         private DiskBoundaries createDiskBoundaries(ColumnFamilyStore cfs, Integer[] boundaries)
         {
             List<PartitionPosition> positions = Arrays.stream(boundaries).map(b -> Util.token(String.format(String.format("%04d", b))).minKeyBound()).collect(Collectors.toList());
-            return new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(), positions, 0, 0);
+            SortedLocalRanges localRanges = Mockito.mock(SortedLocalRanges.class);
+            when(localRanges.getRingVersion()).thenReturn(0L);
+            return new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(), positions, localRanges, 0);
         }
     }
 

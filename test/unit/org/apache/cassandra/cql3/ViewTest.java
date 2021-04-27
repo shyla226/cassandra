@@ -23,6 +23,7 @@ import static org.junit.Assert.*;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import com.google.common.util.concurrent.Uninterruptibles;
@@ -1380,7 +1381,7 @@ public class ViewTest extends CQLTester
         createView(viewName1, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
 
         cfs.enableAutoCompaction();
-        List<Future<?>> futures = CompactionManager.instance.submitBackground(cfs);
+        CompletableFuture<?> future = CompactionManager.instance.submitBackground(cfs);
 
         String viewName2 = viewName1 + "_2";
         //Force a second MV on the same base table, which will restart the first MV builder...
@@ -1388,7 +1389,7 @@ public class ViewTest extends CQLTester
 
 
         //Compact the base table
-        FBUtilities.waitOnFutures(futures);
+        FBUtilities.waitOnFuture(future);
 
         while (!SystemKeyspace.isViewBuilt(keyspace(), viewName1))
             Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);

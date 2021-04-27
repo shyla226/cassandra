@@ -44,10 +44,25 @@ public class CompactionStrategyFactory
      */
     public CompactionStrategyContainer createContainer()
     {
-        // When DB-3560 is available, here we'll either create a CSM or UnifiedCompactionStrategy
-        // depending on the compaction parameters
-        CompactionStrategyContainer ret = new CompactionStrategyManager(this);
-        ret.reload(cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
+        return createContainer(cfs.metadata().params.compaction,
+                               CompactionStrategyContainer.ReloadReason.FULL);
+    }
+
+    private CompactionStrategyContainer createContainer(CompactionParams params, CompactionStrategyContainer.ReloadReason reason)
+    {
+        CompactionStrategyContainer ret;
+
+        if (params.klass() == UnifiedCompactionStrategy.class)
+        {
+            ret = new UnifiedCompactionContainer(this);
+        }
+        else
+        {
+            ret = new CompactionStrategyManager(this);
+            ret.reload(params, reason);
+        }
+
+        cfs.getTracker().subscribe(ret);
         return ret;
     }
 
@@ -64,11 +79,22 @@ public class CompactionStrategyFactory
                                               CompactionParams compactionParams,
                                               CompactionStrategyContainer.ReloadReason reason)
     {
-        // When DB-3560 is available, here we may need to switch from CSM to UnifiedCompactionStrategy
-        // and vice-versa. When switching to CSM, we need to ensure we pass it the existing sstables and
-        // recreate any state that it might need
-        current.reload(compactionParams, reason);
-        return current;
+        if (compactionParams.klass() == UnifiedCompactionStrategy.class)
+        {
+            return createContainer(compactionParams, reason);
+        }
+        else
+        {
+            if (current instanceof CompactionStrategyManager)
+            {
+                current.reload(compactionParams, reason);
+                return current;
+            }
+            else
+            {
+                return createContainer(compactionParams, reason);
+            }
+        }
     }
 
     public CompactionLogger getCompactionLogger()
@@ -83,22 +109,22 @@ public class CompactionStrategyFactory
 
     /**
      * Creates a compaction strategy that is managed by {@link CompactionStrategyManager} and its strategy holders.
-     * These strategies must extend {@link AbstractCompactionStrategy}.
+     * These strategies must extend {@link LegacyAbstractCompactionStrategy}.
      *
-     * @return an instance of the compaction strategy specified in the parameters so long as it extends {@link AbstractCompactionStrategy}
-     * @throws IllegalArgumentException if the params do not contain a strategy that extends  {@link AbstractCompactionStrategy}
+     * @return an instance of the compaction strategy specified in the parameters so long as it extends {@link LegacyAbstractCompactionStrategy}
+     * @throws IllegalArgumentException if the params do not contain a strategy that extends  {@link LegacyAbstractCompactionStrategy}
      */
-    AbstractCompactionStrategy createLegacyStrategy(CompactionParams compactionParams)
+    LegacyAbstractCompactionStrategy createLegacyStrategy(CompactionParams compactionParams)
     {
         // TODO - make it non static and pass the logger to the strategies
         try
         {
-            if (!AbstractCompactionStrategy.class.isAssignableFrom(compactionParams.klass()))
+            if (!LegacyAbstractCompactionStrategy.class.isAssignableFrom(compactionParams.klass()))
                 throw new IllegalArgumentException("Expected compaction params for legacy strategy: " + compactionParams);
 
             Constructor<? extends CompactionStrategy> constructor =
             compactionParams.klass().getConstructor(CompactionStrategyFactory.class, Map.class);
-            AbstractCompactionStrategy ret = (AbstractCompactionStrategy) constructor.newInstance(this, compactionParams.options());
+            LegacyAbstractCompactionStrategy ret = (LegacyAbstractCompactionStrategy) constructor.newInstance(this, compactionParams.options());
             compactionLogger.strategyCreated(ret);
             return ret;
         }

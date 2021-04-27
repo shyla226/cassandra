@@ -1716,6 +1716,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata.repairedAt != ActiveRepairService.UNREPAIRED_SSTABLE;
     }
 
+    /**
+     * The ID of the repair session involving the SSTable, {@code null} otherwise.
+     */
+    public UUID pendingRepair()
+    {
+        return sstableMetadata.pendingRepair;
+    }
+
     public DecoratedKey keyAt(RandomAccessReader reader, long position) throws IOException
     {
         reader.seek(position);

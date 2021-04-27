@@ -233,7 +233,7 @@ public abstract class CompactionStress implements Runnable
                 cfs.enableAutoCompaction();
                 cfs.getCompactionStrategyContainer().enable();
                 for (int i = 0; i < threads; i++)
-                    futures.addAll(CompactionManager.instance.submitBackground(cfs));
+                    futures.add(CompactionManager.instance.submitBackground(cfs));
             }
 
             long working;
@@ -244,7 +244,7 @@ public abstract class CompactionStress implements Runnable
                 if (!maximal)
                 {
                     for (long i = working; i < threads; i++)
-                        futures.addAll(CompactionManager.instance.submitBackground(cfs));
+                        futures.add(CompactionManager.instance.submitBackground(cfs));
                 }
 
                 reportCompactionStats();

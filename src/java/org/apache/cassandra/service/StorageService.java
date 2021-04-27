@@ -1792,7 +1792,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 for (final ColumnFamilyStore store : cfs.concatWithIndexes())
                 {
-                    store.invalidateDiskBoundaries();
+                    store.invalidateLocalRangesAndDiskBoundaries();
                 }
             }
         }

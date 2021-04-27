@@ -213,7 +213,7 @@ public class CompactionsCQLTest extends CQLTester
         getCurrentColumnFamilyStore().setCompactionParameters(localOptions);
         assertTrue(verifyStrategies(getCurrentColumnFamilyStore().getCompactionStrategyContainer(), DateTieredCompactionStrategy.class));
         // Invalidate disk boundaries to ensure that boundary invalidation will not cause the old strategy to be reloaded
-        getCurrentColumnFamilyStore().invalidateDiskBoundaries();
+        getCurrentColumnFamilyStore().invalidateLocalRangesAndDiskBoundaries();
         // altering something non-compaction related
         execute("ALTER TABLE %s WITH gc_grace_seconds = 1000");
         // should keep the local compaction strat
@@ -417,7 +417,9 @@ public class CompactionsCQLTest extends CQLTester
         assertEquals(50, cfs.getLiveSSTables().size());
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) ((CompactionStrategyManager) cfs.getCompactionStrategyContainer())
                                                                     .getUnrepairedUnsafe().first();
-        AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
+        Collection<AbstractCompactionTask> tasks = lcs.getNextBackgroundTasks(0);
+        assertEquals(1, tasks.size());
+        AbstractCompactionTask act = tasks.iterator().next();
         // we should be compacting all 50 sstables:
         assertEquals(50, act.transaction.originals().size());
         act.execute();
@@ -453,7 +455,9 @@ public class CompactionsCQLTest extends CQLTester
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) ((CompactionStrategyManager) cfs.getCompactionStrategyContainer())
                                                                     .getUnrepairedUnsafe()
                                                                     .first();
-        AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
+        Collection<AbstractCompactionTask> tasks = lcs.getNextBackgroundTasks(0);
+        assertEquals(1, tasks.size());
+        AbstractCompactionTask act = tasks.iterator().next();
         // note that max_threshold is 60 (more than the amount of L0 sstables), but MAX_COMPACTING_L0 is 32, which means we will trigger STCS with at most max_threshold sstables
         assertEquals(50, act.transaction.originals().size());
         assertEquals(0, ((LeveledCompactionTask)act).getLevel());
@@ -488,9 +492,10 @@ public class CompactionsCQLTest extends CQLTester
         LeveledCompactionTask lcsTask;
         while (true)
         {
-            lcsTask = (LeveledCompactionTask) lcs.getNextBackgroundTask(0);
-            if (lcsTask != null)
+            Collection<AbstractCompactionTask> tasks = lcs.getNextBackgroundTasks(0);
+            if (tasks.size() > 0)
             {
+                lcsTask = (LeveledCompactionTask) tasks.iterator().next();
                 lcsTask.execute(CompactionManager.instance.active);
                 break;
             }
@@ -525,7 +530,9 @@ public class CompactionsCQLTest extends CQLTester
         // sstables have been removed.
         try
         {
-            AbstractCompactionTask task = new NotifyingCompactionTask(lcs, (LeveledCompactionTask) lcs.getNextBackgroundTask(0));
+            Collection<AbstractCompactionTask> tasks = lcs.getNextBackgroundTasks(0);
+            assertEquals(1, tasks.size());
+            AbstractCompactionTask task = new NotifyingCompactionTask(lcs, (LeveledCompactionTask) tasks.iterator().next());
             task.execute(CompactionManager.instance.active);
             fail("task should throw exception");
         }
@@ -534,16 +541,10 @@ public class CompactionsCQLTest extends CQLTester
             // ignored
         }
 
-        lcsTask = (LeveledCompactionTask) lcs.getNextBackgroundTask(0);
-        try
-        {
-            assertNotNull(lcsTask);
-        }
-        finally
-        {
-            if (lcsTask != null)
-                lcsTask.transaction.abort();
-        }
+        Collection<AbstractCompactionTask> tasks = lcs.getNextBackgroundTasks(0);
+        assertEquals(1, tasks.size());
+        lcsTask = (LeveledCompactionTask) tasks.iterator().next();
+        lcsTask.transaction.abort();
     }
 
     private static class NotifyingCompactionTask extends LeveledCompactionTask

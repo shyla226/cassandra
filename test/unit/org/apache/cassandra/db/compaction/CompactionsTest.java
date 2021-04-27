@@ -160,7 +160,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -210,7 +210,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -232,7 +232,7 @@ public class CompactionsTest
         MigrationManager.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).compaction(CompactionParams.stcs(compactionOptions)).build(), true);
 
         //submit background task again and wait for it to complete
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);

@@ -40,6 +40,7 @@ import org.mockito.MockitoAnnotations;
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
@@ -91,7 +92,7 @@ public class BackgroundCompactionsTest
             throw new IllegalArgumentException("Cannot have more compactions in progress than total compactions");
 
         CompactionAggregate ret = Mockito.mock(CompactionAggregate.class);
-        when(ret.getKey()).thenReturn(key);
+        when(ret.getKey()).thenReturn(new CompactionAggregate.Key(key));
 
         List<CompactionPick> compactions = new ArrayList<>(numCompactions);
         for (int i = 0; i < numCompactions; i++)
@@ -151,7 +152,7 @@ public class BackgroundCompactionsTest
 
         backgroundCompactions.setPending(pending);
 
-        Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
+        Mockito.verify(compactionLogger, never()).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
         Mockito.verify(compactionLogger, times(1)).pending(eq(strategy), eq(pending.size()));
 
         assertEquals(pending.size(), backgroundCompactions.getEstimatedRemainingTasks());
@@ -176,7 +177,7 @@ public class BackgroundCompactionsTest
 
         backgroundCompactions.setPending(pending);
 
-        Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
+        Mockito.verify(compactionLogger, never()).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
         Mockito.verify(compactionLogger, times(1)).pending(eq(strategy), eq(pending.size()));
 
         assertEquals(pending.size(), backgroundCompactions.getEstimatedRemainingTasks());
@@ -236,7 +237,7 @@ public class BackgroundCompactionsTest
 
         backgroundCompactions.setPending(pending);
 
-        Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
+        Mockito.verify(compactionLogger, never()).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
         Mockito.verify(compactionLogger, times(1)).pending(eq(strategy), eq(pending.size()));
 
         assertEquals(pending.size(), backgroundCompactions.getEstimatedRemainingTasks());
@@ -292,7 +293,7 @@ public class BackgroundCompactionsTest
 
         backgroundCompactions.setPending(ImmutableList.of());
 
-        Mockito.verify(compactionLogger, times(1)).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
+        Mockito.verify(compactionLogger, never()).statistics(eq(strategy), eq("pending"), any(CompactionStrategyStatistics.class));
         Mockito.verify(compactionLogger, times(1)).pending(eq(strategy), eq(0));
 
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());

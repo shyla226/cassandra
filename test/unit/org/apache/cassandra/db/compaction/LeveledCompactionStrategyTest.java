@@ -591,9 +591,11 @@ public class LeveledCompactionStrategyTest
         {
             for (CompactionStrategy strategy : strategies)
             {
-                AbstractCompactionTask task = strategy.getNextBackgroundTask(0);
-                if (task != null)
+                Collection<AbstractCompactionTask> tasks = strategy.getNextBackgroundTasks(0);
+                if (!tasks.isEmpty())
                 {
+                    assertEquals(1, tasks.size());
+                    AbstractCompactionTask task = tasks.iterator().next();
                     try
                     {
                         assertTrue(task instanceof LeveledCompactionTask);

@@ -36,7 +36,7 @@ public class StaticControllerTest extends ControllerTest
     public void testFromOptions()
     {
         Map<String, String> options = new HashMap<>();
-        String wStr = String.join(",", Arrays.stream(Ws).mapToObj(i -> Integer.toString(i)).collect(Collectors.toList()));
+        String wStr = Arrays.stream(Ws).mapToObj(Integer::toString).collect(Collectors.joining(","));
         options.put(StaticController.SCALING_FACTORS_OPTION, wStr);
 
         Controller controller = testFromOptions(false, options);
@@ -52,7 +52,7 @@ public class StaticControllerTest extends ControllerTest
     public void testValidateOptions()
     {
         Map<String, String> options = new HashMap<>();
-        String wStr = String.join(",", Arrays.stream(Ws).mapToObj(i -> Integer.toString(i)).collect(Collectors.toList()));
+        String wStr = Arrays.stream(Ws).mapToObj(Integer::toString).collect(Collectors.joining(","));
         options.put(StaticController.SCALING_FACTORS_OPTION, wStr);
 
         super.testValidateOptions(options, false);
@@ -61,21 +61,21 @@ public class StaticControllerTest extends ControllerTest
     @Test
     public void testStartShutdown()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, minSSTableSizeMB);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB);
         super.testStartShutdown(controller);
     }
 
     @Test
     public void testShutdownNotStarted()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, minSSTableSizeMB);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB);
         super.testShutdownNotStarted(controller);
     }
 
     @Test(expected = IllegalStateException.class)
     public void testStartAlreadyStarted()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, minSSTableSizeMB);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB);
         super.testStartAlreadyStarted(controller);
     }
 }

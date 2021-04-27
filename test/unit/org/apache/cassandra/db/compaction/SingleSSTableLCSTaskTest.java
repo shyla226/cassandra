@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Random;
 
 import org.apache.commons.lang3.StringUtils;
@@ -32,6 +33,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class SingleSSTableLCSTaskTest extends CQLTester
@@ -102,16 +104,26 @@ public class SingleSSTableLCSTaskTest extends CQLTester
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) ((CompactionStrategyManager) cfs.getCompactionStrategyContainer())
                                                                     .getUnrepairedUnsafe()
                                                                     .first();
-        AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
+        Collection<AbstractCompactionTask> tasks = lcs.getNextBackgroundTasks(0);
+        assertEquals(1, tasks.size());
+        AbstractCompactionTask act = tasks.iterator().next();
+        assertNotNull(act);
         act.execute();
 
         // now all sstables are laid out non-overlapping in L1, this means that the rest of the compactions
         // will be single sstable ones, make sure that we use SingleSSTableLCSTask if singleSSTUplevel is true:
-        while ((act = lcs.getNextBackgroundTask(0)) != null)
+        tasks = lcs.getNextBackgroundTasks(0);
+        while (!tasks.isEmpty())
         {
+            assertEquals(1, tasks.size());
+            act = tasks.iterator().next();
+            assertNotNull(act);
+
             assertTrue(lcs.getTotalCompactions() > 0);
             assertEquals(singleSSTUplevel, act instanceof SingleSSTableLCSTask);
             act.execute();
+
+            tasks = lcs.getNextBackgroundTasks(0);
         }
 
         assertEquals(0, lcs.getTotalCompactions());

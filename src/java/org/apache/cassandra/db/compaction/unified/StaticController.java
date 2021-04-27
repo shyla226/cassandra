@@ -43,16 +43,16 @@ public class StaticController extends Controller
     private final int[] Ws;
 
     @VisibleForTesting // comp. simulation
-    public StaticController(Environment env, int[] Ws, double survivalFactor, long minSSTableSizeMB)
+    public StaticController(Environment env, int[] Ws, double survivalFactor, long dataSetSizeMB, int numShards, long minSSTableSizeMB)
     {
-        super(new SystemTimeSource(), env, survivalFactor, minSSTableSizeMB);
+        super(new SystemTimeSource(), env, survivalFactor, dataSetSizeMB, numShards, minSSTableSizeMB);
         this.Ws = Ws;
     }
 
-    static Controller fromOptions(Environment env, double o, long minSSTableSizeMB, Map<String, String> options)
+    static Controller fromOptions(Environment env, double o, long dataSetSizeMB, int numShards, long minSSTableSizeMB, Map<String, String> options)
     {
         int[] Ws = parseScalingFactors(options.containsKey(SCALING_FACTORS_OPTION) ? options.get(SCALING_FACTORS_OPTION) : DEFAULT_SCALING_FACTORS);
-        return new StaticController(env, Ws, DEFAULT_SURVIVAL_FACTOR, minSSTableSizeMB);
+        return new StaticController(env, Ws, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMB, numShards, minSSTableSizeMB);
     }
 
     @VisibleForTesting
@@ -84,6 +84,6 @@ public class StaticController extends Controller
     @Override
     public String toString()
     {
-        return String.format("Static controller, m: %d, o: %f, Ws: %s, cost: %s", minSSTableSizeMB, survivalFactor, Arrays.toString(Ws), calculator);
+        return String.format("Static controller, m: %d, o: %f, Ws: %s, cost: %s", minSstableSizeMB, survivalFactor, Arrays.toString(Ws), calculator);
     }
 }

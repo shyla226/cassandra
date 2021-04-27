@@ -19,6 +19,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +38,6 @@ import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.ge
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -50,6 +50,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getWindowBoundsInMillis;
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.validateOptions;
@@ -284,9 +285,12 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         for (SSTableReader sstable : cfs.getLiveSSTables())
             twcs.addSSTable(sstable);
         twcs.startup();
-        assertNull(twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
+        assertTrue(twcs.getNextBackgroundTasks((int) (System.currentTimeMillis() / 1000)).isEmpty());
         Thread.sleep(2000);
-        AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
+        Collection<AbstractCompactionTask> tasks = twcs.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        assertEquals(1, tasks.size());
+
+        AbstractCompactionTask t = tasks.iterator().next();
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.transaction.originals()));
         SSTableReader sstable = t.transaction.originals().iterator().next();
@@ -336,9 +340,9 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
             twcs.addSSTable(sstable);
 
         twcs.startup();
-        assertNull(twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
+        assertTrue(twcs.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
         Thread.sleep(2000);
-        assertNull(twcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000)));
+        assertTrue(twcs.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
 
         options.put(TimeWindowCompactionStrategyOptions.UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_KEY, "true");
         twcs = new TimeWindowCompactionStrategy(new CompactionStrategyFactory(cfs), options);
@@ -346,7 +350,10 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
             twcs.addSSTable(sstable);
 
         twcs.startup();
-        AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
+        Collection<AbstractCompactionTask> tasks = twcs.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+
+        AbstractCompactionTask t = tasks.iterator().next();
+        assertEquals(1, tasks.size());
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.transaction.originals()));
         SSTableReader sstable = t.transaction.originals().iterator().next();

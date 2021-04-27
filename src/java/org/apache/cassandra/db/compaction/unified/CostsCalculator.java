@@ -50,9 +50,10 @@ public class CostsCalculator
     final static int samplingPeriodMs = Integer.getInteger(Controller.PREFIX + "sample_time_ms", 5000);
 
     /** The multipliers can be used by users if they wish to adjust the costs. We reduce the read costs because writes are batch processes (flush and compaction)
-     * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable. */
+     * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable.
+     */
     final static double defaultWriteMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_write_multiplier", "1"));
-    final static double defaultReadMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_read_multiplier", "0.25"));
+    final static double defaultReadMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_read_multiplier", "0.1"));
 
     private final Environment env;
     private final double readMultiplier;
@@ -75,7 +76,7 @@ public class CostsCalculator
                     ScheduledExecutorService executorService,
                     double survivalFactor)
     {
-        this(env, timeSource, strategy, executorService, survivalFactor ,defaultReadMultiplier, defaultWriteMultiplier);
+        this(env, timeSource, strategy, executorService, survivalFactor, defaultReadMultiplier, defaultWriteMultiplier);
     }
 
     CostsCalculator(Environment env,
@@ -248,7 +249,8 @@ public class CostsCalculator
     @Override
     public String toString()
     {
-        return String.format("num partitions read %s, bytes inserted: %s, num sstables %s; Environment: %s", partitionsRead, bytesInserted, numSSTables, env);
+        return String.format("num partitions read %s, bytes inserted: %s, num sstables %s; Environment: %s",
+                             partitionsRead, bytesInserted, numSSTables, env);
     }
 
     @NotThreadSafe

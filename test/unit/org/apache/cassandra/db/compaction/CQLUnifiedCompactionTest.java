@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 import org.junit.After;
@@ -29,6 +30,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.unified.AdaptiveController;
+import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -93,12 +95,12 @@ public class CQLUnifiedCompactionTest extends CQLTester
     @Test
     public void testStaticOptions()
     {
-        testStaticOptions(120, -2);
-        testStaticOptions(240, 0);
-        testStaticOptions(1024, 2);
+        testStaticOptions(512, 2, 50, -2);
+        testStaticOptions(1024, 4, 150, 0);
+        testStaticOptions(2048, 10, 250, 2);
     }
 
-    private void testStaticOptions(int minimalSstableSizeMb, int ... Ws)
+    private void testStaticOptions(int dataSetSizeGB, int numShards, int minSstableSizeMB, int ... Ws)
     {
         String scalingFactorsStr = String.join(",", Arrays.stream(Ws)
                                                           .mapToObj(i -> Integer.toString(i))
@@ -106,14 +108,19 @@ public class CQLUnifiedCompactionTest extends CQLTester
 
         createTable("create table %s (id int primary key, val text) with compaction = " +
                     "{'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', " +
-                    String.format("'minimal_sstable_size_in_mb' : '%d', ", minimalSstableSizeMb) +
+                    String.format("'dataset_size_in_gb' : '%d', ", dataSetSizeGB) +
+                    String.format("'num_shards' : '%d', ", numShards) +
+                    String.format("'min_sstable_size_in_mb' : '%d', ", minSstableSizeMB) +
                     String.format("'static_scaling_factors' : '%s'}", scalingFactorsStr));
 
         CompactionStrategy strategy = getCurrentCompactionStrategy();
         assertTrue(strategy instanceof UnifiedCompactionStrategy);
 
         UnifiedCompactionStrategy unifiedCompactionStrategy = (UnifiedCompactionStrategy) strategy;
-        assertEquals(minimalSstableSizeMb << 20, unifiedCompactionStrategy.getController().getMinSSTableSizeBytes());
+        Controller controller = unifiedCompactionStrategy.getController();
+        assertEquals((long) dataSetSizeGB << 30, controller.getDataSetSizeBytes());
+        assertEquals(numShards, controller.getNumShards());
+        assertEquals((long) minSstableSizeMB << 20, controller.getMinSstableSizeBytes());
 
         assertTrue(unifiedCompactionStrategy.getController() instanceof StaticController);
         for (int i = 0; i < Ws.length; i++)
@@ -123,18 +130,19 @@ public class CQLUnifiedCompactionTest extends CQLTester
     @Test
     public void testAdaptiveOptions()
     {
-        testAdaptiveOptions(120, 32, -2);
-        testAdaptiveOptions(240, 64, 0);
-        testAdaptiveOptions(1024, 128, 2);
+        testAdaptiveOptions(512, 2, 50, -2);
+        testAdaptiveOptions(1024, 4, 150, 0);
+        testAdaptiveOptions(2048, 10, 250, 2);
     }
 
-    private void testAdaptiveOptions(int minimalSstableSizeMb, int targetSizeGB, int W)
+    private void testAdaptiveOptions(int dataSetSizeGB, int numShards, int sstableSizeMB, int w)
     {
         createTable("create table %s (id int primary key, val text) with compaction = " +
                     "{'class':'UnifiedCompactionStrategy', 'adaptive' : 'true', " +
-                    String.format("'minimal_sstable_size_in_mb' : '%d', ", minimalSstableSizeMb) +
-                    String.format("'adaptive_min_target_size_gb' : '%d', ", targetSizeGB) +
-                    String.format("'adaptive_starting_w' : '%s', ", W) +
+                    String.format("'dataset_size_in_gb' : '%d', ", dataSetSizeGB) +
+                    String.format("'num_shards' : '%d', ", numShards) +
+                    String.format("'min_sstable_size_in_mb' : '%d', ", sstableSizeMB) +
+                    String.format("'adaptive_starting_w' : '%s', ", w) +
                     String.format("'adaptive_min_w' : '%s', ", -6) +
                     String.format("'adaptive_max_w' : '%s', ", 16) +
                     String.format("'adaptive_interval_sec': '%d', ", 300) +
@@ -145,14 +153,16 @@ public class CQLUnifiedCompactionTest extends CQLTester
         assertTrue(strategy instanceof UnifiedCompactionStrategy);
 
         UnifiedCompactionStrategy unifiedCompactionStrategy = (UnifiedCompactionStrategy) strategy;
-        assertEquals(minimalSstableSizeMb << 20, unifiedCompactionStrategy.getController().getMinSSTableSizeBytes());
+        assertEquals(sstableSizeMB << 20, unifiedCompactionStrategy.getController().getMinSstableSizeBytes());
 
         assertTrue(unifiedCompactionStrategy.getController() instanceof AdaptiveController);
         for (int i = 0; i < 10; i++)
-            assertEquals(W, unifiedCompactionStrategy.getW(i));
+            assertEquals(w, unifiedCompactionStrategy.getW(i));
 
         AdaptiveController controller = (AdaptiveController) unifiedCompactionStrategy.getController();
-        assertEquals(targetSizeGB, controller.getMinTargetSizeGB());
+        assertEquals((long) dataSetSizeGB << 30, controller.getDataSetSizeBytes());
+        assertEquals(numShards, controller.getNumShards());
+        assertEquals((long) sstableSizeMB << 20, controller.getMinSstableSizeBytes());
         assertEquals(-6, controller.getMinW());
         assertEquals(16, controller.getMaxW());
         assertEquals(300, controller.getInterval());
@@ -192,7 +202,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
         int valSize = 1024;
 
         createTable("create table %s (id int primary key, val blob) with compaction = {'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', " +
-                    String.format("'static_scaling_factors' : '%d', 'minimal_sstable_size_in_mb' : '1', 'log_all' : 'true'}", W));
+                    String.format("'static_scaling_factors' : '%d', 'min_sstable_size_in_mb' : '1', 'num_shards': '1', 'log_all' : 'true'}", W));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
@@ -219,38 +229,45 @@ public class CQLUnifiedCompactionTest extends CQLTester
     public void testMultipleCompactionsSingleW_Static() throws Throwable
     {
         // tiered tests with W = 2 and T = F = 4
-        testMultipleCompactions(4, 1, new int[] {2});  //  4 sstables should be compacted into 1
-        testMultipleCompactions(8, 2, new int[] {2});  //  8 sstables should be compacted into 2
-        testMultipleCompactions(16, 1, new int[] {2}); // 16 sstables should be compacted into 1
+        testMultipleCompactions(4, 1, 1, new int[] {2});  //  4 sstables should be compacted into 1
+        testMultipleCompactions(8, 1, 1, new int[] {2});  //  8 sstables should be compacted into 1
+        testMultipleCompactions(16, 1, 1, new int[] {2}); // 16 sstables should be compacted into 1
 
         // middle-point tests between tiered and leveled with W = 0, T = F = 2
-        testMultipleCompactions(2, 1, new int[] {0});   // 2 sstables should be compacted into 1
-        testMultipleCompactions(4, 1, new int[] {0});   // 4 sstables should be compacted into 1
-        testMultipleCompactions(8, 1, new int[] {0});   // 2 sstables should be compacted into 1
-        testMultipleCompactions(16, 1, new int[] {0});  // 16 sstables should be compacted into 1
+        testMultipleCompactions(2, 1, 1, new int[] {0});   // 2 sstables should be compacted into 1
+        testMultipleCompactions(4, 1, 1, new int[] {0});   // 4 sstables should be compacted into 1
+        testMultipleCompactions(8, 1, 1, new int[] {0});   // 2 sstables should be compacted into 1
+        testMultipleCompactions(16, 1, 1, new int[] {0});  // 16 sstables should be compacted into 1
 
         // leveled tests with W = -2 and T = 2, F = 4
-        testMultipleCompactions(2, 1, new int[] {-2});  //  2 sstables should be compacted into 1
-        testMultipleCompactions(4, 1, new int[] {-2});  //  4 sstables should be compacted into 1
-        testMultipleCompactions(8, 1, new int[] {-2});  //  8 sstables should be compacted into 1
-        testMultipleCompactions(9, 2, new int[] {-2});  //  9 sstables should be compacted into 2
-        testMultipleCompactions(16, 1, new int[] {-2}); // 12 sstables should be compacted into 1
+        testMultipleCompactions(2, 1, 1, new int[] {-2});  //  2 sstables should be compacted into 1
+        testMultipleCompactions(4, 1, 1, new int[] {-2});  //  4 sstables should be compacted into 1
+        testMultipleCompactions(8, 1, 1, new int[] {-2});  //  8 sstables should be compacted into 1
+        testMultipleCompactions(9, 1, 1, new int[] {-2});  //  9 sstables should be compacted into 2
+        testMultipleCompactions(16, 1, 1, new int[] {-2}); // 12 sstables should be compacted into 1
     }
 
     @Test
     public void testMultipleCompactionsDifferentWs_Static() throws Throwable
     {
         // tiered tests with W = [4, -6] and T = [6, 2], F = [6, 8]
-        testMultipleCompactions(12, 1, new int[] {4, -6});  //  sstables: 12 -> (6,6) => 2 => 1
+        testMultipleCompactions(12, 1, 1, new int[] {4, -6});  //  sstables: 12 -> (6,6) => 2 => 1
 
         // tiered tests with W = [30, 2, -6] and T = [32, 4, 2], F = [32, 4, 8]
-        testMultipleCompactions(128, 1, new int[] {30, 2, -6});  //  sstables: 128 -> (32,32, 32, 32) => 4 => (4) => 1
+        testMultipleCompactions(128, 1, 1, new int[] {30, 2, -6});  //  sstables: 128 -> (32,32, 32, 32) => 4 => (4) => 1
     }
 
-    private void testMultipleCompactions(int numInitialSSTables, int numFinalSSTables, int[] Ws) throws Throwable
+    @Test
+    public void testMultipleCompactionsSingleW_TwoShards() throws Throwable
     {
-        int numInserts = 1024;
-        int valSize = 1024;
+        testMultipleCompactions(4, 1, 2, new int[]{2});  //  4 sstables should be compacted into 1
+        testMultipleCompactions(8, 1, 2, new int[]{2});  //  8 sstables should be compacted into 1
+    }
+
+    private void testMultipleCompactions(int numInitialSSTables, int numFinalSSTables, int numShards, int[] Ws) throws Throwable
+    {
+        int numInserts = 1024 * numShards;
+        int valSize = 2048;
 
         String scalingFactorsStr = String.join(",", Arrays.stream(Ws)
                                                           .mapToObj(i -> Integer.toString(i))
@@ -258,21 +275,24 @@ public class CQLUnifiedCompactionTest extends CQLTester
 
         createTable("create table %s (id int primary key, val blob) with compression = { 'enabled' : false } AND " +
                     "compaction = {'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', " +
-                    String.format("'static_scaling_factors' : '%s', 'minimal_sstable_size_in_mb' : '1', 'log_all' : 'true'}",
-                                  scalingFactorsStr));
+                    String.format("'static_scaling_factors' : '%s', 'min_sstable_size_in_mb' : '1', 'num_shards': '%d', 'log_all' : 'true'}",
+                                  scalingFactorsStr, numShards));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
 
         int key = 0;
-        ByteBuffer val = ByteBuffer.wrap(new byte[valSize]);
+        byte[] bytes = new byte[valSize];
+        (new Random(87652)).nextBytes(bytes);
+        ByteBuffer val = ByteBuffer.wrap(bytes);
+
         for (int i = 0; i < numInitialSSTables; i++)
             key = insertAndFlush(numInserts, key, val);
 
         int expectedInserts = numInserts * numInitialSSTables;
 
-        assertEquals(numInitialSSTables, cfs.getLiveSSTables().size());
         assertEquals(expectedInserts, getRows(execute("SELECT * FROM %s")).length);
+        assertEquals(numInitialSSTables * numShards, cfs.getLiveSSTables().size());
 
         // trigger a compaction, wait for the future because otherwise the check below
         // may be called before the strategy has executed getNextBackgroundTask()
@@ -291,8 +311,8 @@ public class CQLUnifiedCompactionTest extends CQLTester
             numChecks++;
         }
 
+        assertEquals(numFinalSSTables * numShards, cfs.getLiveSSTables().size());
         assertEquals(numFinalSSTables, cfs.getLiveSSTables().size());
-        assertEquals(expectedInserts, getRows(execute("SELECT * FROM %s")).length);
     }
 
     private int insertAndFlush(int numInserts, int key, ByteBuffer val) throws Throwable

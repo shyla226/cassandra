@@ -53,12 +53,26 @@ public abstract class Controller
 
     final static String PREFIX = "dse.universal_compaction.";
 
-    /** The minimal sstable size determines the size of the buckets since we multiply this value by F. When the default minimal
-     * sstable size is zero, then it is calculated by the controller by looking at the initial flush size. A positive value here
-     * means that the user wishes to set this value manually thereby ignoring the calculations based on the flush size.
+    /** The data size in GB, it will be assumed that the node will have on disk roughly this size of data when it
+     * reaches equilibrium. By default 1 TB. */
+    static String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
+    static int DEFAULT_DATASET_SIZE_GB = Integer.getInteger(PREFIX + DATASET_SIZE_OPTION_GB, 1024);
+
+    /** The number of shards. The shard size will be calculated by dividing the data size by this number.
+     * By default 5, which means shards of 200 GB (1 TB / 5).*/
+    final static String NUM_SHARDS_OPTION = "num_shards";
+    final static int DEFAULT_NUM_SHARDS = Integer.getInteger(PREFIX + NUM_SHARDS_OPTION, 5);
+
+    /** The minimum sstable size determines various things:
+     *
+     * - first of all it determines the size of the buckets since we multiply this value by F.
+     * - secondly, when sstables are split over shard, they must be at least as large as the minimum size
+     *
+     * When the minimum sstable size is zero in the compaction options, then it is calculated by the controller by
+     * looking at the initial flush size.
      */
-    static String MINIMAL_SSTABLE_SIZE_OPTION_MB = "minimal_sstable_size_in_mb";
-    static int DEFAULT_MINIMAL_SSTABLE_SIZE_MB = Integer.getInteger(PREFIX + MINIMAL_SSTABLE_SIZE_OPTION_MB, 0);
+    static String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
+    static int DEFAULT_MIN_SSTABLE_SIZE_MB = Integer.getInteger(PREFIX + MIN_SSTABLE_SIZE_OPTION_MB, 0);
 
     /**
      * This parameter is intended to modify the shape of the LSM by taking into account the survival ratio of data, for now it is fixed to one.
@@ -74,18 +88,31 @@ public abstract class Controller
     protected final TimeSource timeSource;
     protected final Environment env;
     protected final double survivalFactor;
-    protected volatile long minSSTableSizeMB;
+    protected final long dataSetSizeMB;
+    protected volatile int numShards;
+    protected final long shardSizeMB;
+    protected volatile long minSstableSizeMB;
+
 
     @Nullable
     protected volatile CostsCalculator calculator;
     @Nullable private volatile Metrics metrics;
 
-    Controller(TimeSource timeSource, Environment env,  double survivalFactor, long minSSTableSizeMB)
+    Controller(TimeSource timeSource, Environment env,  double survivalFactor,  long dataSetSizeMB, int numShards, long minSstableSizeMB)
     {
         this.timeSource = timeSource;
         this.env = env;
         this.survivalFactor = survivalFactor;
-        this.minSSTableSizeMB = minSSTableSizeMB;
+        this.dataSetSizeMB = dataSetSizeMB;
+        this.numShards = numShards;
+        this.shardSizeMB = (int) Math.ceil((double) dataSetSizeMB / numShards);
+        this.minSstableSizeMB = minSstableSizeMB;
+    }
+
+    @VisibleForTesting
+    public Environment getEnv()
+    {
+        return env;
     }
 
     /**
@@ -93,6 +120,14 @@ public abstract class Controller
      * @param index
      */
     public abstract int getW(int index);
+
+    /**
+     * @return the number of shards according to the dataset and shard sizes set by the user
+     */
+    public int getNumShards()
+    {
+        return numShards;
+    }
 
     /**
      * @return the survival factor o
@@ -103,21 +138,41 @@ public abstract class Controller
     }
 
     /**
-     * Return the minimum sstable size in bytes.
+     * The user specified dataset size.
+     *
+     * @return the target size of the entire data set, in bytes.
+     */
+    public long getDataSetSizeBytes()
+    {
+        return dataSetSizeMB << 20;
+    }
+
+    /**
+     * The user specified shard, or compaction arena, size.
+     *
+     * @return the desired size of each shard, or compaction arena, in bytes.
+     */
+    public long getShardSizeBytes()
+    {
+        return shardSizeMB << 20;
+    }
+
+    /**
+     * Return the sstable size in bytes.
      *
      * This is either set by the user in the options or calculated by rounding up the first flush size to 50 MB.
      *
      * @return the minimum sstable size in bytes.
      */
-    public long getMinSSTableSizeBytes()
+    public long getMinSstableSizeBytes()
     {
-        if (minSSTableSizeMB > 0)
-            return minSSTableSizeMB << 20;
+        if (minSstableSizeMB > 0)
+            return minSstableSizeMB << 20;
 
         synchronized (this)
         {
-            if (minSSTableSizeMB > 0)
-                return minSSTableSizeMB << 20;
+            if (minSstableSizeMB > 0)
+                return minSstableSizeMB << 20;
 
             // round the avg flush size to the nearest byte
             long envFlushSize = Math.round(env.flushSize());
@@ -128,7 +183,7 @@ public abstract class Controller
 
             // If the env flush size is positive, then we've flushed at least once and we use this value permanently
             if (envFlushSize > 0)
-                minSSTableSizeMB = flushSize >> 20;
+                minSstableSizeMB = flushSize >> 20;
 
             return flushSize;
         }
@@ -193,7 +248,7 @@ public abstract class Controller
     }
 
     /**
-     * The strategy will call this method each time {@link CompactionStrategy#getNextBackgroundTask(int)} is called.
+     * The strategy will call this method each time {@link CompactionStrategy#getNextBackgroundTasks(int)} is called.
      */
     public void onStrategyBackgroundTaskRequest()
     {
@@ -211,7 +266,7 @@ public abstract class Controller
     public int RA(long length, int W)
     {
         double o = getSurvivalFactor();
-        long m = getMinSSTableSizeBytes();
+        long m = getMinSstableSizeBytes();
 
         int F = W < 0 ? 2 - W : 2 + W;
         int T = W < 0 ? 2 : F;
@@ -236,7 +291,7 @@ public abstract class Controller
     public int WA(long size, int W)
     {
         double o = getSurvivalFactor();
-        long m = getMinSSTableSizeBytes();
+        long m = getMinSstableSizeBytes();
 
         int F = W < 0 ? 2 - W : 2 + W;
         int maxIndex = Math.max(0, (int) Math.floor((Math.log(size) - Math.log(m)) / (Math.log(F) - Math.log(o))));
@@ -282,12 +337,21 @@ public abstract class Controller
     public static Controller fromOptions(ColumnFamilyStore cfs, Map<String, String> options)
     {
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.get(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
-        long m = (options.containsKey(MINIMAL_SSTABLE_SIZE_OPTION_MB) ? Integer.parseInt(options.get(MINIMAL_SSTABLE_SIZE_OPTION_MB)) : DEFAULT_MINIMAL_SSTABLE_SIZE_MB);
+        long dataSetSizeMb = (options.containsKey(DATASET_SIZE_OPTION_GB) ? Long.parseLong(options.get(DATASET_SIZE_OPTION_GB)) : DEFAULT_DATASET_SIZE_GB) << 10;
+        int numShards = options.containsKey(NUM_SHARDS_OPTION) ? Integer.parseInt(options.get(NUM_SHARDS_OPTION)) : DEFAULT_NUM_SHARDS;
+        long sstableSizeMb = options.containsKey(MIN_SSTABLE_SIZE_OPTION_MB) ? Long.parseLong(options.get(MIN_SSTABLE_SIZE_OPTION_MB)) : DEFAULT_MIN_SSTABLE_SIZE_MB;
+
+        if (dataSetSizeMb <= 0)
+            throw new IllegalArgumentException(String.format("Invalid configuration, dataset size should be positive: %d", dataSetSizeMb));
+
+        if (numShards <= 0)
+            throw new IllegalArgumentException(String.format("Invalid configuration, num shards should be >= 1: %d", numShards));
+
         Environment env = new RealEnvironment(cfs);
 
         return adaptive
-               ? AdaptiveController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, m, options)
-               : StaticController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, m, options);
+               ? AdaptiveController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMb, numShards, sstableSizeMb, options)
+               : StaticController.fromOptions(env, DEFAULT_SURVIVAL_FACTOR, dataSetSizeMb, numShards, sstableSizeMb, options);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -295,7 +359,9 @@ public abstract class Controller
         options = new HashMap<>(options);
 
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.remove(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
-        options.remove(Controller.MINIMAL_SSTABLE_SIZE_OPTION_MB);
+        options.remove(Controller.MIN_SSTABLE_SIZE_OPTION_MB);
+        options.remove(Controller.DATASET_SIZE_OPTION_GB);
+        options.remove(Controller.NUM_SHARDS_OPTION);
 
         return adaptive ? AdaptiveController.validateOptions(options) : StaticController.validateOptions(options);
     }

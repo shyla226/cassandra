@@ -151,8 +151,10 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         LocalSessionAccessor.finalizeUnsafe(repairID);
 
         Assert.assertEquals(2, prm.getSessions().size());
-        Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
-        AbstractCompactionTask compactionTask = prm.getNextRepairFinishedTask();
+        Assert.assertTrue(prm.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
+        Collection<AbstractCompactionTask> compactionTasks = prm.getNextRepairFinishedTasks();
+        Assert.assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         try
         {
             Assert.assertNotNull(compactionTask);
@@ -170,7 +172,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     public void getNextBackgroundTaskNoSessions()
     {
         PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
-        Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
+        Assert.assertTrue(prm.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
     }
 
     /**
@@ -190,7 +192,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         Assert.assertNotNull(prm.get(repairID));
         LocalSessionAccessor.finalizeUnsafe(repairID);
 
-        Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
+        Assert.assertTrue(prm.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
 
     }
 
@@ -302,7 +304,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         prm.getOrCreate(sstable);
         cfs.truncateBlocking();
         Assert.assertFalse(cfs.getSSTables(SSTableSet.LIVE).iterator().hasNext());
-        Assert.assertNull(cfs.getCompactionStrategy().getNextBackgroundTask(0));
+        Assert.assertTrue(cfs.getCompactionStrategy().getNextBackgroundTasks(0).isEmpty());
 
     }
 }

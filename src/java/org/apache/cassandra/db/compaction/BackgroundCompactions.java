@@ -48,7 +48,7 @@ public class BackgroundCompactions implements CompactionObserver
 
     /** The compaction aggregates with either pending or ongoing compactions, or both. This is a private map
      * whose access needs to be synchronized. */
-    private final TreeMap<Long, CompactionAggregate> aggregatesMap;
+    private final TreeMap<CompactionAggregate.Key, CompactionAggregate> aggregatesMap;
 
     /**
      * The current list of compaction aggregates, this list must be recreated every time the aggregates
@@ -146,8 +146,8 @@ public class BackgroundCompactions implements CompactionObserver
 
         if (compactionLogger != null && compactionLogger.enabled())
         {
+            // compactionLogger.statistics(strategy, "pending", getStatistics()); // too much noise
             compactionLogger.pending(strategy, getEstimatedRemainingTasks());
-            compactionLogger.statistics(strategy, "pending", getStatistics());
         }
     }
 

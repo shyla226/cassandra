@@ -23,15 +23,12 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.SortedMap;
-import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
@@ -42,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * A compaction aggregate is either a level in {@link LeveledCompactionStrategy} or a tier (bucket) in other
@@ -57,6 +53,9 @@ public abstract class CompactionAggregate
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionAggregate.class);
 
+    /** The unique key that identifies this aggregate. */
+    final Key key;
+
     /** The sstables in this aggregate, whether they are compaction candidates or not */
     final Set<SSTableReader> sstables;
 
@@ -66,11 +65,12 @@ public abstract class CompactionAggregate
     /** The compactions that are part of this aggregate, they could be pending or in progress. */
     final LinkedHashSet<CompactionPick> compactions;
 
-    CompactionAggregate(Iterable<SSTableReader> sstables, CompactionPick selected, Iterable<CompactionPick> pending)
+    CompactionAggregate(Key key, Iterable<SSTableReader> sstables, CompactionPick selected, Iterable<CompactionPick> pending)
     {
         if (sstables == null || selected == null || pending == null)
             throw new IllegalArgumentException("Arguments cannot be null");
 
+        this.key = key;
         this.sstables = new HashSet<>(); sstables.forEach(this.sstables::add);
         this.selected = selected;
 
@@ -92,6 +92,20 @@ public abstract class CompactionAggregate
     public CompactionPick getSelected()
     {
         return selected;
+    }
+
+    /**
+     * @return the total sstable size for all the compaction picks that are either pending or still in progress
+     */
+    public long getPendingBytes()
+    {
+        long ret = 0;
+        for (CompactionPick comp : compactions)
+        {
+            if (comp.id == null)
+                ret += comp.totSizeInBytes;
+        }
+        return ret;
     }
 
     /**
@@ -156,9 +170,14 @@ public abstract class CompactionAggregate
     }
 
     /**
-     * @return a key that is specific to the concrete implementation, used for grouping compacting aggregates
+     * @return a key that ensures the uniqueness of an aggregate but also that allows identify future identical aggregates,
+     *         e.g. when an aggregate is merged with an older aggregate that has still ongoing compactions like a level
+     *         in LCS or a bucket in the unified strategy or STCS or a time window in TWCS
      */
-    abstract long getKey();
+    public Key getKey()
+    {
+        return key;
+    }
 
     /**
      * Return a matching aggregate from the map passed in or null. Normally this is just a matter of finding
@@ -169,7 +188,7 @@ public abstract class CompactionAggregate
      *
      * @return an aggregate with the same key or null
      */
-    @Nullable CompactionAggregate getMatching(NavigableMap<Long, CompactionAggregate> others)
+    @Nullable CompactionAggregate getMatching(NavigableMap<Key, CompactionAggregate> others)
     {
         return others.get(getKey());
     }
@@ -286,7 +305,7 @@ public abstract class CompactionAggregate
                 int pendingCompactions,
                 int fanout)
         {
-            super(sstables, selected, compactions);
+            super(new Key(level), sstables, selected, compactions);
 
             this.level = level;
             this.nextLevel = nextLevel;
@@ -368,12 +387,6 @@ public abstract class CompactionAggregate
         public boolean isEmpty()
         {
             return super.isEmpty() && pendingCompactions == 0;
-        }
-
-        @Override
-        long getKey()
-        {
-            return level;
         }
 
         @Override
@@ -486,7 +499,7 @@ public abstract class CompactionAggregate
                    long minSizeBytes,
                    long maxSizeBytes)
         {
-            super(sstables, selected, pending);
+            super(new Key(avgSizeBytes), sstables, selected, pending);
 
             this.hotness = hotness;
             this.avgSizeBytes = avgSizeBytes;
@@ -556,15 +569,9 @@ public abstract class CompactionAggregate
         }
 
         @Override
-        long getKey()
+        @Nullable CompactionAggregate getMatching(NavigableMap<Key, CompactionAggregate> others)
         {
-            return avgSizeBytes;
-        }
-
-        @Override
-        @Nullable CompactionAggregate getMatching(NavigableMap<Long, CompactionAggregate> others)
-        {
-            SortedMap<Long, CompactionAggregate> subMap = others.subMap(minSizeBytes, maxSizeBytes);
+            SortedMap<Key, CompactionAggregate> subMap = others.subMap(new Key(minSizeBytes), new Key(maxSizeBytes));
             if (subMap.isEmpty())
             {
                 if (logger.isTraceEnabled())
@@ -579,11 +586,11 @@ public abstract class CompactionAggregate
                              subMap.size(),
                              FBUtilities.prettyPrintMemory(avgSizeBytes));
 
-            Long closest = null;
+            Key closest = null;
             long minDiff = 0;
-            for (Long m : subMap.keySet())
+            for (Key m : subMap.keySet())
             {
-                long diff = Math.abs(m - avgSizeBytes);
+                long diff = Math.abs(m.index - avgSizeBytes);
                 if (closest == null || diff < minDiff)
                 {
                     closest = m;
@@ -594,7 +601,7 @@ public abstract class CompactionAggregate
             if (logger.isTraceEnabled())
                 logger.trace("Using closest matching aggregate for {}: {}",
                              FBUtilities.prettyPrintMemory(avgSizeBytes),
-                             FBUtilities.prettyPrintMemory(closest));
+                             FBUtilities.prettyPrintMemory(closest.index));
 
             return others.get(closest);
         }
@@ -632,7 +639,7 @@ public abstract class CompactionAggregate
 
         TimeTiered(Iterable<SSTableReader> sstables, CompactionPick selected, Iterable<CompactionPick> pending, long timestamp)
         {
-            super(sstables, selected, pending);
+            super(new Key(timestamp), sstables, selected, pending);
             this.timestamp = timestamp;
         }
 
@@ -698,12 +705,6 @@ public abstract class CompactionAggregate
         }
 
         @Override
-        long getKey()
-        {
-            return timestamp;
-        }
-
-        @Override
         public String toString()
         {
             return String.format("Time tiered %d with %d sstables, %d compactions", timestamp, sstables.size(), compactions.size());
@@ -722,15 +723,20 @@ public abstract class CompactionAggregate
 
     public static final class UnifiedAggregate extends CompactionAggregate
     {
+        /** The shard to which this bucket belongs */
+        private final UnifiedCompactionStrategy.Shard shard;
+
         /** The bucket generated by the compaction strategy */
         private final UnifiedCompactionStrategy.Bucket bucket;
 
         UnifiedAggregate(Iterable<SSTableReader> sstables,
                          CompactionPick selected,
                          Iterable<CompactionPick> pending,
+                         UnifiedCompactionStrategy.Shard shard,
                          UnifiedCompactionStrategy.Bucket bucket)
         {
-            super(sstables, selected, pending);
+            super(new ShardedKey(shard, bucket.index), sstables, selected, pending);
+            this.shard = shard;
             this.bucket = bucket;
         }
 
@@ -779,6 +785,7 @@ public abstract class CompactionAggregate
                                                    bucket.F,
                                                    bucket.min,
                                                    bucket.max,
+                                                   shard.name(),
                                                    numCompactions,
                                                    numCompactionsInProgress,
                                                    sstables.size(),
@@ -790,12 +797,6 @@ public abstract class CompactionAggregate
                                                    tot,
                                                    read,
                                                    written);
-        }
-
-        @Override
-        long getKey()
-        {
-            return bucket.index;
         }
 
         @Override
@@ -812,16 +813,17 @@ public abstract class CompactionAggregate
         @Override
         protected CompactionAggregate clone(Iterable<SSTableReader> sstables, CompactionPick selected, Iterable<CompactionPick> compactions)
         {
-            return new UnifiedAggregate(sstables, selected, compactions, bucket);
+            return new UnifiedAggregate(sstables, selected, compactions, shard, bucket);
         }
     }
 
     static CompactionAggregate createUnified(Collection<SSTableReader> sstables,
                                              CompactionPick selected,
                                              Iterable<CompactionPick> pending,
+                                             UnifiedCompactionStrategy.Shard shard,
                                              UnifiedCompactionStrategy.Bucket bucket)
     {
-        return new UnifiedAggregate(sstables, selected, pending, bucket);
+        return new UnifiedAggregate(sstables, selected, pending, shard, bucket);
     }
 
 
@@ -831,7 +833,7 @@ public abstract class CompactionAggregate
     {
         TombstoneAggregate(Iterable<SSTableReader> sstables, CompactionPick selected, Iterable<CompactionPick> pending)
         {
-            super(sstables, selected, pending);
+            super(new Key(-1), sstables, selected, pending);
         }
 
         @Override
@@ -887,12 +889,6 @@ public abstract class CompactionAggregate
         }
 
         @Override
-        long getKey()
-        {
-            return -1; // Tombstone compactions are the only ones with negative keys so they will be matched by a unique aggregate
-        }
-
-        @Override
         public String toString()
         {
             return String.format("Tombstones with %d sstables, %d compactions", sstables.size(), compactions.size());
@@ -907,6 +903,56 @@ public abstract class CompactionAggregate
     }
 
     /**
+     * A key suitable for a strategy that has no shards, that is a legacy strategy that is
+     * managed by CompactionStrategyManager.
+     */
+    public static class Key implements Comparable<Key>
+    {
+        protected final long index;
+
+        Key(long index)
+        {
+            this.index = index;
+        }
+
+        @Override
+        public int compareTo(Key key)
+        {
+            return Long.compare(index, key.index);
+        }
+    }
+
+    /**
+     * A key suitable for a strategy using shards, first it compares by shard, and then by bucket index.
+     */
+    private final static class ShardedKey extends Key
+    {
+        private final UnifiedCompactionStrategy.Shard shard;
+
+        ShardedKey(UnifiedCompactionStrategy.Shard shard, long index)
+        {
+            super(index);
+            this.shard = shard;
+        }
+
+        @Override
+        public int compareTo(Key key)
+        {
+            if (key instanceof ShardedKey)
+            {
+                ShardedKey shardedKey = (ShardedKey) key;
+
+                int ret = shard.compareTo(shardedKey.shard);
+                if (ret != 0)
+                    return ret;
+            }
+
+            // either not sharded or same shard
+            return Long.compare(index, key.index);
+        }
+    }
+
+    /**
      * Return the compaction statistics for this strategy and list of compactions that are either pending or in progress.
      *
      * @param aggregates the compaction aggregates
@@ -917,16 +963,12 @@ public abstract class CompactionAggregate
                                                       CompactionStrategy strategy,
                                                       Collection<CompactionAggregate> aggregates)
     {
-        List<Pair<Long, CompactionAggregateStatistics>> statistcs = new ArrayList<>(aggregates.size());
+        List<CompactionAggregateStatistics> statistcs = new ArrayList<>(aggregates.size());
 
         for (CompactionAggregate aggregate : aggregates)
-        {
-            statistcs.add(Pair.create(aggregate.getKey(), aggregate.getStatistics()));
-        }
+            statistcs.add(aggregate.getStatistics());
 
-        return new CompactionStrategyStatistics(metadata,
-                                                strategy.getClass().getSimpleName(),
-                                                statistcs.stream().map(p -> p.right).collect(Collectors.toList()));
+        return new CompactionStrategyStatistics(metadata, strategy.getClass().getSimpleName(), statistcs);
     }
 
     public static int WA(Collection<CompactionAggregate> aggregates)

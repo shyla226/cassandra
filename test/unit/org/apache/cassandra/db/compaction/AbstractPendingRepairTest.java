@@ -98,7 +98,7 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         {
             compactionStrategyContainer.getStrategies()
                                        .get(1)
-                                       .forEach(acs -> ((AbstractCompactionStrategy) acs).removeSSTable(sstable));
+                                       .forEach(acs -> ((LegacyAbstractCompactionStrategy) acs).removeSSTable(sstable));
         }
         return sstable;
     }

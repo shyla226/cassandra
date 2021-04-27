@@ -327,9 +327,11 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         for (SSTableReader sstable : cfs.getLiveSSTables())
             dtcs.addSSTable(sstable);
         dtcs.startup();
-        assertNull(dtcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
+        assertTrue(dtcs.getNextBackgroundTasks((int) (System.currentTimeMillis() / 1000)).isEmpty());
         Thread.sleep(2000);
-        AbstractCompactionTask t = dtcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
+        Collection<AbstractCompactionTask> tasks = dtcs.getNextBackgroundTasks((int) (System.currentTimeMillis() / 1000));
+        assertEquals(1, tasks.size());
+        AbstractCompactionTask t = tasks.iterator().next();
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.transaction.originals()));
         SSTableReader sstable = t.transaction.originals().iterator().next();
@@ -375,7 +377,11 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(factory, options);
         for (SSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
             dtcs.addSSTable(sstable);
-        AbstractCompactionTask task = dtcs.getNextBackgroundTask(0);
+
+        Collection<AbstractCompactionTask> tasks = dtcs.getNextBackgroundTasks(0);
+        assertEquals(1, tasks.size());
+
+        AbstractCompactionTask task = tasks.iterator().next();
         assertEquals(20, task.transaction.originals().size());
         task.transaction.abort();
         cfs.truncateBlocking();

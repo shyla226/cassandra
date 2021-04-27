@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -40,8 +41,6 @@ import java.util.regex.Pattern;
 
 import javax.inject.Inject;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
 import org.apache.commons.math3.distribution.AbstractIntegerDistribution;
@@ -65,12 +64,16 @@ import io.airlift.airline.SingleCommand;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.compaction.unified.AdaptiveController;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.CostsCalculator;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.db.compaction.unified.Environment;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.utils.ExpMovingAverage;
@@ -82,6 +85,7 @@ import org.apache.cassandra.utils.TimeSource;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.when;
 
 /**
  * A test that simulates compactions to see how strategies behave.
@@ -120,28 +124,19 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     private static final String logDirectory = System.getProperty("cassandra.logdir", ".");
 
     /**
-     * The time in nanoseconds for writing {@link this#blockSizeBytes} bytes sequentially.
-     * The value here is a rough estimate based on running fio on a moonshot ms1.small instance
-     * and it includes the time to perform an fsync every 10MB, otherwise it can be as little as 2.5 us
-     * and 3 us on ironic. Command:
-     *
-     * fio --name=test_seq_write --filename=test_seq --size=12G --readwrite=write --fdatasync=2560 --runtime=180 --time_based
-     * */
-    @VisibleForTesting
-    long seqWriteTimeNanos = 12;
+     * The average time for flushing 1kb of data, as measured on Fallout tests ran on ironic.
+     */
+    private long flushTimeMicros = 20;
 
     /**
-     * The time in nanoseconds for reading {@link this#blockSizeBytes} bytes randomly.
-     * As described in {@link this#seqWriteTimeNanos} but for random reads of {@link this#blockSizeBytes}. Command:
-     *
-     * fio --name=test_seq_read --filename=test_seq --size=12G --readwrite=randread --direct=1 --ioengine=libaio  --runtime=180 --time_based
-     * */
-    @VisibleForTesting
-    long randReadTimeNanos = 130;
+     * The average time for compacting 1kb of data, as measured on Fallout tests ran on ironic.
+     */
+    private long compactionTimeMicros = 45;
 
-    /** The size of IO blocks for the read and write times above */
-    @VisibleForTesting
-    int blockSizeBytes = 4096;
+    /**
+     * The average time for reading an entire partition, as measured on Fallout tests ran on ironic.
+     */
+    private long partitionReadLatencyMicros = 150;
 
     /** How often we append values to the csv file */
     private static final int csvUpdatePeriodMs = 500;
@@ -150,10 +145,10 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     private static final int warmupPeriodSec = 15;
 
     /** The minimum sstable size in bytes */
-    private static final long minSSTableSize = 2 << 20; // 2 MB
+    private static final long sstableSize = 50 << 20; // 50 MB
 
     /** The number of unique keys that cause an sstable to be flushed, the value size is calculated by dividing
-     * {@link this#minSSTableSize} by this value. The smaller this value is, the greater the number of sstables generated.
+     * {@link this#sstableSize} by this value. The smaller this value is, the greater the number of sstables generated.
      */
     private static final int uniqueKeysPerSStable = 5000;
 
@@ -182,8 +177,11 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     @Option(name= {"-max"}, description = "The maximum value of W")
     int maxW = 32;
 
-    @Option(name= {"--min-data-size"}, description = "The minimum data set size in GB for adaptive analysis")
-    int minTargetSizeGB = 32;
+    @Option(name= {"--data-size"}, description = "The data set size in GB")
+    int datasetSizeGB = 128;
+
+    @Option(name= {"--num-shards"}, description = "The number of compaction shards")
+    int numShards = 4;
 
     @Option(name= {"--min-cost"}, description = "The minimum cost for adaptive analysis")
     int minCost = 5;
@@ -212,7 +210,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     @Before
     public void setUp()
     {
-        super.setUp();
+        setUp(numShards);
+        logger.info("Simulation set up for data size of {} GiB, {} shards", datasetSizeGB, numShards);
     }
 
     public static void main(String[] args) throws Exception
@@ -276,7 +275,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         int maxKey = 30_000_000;
 
         CsvWriter csvWriter = CsvWriter.make("testUniform_UnifiedStrategy");
-        testUniform(false, csvWriter, W, minSSTableSize, TimeUnit.MINUTES.toMillis(1), maxKey, readRowsSec, writeRowsSec, NO_OP_OBSERVER);
+        testUniform(false, csvWriter, W, sstableSize, TimeUnit.MINUTES.toMillis(1), maxKey, readRowsSec, writeRowsSec, NO_OP_OBSERVER);
     }
 
     /**
@@ -290,7 +289,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         String csvFileName = "testAdaptiveController_" + dataSetName;
         CsvWriter csvWriter = CsvWriter.make(csvFileName);
 
-        testUniform(true, csvWriter, W, minSSTableSize, TimeUnit.MINUTES.toMillis(durationMinutes), maxKey, readRowsSec, writeRowsSec, NO_OP_OBSERVER);
+        testUniform(true, csvWriter, W, sstableSize, TimeUnit.MINUTES.toMillis(durationMinutes), maxKey, readRowsSec, writeRowsSec, NO_OP_OBSERVER);
         clearSSTables();
     }
 
@@ -308,7 +307,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
         for (int w = minW; w <= maxW; w += stepW)
         {
-            testUniform(false, csvWriter, w, minSSTableSize, TimeUnit.MINUTES.toMillis(durationMinutes), maxKey, readRowsSec, writeRowsSec, NO_OP_OBSERVER);
+            testUniform(false, csvWriter, w, sstableSize, TimeUnit.MINUTES.toMillis(durationMinutes), maxKey, readRowsSec, writeRowsSec, NO_OP_OBSERVER);
             clearSSTables();
         }
     }
@@ -316,7 +315,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     private void testUniform(boolean adaptive,
                              CsvWriter csvWriter,
                              int W,
-                             long minSSTableSize,
+                             long sstableSize,
                              long durationMillis,
                              int maxKey,
                              int readRowsSec,
@@ -326,15 +325,15 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         if (maxKey <= 0)
             fail("Maxkey should be positive");
 
-        int valueSize = (int) Math.ceil(minSSTableSize / (double) uniqueKeysPerSStable); // value length for each key
+        int valueSize = (int) Math.ceil(sstableSize / (double) uniqueKeysPerSStable); // value length for each key
 
-        logger.debug("Running simulation with uniform distribution, max key: {}, duration: {} ms, maxKey: {}, keys/sstable: {}, value len: {}, min sstable size: {}",
-                     maxKey, durationMillis, maxKey, uniqueKeysPerSStable, valueSize, FBUtilities.prettyPrintMemory(minSSTableSize));
+        logger.debug("Running simulation with uniform distribution, max key: {}, duration: {} ms, maxKey: {}, keys/sstable: {}, value size: {}, min sstable size: {}",
+                     maxKey, durationMillis, maxKey, uniqueKeysPerSStable, valueSize, FBUtilities.prettyPrintMemory(sstableSize));
 
         AbstractIntegerDistribution distribution = new UniformIntegerDistribution(random, 0, maxKey);
 
         Counters counters = new Counters();
-        UnifiedCompactionStrategy strategy = createUnifiedCompactionStrategy(counters, adaptive, W, minSSTableSize, valueSize);
+        UnifiedCompactionStrategy strategy = createUnifiedCompactionStrategy(counters, adaptive, W, sstableSize, valueSize);
 
         Simulation simulation = new Simulation(strategy,
                                                distribution,
@@ -363,14 +362,29 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         assertTrue(dataTracker.getCompacting().isEmpty());
     }
 
-    private UnifiedCompactionStrategy createUnifiedCompactionStrategy(Counters counters, boolean adaptive, int W, long minSSTableSize, int valueSize)
+    private UnifiedCompactionStrategy createUnifiedCompactionStrategy(Counters counters, boolean adaptive, int W, long sstableSize, int valueSize)
     {
         double o = 1.0;
         int[] Ws = new int[] { W };
 
         Controller controller = adaptive
-                                ? new AdaptiveController(new SystemTimeSource(), new SimulatedEnvironment(counters, valueSize), Ws[0], o, minSSTableSize >> 20, updateTimeSec, minW, maxW, minTargetSizeGB, gain, minCost)
-                                : new StaticController(new SimulatedEnvironment(counters, valueSize), Ws, o, minSSTableSize >> 20);
+                                ? new AdaptiveController(new SystemTimeSource(),
+                                                         new SimulatedEnvironment(counters, valueSize), Ws[0],
+                                                         o,
+                                                         datasetSizeGB << 10,  // MB
+                                                         numShards,
+                                                         sstableSize >> 20, // MB
+                                                         updateTimeSec,
+                                                         minW,
+                                                         maxW,
+                                                         gain,
+                                                         minCost)
+                                : new StaticController(new SimulatedEnvironment(counters, valueSize),
+                                                       Ws,
+                                                       o,
+                                                       datasetSizeGB << 10,  // MB
+                                                       numShards,
+                                                       sstableSize >> 20); // MB
 
         return new UnifiedCompactionStrategy(strategyFactory, controller);
     }
@@ -550,20 +564,20 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         @Override
         public double sstablePartitionReadLatencyNanos()
         {
-            return Math.ceil(valueSize / (double) blockSizeBytes) * cacheFactor * randReadTimeNanos; // a partition is valueSize
+            return TimeUnit.MICROSECONDS.toNanos(partitionReadLatencyMicros);
         }
 
         @Override
         public double compactionLatencyPerKbInNanos()
         {
             // this is slightly incorrect, we would need to measure the size of compacted sstables
-            return (seqWriteTimeNanos * Math.ceil(flushSize() / blockSizeBytes)) / (double) Math.max(1, (long) flushSize() * 1024L);
+            return TimeUnit.MICROSECONDS.toNanos(compactionTimeMicros);
         }
 
         @Override
         public double flushLatencyPerKbInNanos()
         {
-            return (seqWriteTimeNanos * Math.ceil(flushSize() / blockSizeBytes)) / (double) Math.max(1, (long) flushSize() * 1024L);
+            return TimeUnit.MICROSECONDS.toNanos(flushTimeMicros);
         }
 
         @Override
@@ -888,19 +902,23 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
             {
                 NamedThreadFactory threadFactory = new NamedThreadFactory("Simulation-worker");
 
-                CountDownLatch settingUpDone = new CountDownLatch(1);
-                CountDownLatch runningDone = new CountDownLatch(2);
-                CountDownLatch tearingDownDone = new CountDownLatch(4);
-
                 setState(SimulationState.NONE, SimulationState.SETTING_UP);
 
                 this.start = System.currentTimeMillis();
                 strategy.getController().startup(strategy, ScheduledExecutors.scheduledTasks);
                 this.output = new SimulationOutput(start, csvWriter, strategy);
 
+                int numShards = strategy.getController().getNumShards();
+
+                CountDownLatch settingUpDone = new CountDownLatch(1);
+                CountDownLatch runningDone = new CountDownLatch(2);
+                CountDownLatch tearingDownDone = new CountDownLatch(3 + numShards); // 1 reporter, 2 flusher and num shards compacting threads
+
                 threadFactory.newThread(new RunAndCountDown(settingUpDone, "preload", this::preloadData)).start();
                 threadFactory.newThread(new RunAndCountDown(tearingDownDone, "report", this::reportOutput)).start();
-                threadFactory.newThread(new RunAndCountDown(tearingDownDone, "compact 1", this::compactData)).start();
+
+                for (int i = 0; i < numShards; i++)
+                    threadFactory.newThread(new RunAndCountDown(tearingDownDone, "compact " + i, this::compactData)).start();
 
                 settingUpDone.await();
 
@@ -1024,7 +1042,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
             }
 
             long elapsedMs = System.currentTimeMillis() - start;
-            logger.info("Total time: {}s", TimeUnit.SECONDS.convert(elapsedMs, TimeUnit.MILLISECONDS));
+            logger.info("Total time: {}s  WA : {}", TimeUnit.SECONDS.convert(elapsedMs, TimeUnit.MILLISECONDS), strategy.getController().getEnv().WA());
             logger.info("Final outputs: {} {}", counters, output);
 
             logger.info("Strategy aggregated statistics:");
@@ -1054,21 +1072,33 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
             long numToFlush;
             int lastFlushed = 0;
             long lastLogged = System.currentTimeMillis();
+            long maxBytesToInsert = (long) datasetSizeGB << 30;
+            long bytesInserted = 0;
+            int i = 0;
+
+            logger.info("Inserting up to {}", FBUtilities.prettyPrintMemory(maxBytesToInsert));
 
             try
             {
-                for (int i = 0; i < maxKey; i++)
+                while(bytesInserted < maxBytesToInsert)
                 {
                     scratch.clear();
                     scratch.putLong(0, i);
                     long hash = MurmurHash.hash64(scratchBytes, scratchBytes.length);
-
                     cardinality.offerHashed(hash);
+
+                    counters.numInserted.incrementAndGet();
+                    bytesInserted += valueSize;
+
+                    i++;
+                    if (i == maxKey)
+                        i = 0;
 
                     if (System.currentTimeMillis()- lastLogged >= TimeUnit.SECONDS.toMillis(1))
                     {
                         lastLogged = System.currentTimeMillis();
-                        logger.debug("Ins: {}, live sstables: {}, compacting: {}, pending compactions: {}",
+                        logger.debug("Ins: {}, keys: {}, live sstables: {}, compacting: {}, pending compactions: {}",
+                                     FBUtilities.prettyPrintMemory(bytesInserted),
                                      i,
                                      dataTracker.getLiveSSTables().size(),
                                      dataTracker.getCompacting().size(),
@@ -1080,7 +1110,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                     {
                         counters.numFlushed.addAndGet(numToFlush);
                         lastFlushed = i;
-                        generateSSTable(cardinality, numToFlush, "preload", true);
+                        generateSSTables(cardinality, numToFlush, "preload", true);
 
                         cardinality = newCardinality();
                     }
@@ -1095,7 +1125,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                 if ((numToFlush = cardinality.cardinality()) > 0)
                 {
                     counters.numFlushed.addAndGet(numToFlush);
-                    generateSSTable(cardinality, numToFlush, "preload", true);
+                    generateSSTables(cardinality, numToFlush, "preload", true);
                 }
             }
             catch (Exception e)
@@ -1225,7 +1255,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
                     long numToFlush = cardinality.cardinality();
                     counters.numFlushed.addAndGet(numToFlush);
-                    generateSSTable(cardinality, numToFlush, "flushing", true);
+                    generateSSTables(cardinality, numToFlush, "flushing", true);
                 }
             }
             catch (InterruptedException e)
@@ -1266,12 +1296,11 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                     counters.numWrittenForCompaction.addAndGet(merged.cardinality());
 
                     // first remove the sstables to avoid overlaps when adding the new one for LCS
-                    strategy.removeSSTables(candidates);
                     dataTracker.removeUnsafe(candidates);
                     dataTracker.removeCompactingUnsafe(candidates);
 
                     // first create the new merged sstable
-                    generateSSTable(merged, merged.cardinality(), "compacting", false);
+                    generateSSTables(merged, merged.cardinality(), "compacting", false);
                     //Thread.sleep(5);
 
                     // then remove the old sstables
@@ -1332,27 +1361,64 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         }
 
         /**
-         * Create a mocked sstable based on the cardinality received and pass it to the strategy.
-         * <p/>
-         * Update live and compacting sstables:
-         *  <li>The new sstable is always added to the live sstables </li>
-         *  <li>If the strategy returns a non null task the txn originals of the task are added to the compacting sstables and the task
-         *      is added to the compactions queue. </li>
-         *
-         *  <p/>
-         *  The method is synchronized to protect the live and compacting sstable sets and the sorted run counter, also Mockito is probably
-         *  not thread safe.
+         * Create one or more mocked sstables based on the cardinality received and the value size. The theoretical sstable size
+         * (numEntries * valueSize) will be split across multiple compaction shards.
          *
          * @param cardinality - the cardinality used to simulate the sstable
+         * @param numEntries - the total number of entries to write to disk
+         * @param reason - the reason (flushing, compacting, etc)
+         * @param checkForCompaction- if true we check if a compaction needs to be submitted
          */
-        private void generateSSTable(ICardinality cardinality, long numEntries, String reason, boolean checkForCompaction) throws InterruptedException
+        private void generateSSTables(ICardinality cardinality, long numEntries, String reason, boolean checkForCompaction) throws InterruptedException
         {
-            SSTableReader ssTableReader = mockSSTable(cardinality, System.currentTimeMillis(), valueSize);
+            // The theoretical sstable size that is being mocked
+            long sstableSize = numEntries * valueSize;
+
+            // The minimum sstable size and the compaction boundaries as dictated by the strategy
+            long minSStableSize = strategy.getController().getMinSstableSizeBytes();
+            List<PartitionPosition> boundaries = strategy.getBoundaries();
+
+            // If we didn't have a minimum sstable size, each shard would get an sstable segment of this size and the number of
+            // sstables would be the number of shards, but because we have a minimum sstable size, we need to put a cap of minSStableSize
+            long sizeAssignableToEachShard = Math.max(minSStableSize, (int) Math.ceil((double) sstableSize / boundaries.size()));
+
+            // How many sstables to compose the original sstable size, by rounding down we disregard the final segment which would be < minSStableSize
+            int numSStables = Math.min(boundaries.size(), Math.max(1, (int) (sstableSize / sizeAssignableToEachShard)));
+
+            // spread the sstables over the boundaries
+            int numShardsCoveredByEachSStable = boundaries.size() / numSStables;
+
+            List<SSTableReader> sstables = new ArrayList<>(numSStables);
+            long keyCount = (long) Math.ceil(numEntries / (double) numSStables);
+            long bytesOnDisk = valueSize * keyCount;
+            long timestamp = System.currentTimeMillis();
+
+            Token min = partitioner.getMinimumToken();
+            int max = numShardsCoveredByEachSStable - 1;
+            for (int i = 0; i < numSStables; i++)
+            {
+                // use the max token for the last sstable, this is because we rounded down when calculating numShardsCoveredByEachSStable
+                if (i == numSStables -1)
+                    max = boundaries.size() - 1;
+                else
+                    assertTrue(max < boundaries.size());
+
+                DecoratedKey first = new BufferDecoratedKey(min, ByteBuffer.allocate(0));
+                DecoratedKey last = new BufferDecoratedKey(boundaries.get(max).getToken(), ByteBuffer.allocate(0));
+
+                SSTableReader sstable = mockSSTable(0, bytesOnDisk, timestamp, 0, first, last, true, 0, true, null);
+                when(sstable.keyCardinalityEstimator()).thenReturn(cardinality);
+                sstables.add(sstable);
+
+                min = boundaries.get(max).getToken().increaseSlightly();
+                max += numShardsCoveredByEachSStable;
+            }
 
             counters.numWritten.addAndGet(numEntries);
-            dataTracker.addInitialSSTablesWithoutUpdatingSize(ImmutableList.of(ssTableReader));
-            strategy.addSSTable(ssTableReader);
-            logger.debug("Generated new sstable for {}, live: {}, compacting: {}", reason, dataTracker.getLiveSSTables().size(), dataTracker.getCompacting().size());
+            dataTracker.addInitialSSTablesWithoutUpdatingSize(sstables);
+            logger.debug("Generated {} new sstables for {}, live: {}, compacting: {}, tot sstable size {}, min sstable size {}, sizeAssignableToEachShard {}",
+                         sstables.size(), reason, dataTracker.getLiveSSTables().size(), dataTracker.getCompacting().size(),
+                         sstableSize, minSStableSize, sizeAssignableToEachShard);
 
             if (checkForCompaction)
                 maybeSubmitCompaction();
@@ -1360,8 +1426,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
         private void maybeSubmitCompaction() throws InterruptedException
         {
-            AbstractCompactionTask task = strategy.getNextBackgroundTask(FBUtilities.nowInSeconds());
-            if (task != null)
+            Collection<AbstractCompactionTask> tasks = strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+            for (AbstractCompactionTask task : tasks)
             {
                 compactions.put(task);
                 counters.numCompactionsPending.incrementAndGet();

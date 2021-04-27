@@ -43,7 +43,6 @@ public class AdaptiveControllerTest extends ControllerTest
 
     private final int minW = -10;
     private final int maxW = 64;
-    private final int minTargetSizeGB = 32;
     private final int W = 0;
     private final int interval = 60;
     private final int minCost = 5;
@@ -59,12 +58,23 @@ public class AdaptiveControllerTest extends ControllerTest
 
     private AdaptiveController makeController()
     {
-        return makeController(minSSTableSizeMB, minTargetSizeGB);
+        return makeController(dataSizeGB, numShards, sstableSizeMB);
     }
 
-    private AdaptiveController makeController(int minSSTableSizeMB, int minTargetSizeGB)
+    private AdaptiveController makeController(int dataSizeGB, int numShards, int sstableSizeMB)
     {
-        return new AdaptiveController(timeSource, env, W, Controller.DEFAULT_SURVIVAL_FACTOR, minSSTableSizeMB, interval, minW, maxW, minTargetSizeGB, gain, minCost);
+        return new AdaptiveController(timeSource,
+                                      env,
+                                      W,
+                                      Controller.DEFAULT_SURVIVAL_FACTOR,
+                                      dataSizeGB << 10,
+                                      numShards,
+                                      sstableSizeMB,
+                                      interval,
+                                      minW,
+                                      maxW,
+                                      gain,
+                                      minCost);
     }
 
     @Test
@@ -75,7 +85,6 @@ public class AdaptiveControllerTest extends ControllerTest
         options.put(AdaptiveController.MIN_W, "-10");
         options.put(AdaptiveController.MAX_W, "32");
         options.put(AdaptiveController.INTERVAL_SEC, "120");
-        options.put(AdaptiveController.MIN_TARGET_SIZE_GB, "256");
         options.put(AdaptiveController.GAIN, "0.15");
         options.put(AdaptiveController.MIN_COST, "5");
 
@@ -94,7 +103,6 @@ public class AdaptiveControllerTest extends ControllerTest
         options.put(AdaptiveController.MIN_W, "-10");
         options.put(AdaptiveController.MAX_W, "32");
         options.put(AdaptiveController.INTERVAL_SEC, "120");
-        options.put(AdaptiveController.MIN_TARGET_SIZE_GB, "256");
         options.put(AdaptiveController.GAIN, "0.15");
         options.put(AdaptiveController.MIN_COST, "5");
 
@@ -148,13 +156,13 @@ public class AdaptiveControllerTest extends ControllerTest
     private void testMinSSTableSizeDynamic(long flushSizeBytes1, int minSSTableSizeMB1, long flushSizeBytes2, int minSSTableSizeMB2)
     {
         // create a controller with minSSTableSizeMB set to zero so that it will calculate the min sstable size from the flush size
-        AdaptiveController controller = makeController(0, minTargetSizeGB);
+        AdaptiveController controller = makeController(dataSizeGB, numShards, 0);
 
         when(env.flushSize()).thenReturn(flushSizeBytes1 * 1.0);
-        assertEquals(minSSTableSizeMB1 << 20, controller.getMinSSTableSizeBytes());
+        assertEquals(minSSTableSizeMB1 << 20, controller.getMinSstableSizeBytes());
 
         when(env.flushSize()).thenReturn(flushSizeBytes2 * 1.0);
-        assertEquals(minSSTableSizeMB2 << 20, controller.getMinSSTableSizeBytes());
+        assertEquals(minSSTableSizeMB2 << 20, controller.getMinSstableSizeBytes());
     }
 
 
@@ -188,58 +196,72 @@ public class AdaptiveControllerTest extends ControllerTest
     }
 
     @Test
-    public void testUpdateWithSSTableSize_min() throws InterruptedException
+    public void testUpdateWithSize_min() throws InterruptedException
     {
-        long totSize = (long) minSSTableSizeMB << 20;
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {0, 0, 0});
+        long totSize = (long) sstableSizeMB << 20;
+        testUpdateWithSize(totSize, new double[]{ baseCost, 0, baseCost }, new double[]{ 0, baseCost, baseCost }, new int[]{ 0, 0, 0 });
     }
 
     @Test
-    public void testUpdateWithSSTableSize_2GB() throws InterruptedException
+    public void testUpdateWithSize_1GB() throws InterruptedException
     {
         long totSize = 1L << 31;
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-9, 31, -1});
+        testUpdateWithSize(totSize, new double[]{ baseCost, 0, baseCost }, new double[]{ 0, baseCost, baseCost }, new int[]{ -9, 31, -1 });
     }
 
     @Test
-    public void testUpdateWithSSTableSize_128GB() throws InterruptedException
+    public void testUpdateWithSize_2GB() throws InterruptedException
+    {
+        long totSize = 2L << 31;
+        testUpdateWithSize(totSize, new double[]{ baseCost, 0, baseCost }, new double[]{ 0, baseCost, baseCost }, new int[]{ -5, 44, 1 } );
+    }
+
+    @Test
+    public void testUpdateWithSize_128GB() throws InterruptedException
     {
         long totSize = 1L << 37;
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-8, 39, -1});
+        testUpdateWithSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-8, 39, -1});
     }
 
     @Test
-    public void testUpdateWithSSTableSize_512GB() throws InterruptedException
+    public void testUpdateWithSize_512GB() throws InterruptedException
     {
         long totSize = 1L << 39;
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-7, 63, -1});
+        testUpdateWithSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-7, 63, -1});
     }
 
     @Test
-    public void testUpdateWithSSTableSize_1TB() throws InterruptedException
+    public void testUpdateWithSize_1TB() throws InterruptedException
     {
         long totSize = 1L << 40;
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-7, 25, 1});
+        testUpdateWithSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-7, 25, 1});
     }
 
     @Test
-    public void testUpdateWithSSTableSize_10TB() throws InterruptedException
+    public void testUpdateWithSize_5TB() throws InterruptedException
+    {
+        long totSize = 5 * (1L << 40);
+        testUpdateWithSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-10, 39, -1});
+    }
+
+    @Test
+    public void testUpdateWithSize_10TB() throws InterruptedException
     {
         long totSize = 10 * (1L << 40);
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-8, 46, -1});
+        testUpdateWithSize(totSize, new double[] { baseCost, 0, baseCost}, new double[] { 0, baseCost, baseCost}, new int[] { -8, 46, -1});
     }
 
     @Test
-    public void testUpdateWithSSTableSize_20TB() throws InterruptedException
+    public void testUpdateWithSize_20TB() throws InterruptedException
     {
         long totSize = 20 * (1L << 49);
-        testUpdateWithSSTablesSize(totSize, new double[] {baseCost, 0, baseCost}, new double[] {0, baseCost, baseCost}, new int[] {-8, 40, -1});
+        testUpdateWithSize(totSize, new double[] { baseCost, 0, baseCost}, new double[] { 0, baseCost, baseCost}, new int[] { -8, 40, -1});
     }
 
-    private void testUpdateWithSSTablesSize(long totSize, double[] readCosts, double[] writeCosts, int[] expectedWs) throws InterruptedException
+    private void testUpdateWithSize(long totSize, double[] readCosts, double[] writeCosts, int[] expectedWs) throws InterruptedException
     {
-        int minTargetSizeGB = (int) (totSize << 30);
-        AdaptiveController controller = makeController(minSSTableSizeMB, minTargetSizeGB);
+        int shardSizeGB = (int) (totSize >> 30);
+        AdaptiveController controller = makeController(shardSizeGB, 1, sstableSizeMB); // one unique shard
         controller.startup(strategy, calculator);
 
         assertEquals(readCosts.length, writeCosts.length);

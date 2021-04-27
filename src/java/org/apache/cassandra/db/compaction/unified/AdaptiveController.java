@@ -64,11 +64,7 @@ public class AdaptiveController extends Controller
 
     /** The interval for periodically checking the optimal value for W */
     final static String INTERVAL_SEC = "adaptive_interval_sec";
-    private final static int DEFAULT_INTERVAL_SEC = Integer.getInteger(PREFIX + INTERVAL_SEC, 120);
-
-    /** The minimum data size in GB, it will be assumed that the node will have on disk at least this size of data for each strategy. */
-    final static String MIN_TARGET_SIZE_GB = "adaptive_min_target_size_gb";
-    private final static int DEFAULT_MIN_TARGET_SIZE_GB = Integer.getInteger(PREFIX + MIN_TARGET_SIZE_GB, 256);
+    private final static int DEFAULT_INTERVAL_SEC = Integer.getInteger(PREFIX + INTERVAL_SEC, 300);
 
     /** The gain is a number between 0 and 1 used to determine if a new choice of W is better than the current one */
     final static String GAIN = "adaptive_gain";
@@ -82,7 +78,6 @@ public class AdaptiveController extends Controller
     private final int intervalSec;
     private final int minW;
     private final int maxW;
-    private final int minTargetSizeGB;
     private final double gain;
     private final int minCost;
 
@@ -94,32 +89,31 @@ public class AdaptiveController extends Controller
                               Environment env,
                               int W,
                               double survivalFactor,
-                              long minSSTableSizeMB,
+                              long dataSetSizeMB,
+                              int numShards,
+                              long minSstableSizeMB,
                               int intervalSec,
                               int minW,
                               int maxW,
-                              int minTargetSizeGB,
                               double gain,
                               int minCost)
     {
-        super(timeSource, env, survivalFactor, minSSTableSizeMB);
+        super(timeSource, env, survivalFactor, dataSetSizeMB, numShards, minSstableSizeMB);
 
         this.W = W;
         this.intervalSec = intervalSec;
         this.minW = minW;
         this.maxW = maxW;
-        this.minTargetSizeGB = minTargetSizeGB;
         this.gain = gain;
         this.minCost = minCost;
     }
 
-    static Controller fromOptions(Environment env, double o, long minSSTableSizeMB, Map<String, String> options)
+    static Controller fromOptions(Environment env, double o, long dataSetSizeMB, int numShards, long minSstableSizeMB, Map<String, String> options)
     {
         int W = options.containsKey(STARTING_W) ? Integer.parseInt(options.get(STARTING_W)) : DEFAULT_STARTING_W;
         int minW = options.containsKey(MIN_W) ? Integer.parseInt(options.get(MIN_W)) : DEFAULT_MIN_W;
         int maxW = options.containsKey(MAX_W) ? Integer.parseInt(options.get(MAX_W)) : DEFAULT_MAX_W;
         int intervalSec = options.containsKey(INTERVAL_SEC) ? Integer.parseInt(options.get(INTERVAL_SEC)) : DEFAULT_INTERVAL_SEC;
-        int minTargetSizeGb = options.containsKey(MIN_TARGET_SIZE_GB) ? Integer.parseInt(options.get(MIN_TARGET_SIZE_GB)) : DEFAULT_MIN_TARGET_SIZE_GB;
         double gain = options.containsKey(GAIN) ? Double.parseDouble(options.get(GAIN)) : DEFAULT_GAIN;
         int minCost = options.containsKey(MIN_COST) ? Integer.parseInt(options.get(MIN_COST)) : DEFAULT_MIN_COST;
 
@@ -129,16 +123,13 @@ public class AdaptiveController extends Controller
         if (intervalSec <= 0)
             throw new IllegalArgumentException(String.format("Invalid configuration for interval, it should be positive: %d", intervalSec));
 
-        if (minTargetSizeGb <= 0)
-            throw new IllegalArgumentException(String.format("Invalid configuration for minTargetSizeGb, it should be positive: %d", minTargetSizeGb));
-
         if (gain <= 0 || gain > 1)
             throw new IllegalArgumentException(String.format("Invalid configuration for gain, it should be within (0,1]: %f", gain));
 
         if (minCost <= 0)
             throw new IllegalArgumentException(String.format("Invalid configuration for minCost, it should be positive: %d", minCost));
 
-        return new AdaptiveController(new SystemTimeSource(), env, W, o, minSSTableSizeMB, intervalSec, minW, maxW, minTargetSizeGb, gain, minCost);
+        return new AdaptiveController(new SystemTimeSource(), env, W, o, dataSetSizeMB, numShards, minSstableSizeMB, intervalSec, minW, maxW, gain, minCost);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -147,7 +138,6 @@ public class AdaptiveController extends Controller
         options.remove(MIN_W);
         options.remove(MAX_W);
         options.remove(INTERVAL_SEC);
-        options.remove(MIN_TARGET_SIZE_GB);
         options.remove(GAIN);
         options.remove(MIN_COST);
         return options;
@@ -194,11 +184,6 @@ public class AdaptiveController extends Controller
         return maxW;
     }
 
-    public int getMinTargetSizeGB()
-    {
-        return minTargetSizeGB;
-    }
-
     public double getGain()
     {
         return gain;
@@ -231,14 +216,20 @@ public class AdaptiveController extends Controller
 
     private void maybeUpdate(long now)
     {
-        final long size = Math.max((long) minTargetSizeGB << 30, (long) Math.ceil(calculator.spaceUsed().get()));
-        final double readCost = calculator.getReadCostForQueries(RA(size, W));
-        final double writeCost = calculator.getWriteCostForQueries(WA(size, W));
+        // Each shard will act independently and so our target size of the same as the shard size
+        final long targetSizeMB = shardSizeMB;
+        final long targetSize = Math.max(targetSizeMB << 20, (long) Math.ceil(calculator.spaceUsed().get()));
+
+        final int RA = RA(targetSize, W);
+        final int WA = WA(targetSize, W);
+
+        final double readCost = calculator.getReadCostForQueries(RA);
+        final double writeCost = calculator.getWriteCostForQueries(WA);
         final double cost =  readCost + writeCost;
 
         if (cost <= minCost)
         {
-            logger.debug("Adaptive compaction controller not updated, cost for current W {} is below minimum cost {}: read cost: {}, write cost: {}", W, minCost, readCost, writeCost);
+            logger.debug("Adaptive compaction controller not updated, cost for current W {} is below minimum cost {}: read cost: {}, write cost: {}\\nAverages: {}", W, minCost, readCost, writeCost, calculator);
             return;
         }
 
@@ -251,8 +242,19 @@ public class AdaptiveController extends Controller
         for (int i = minW; i <= maxW; i++)
         {
             final int idx = i - minW;
-            readCosts[idx] = i == W ? readCost : calculator.getReadCostForQueries(RA(size, i));
-            writeCosts[idx] = i == W ? writeCost : calculator.getWriteCostForQueries(WA(size, i));
+            if (i == W)
+            {
+                readCosts[idx] = readCost;
+                writeCosts[idx] = writeCost;
+            }
+            else
+            {
+                final int ra = RA(targetSize, i);
+                final int wa = WA(targetSize, i);
+
+                readCosts[idx] = calculator.getReadCostForQueries(ra);
+                writeCosts[idx] = calculator.getWriteCostForQueries(wa);
+            }
             totCosts[idx] = readCosts[idx] + writeCosts[idx];
             // in case of a tie, for neg.ve Ws we prefer higher Ws (smaller WA), but not for pos.ve Ws we prefer lower Ws (more parallelism)
             if (totCosts[idx] < candCost || (i < 0 && totCosts[idx] == candCost))
@@ -262,8 +264,14 @@ public class AdaptiveController extends Controller
             }
         }
 
-        logger.debug("Min cost: {}, min W: {}\nmin sstable size: {}\nread costs: {}\nwrite costs: {}\ntot costs: {}\nAverages: {}",
-                     candCost, candW, FBUtilities.prettyPrintMemory(getMinSSTableSizeBytes()), Arrays.toString(readCosts), Arrays.toString(writeCosts), Arrays.toString(totCosts), calculator);
+        logger.debug("Min cost: {}, min W: {}, min sstable size: {}\nread costs: {}\nwrite costs: {}\ntot costs: {}\nAverages: {}",
+                     candCost,
+                     candW,
+                     FBUtilities.prettyPrintMemory(getMinSstableSizeBytes()),
+                     Arrays.toString(readCosts),
+                     Arrays.toString(writeCosts),
+                     Arrays.toString(totCosts),
+                     calculator);
 
         StringBuilder str = new StringBuilder(100);
         str.append("Adaptive compaction controller ");
@@ -278,7 +286,7 @@ public class AdaptiveController extends Controller
             str.append("unchanged");
         }
 
-        str.append(", data size: ").append(FBUtilities.prettyPrintMemory(size));
+        str.append(", data size: ").append(FBUtilities.prettyPrintMemory(targetSize));
         str.append(", query cost: ").append(cost);
         str.append(", new query cost: ").append(candCost);
         str.append(", took ").append(TimeUnit.NANOSECONDS.toMicros(timeSource.nanoTime() - now)).append(" us");
@@ -289,6 +297,6 @@ public class AdaptiveController extends Controller
     @Override
     public String toString()
     {
-        return String.format("m: %d, o: %f, W: %d - %s", minSSTableSizeMB, survivalFactor, W, calculator);
+        return String.format("m: %d, o: %f, W: %d - %s", minSstableSizeMB, survivalFactor, W, calculator);
     }
 }
