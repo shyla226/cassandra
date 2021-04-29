@@ -19,19 +19,11 @@
 package org.apache.cassandra.guardrails;
 
 
-import java.util.Collections;
-import java.util.Set;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.InvalidQueryException;
-import org.apache.cassandra.config.DatabaseDescriptor;
-
 import static java.lang.String.format;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
 public class GuardrailMaterializedViewsPerTableTest extends GuardrailTester
@@ -40,13 +32,13 @@ public class GuardrailMaterializedViewsPerTableTest extends GuardrailTester
     private static final String CREATE_VIEW = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
                                               "WHERE k is NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)";
 
-    private Long defaultMVPerTableFailureThreshold;
+    private int defaultMVPerTableFailureThreshold;
 
     @Before
     public void before()
     {
         defaultMVPerTableFailureThreshold = config().materialized_view_per_table_failure_threshold;
-        config().materialized_view_per_table_failure_threshold = 1L;
+        config().materialized_view_per_table_failure_threshold = 1;
 
         createTable(CREATE_TABLE);
     }
