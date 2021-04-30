@@ -76,7 +76,7 @@ class BKDQueries
         byte[] buffer = new byte[TypeUtil.fixedSizeOf(type)];
         //assert buffer.length == bytesPerDim * numDim;
         TypeUtil.toComparableBytes(value, type, buffer);
-        System.arraycopy(buffer, 0, buffer, 1, buffer.length - 1); // move the bytes up one
+        //System.arraycopy(buffer, 0, buffer, 1, buffer.length - 1); // move the bytes up one
         return buffer;
     }
 
