@@ -85,7 +85,42 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.maxTermSize = columnContext.isFrozenCollection() ? MAX_FROZEN_COLLECTION_TERM_SIZE : MAX_STRING_TERM_SIZE;
+    }
 
+    @Override
+    public SortedRow.SortedRowFactory sortedRowFactory()
+    {
+        return columnContext.sortedRowFactory();
+    }
+
+    @Override
+    public IndexComponents indexComponents()
+    {
+        return indexComponents;
+    }
+
+    @Override
+    public Descriptor descriptor()
+    {
+        return descriptor;
+    }
+
+    @Override
+    public boolean isLiteral()
+    {
+        return TypeUtil.isLiteral(columnContext.getValidator());
+    }
+
+    @Override
+    public String indexName()
+    {
+        return columnContext.getIndexName();
+    }
+
+    @Override
+    public String columnName()
+    {
+        return columnContext.getColumnName();
     }
 
     @Override

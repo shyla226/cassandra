@@ -22,11 +22,11 @@ import java.io.IOException;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.utils.LongArray;
-import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.CorruptIndexException;
@@ -50,12 +50,26 @@ public class BlockPackedReader implements LongArray.Factory
     private final long[] blockOffsets;
     private final long[] minValues;
 
-    public BlockPackedReader(FileHandle file, Component component, IndexComponents components, MetadataSource source) throws IOException
+    public BlockPackedReader(FileHandle file, SortedRow.SortedRowFactory keyFactory, IndexComponents components, MetadataSource source) throws IOException
     {
-        this(file, components, new NumericValuesMeta(source.get(component.name())));
+        this(file, components, init(source, keyFactory));
+
+        //meta.get(IndexComponents.NDIType.KD_TREE_ROW_ORDINALS.name());
+        //this(file, components, new NumericValuesMeta(source.get(IndexComponents.NDIType.KD_TREE_ROW_ORDINALS.name())));
     }
 
-    @SuppressWarnings("resource")
+    public static NumericValuesMeta init(MetadataSource source, SortedRow.SortedRowFactory keyFactory) throws IOException
+    {
+        SegmentMetadata segmentMeta = SegmentMetadata.load(source, keyFactory, null);
+        SegmentMetadata.ComponentMetadata componentMetadata = segmentMeta.componentMetadatas.get(IndexComponents.NDIType.KD_TREE_ROW_ORDINALS);
+
+        long count = Long.parseLong(componentMetadata.attributes.get("count"));
+        int blockSize = Integer.parseInt(componentMetadata.attributes.get("blockSize"));
+
+        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(count, blockSize, componentMetadata.root);
+        return numericValuesMeta;
+    }
+
     public BlockPackedReader(FileHandle file, IndexComponents components, NumericValuesMeta meta) throws IOException
     {
         this.components = components;
@@ -73,7 +87,7 @@ public class BlockPackedReader implements LongArray.Factory
         try (final RandomAccessReader reader = this.file.createReader())
         {
             final IndexInputReader in = IndexInputReader.create(reader);
-            SAICodecUtils.validate(in);
+            //SAICodecUtils.validate(in);
             in.seek(meta.blockMetaOffset);
 
             for (int i = 0; i < numBlocks; ++i)

@@ -70,6 +70,7 @@ public class IndexComponents
     public static final String TYPE_PREFIX = "SAI";
     private static final String PER_SSTABLE_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s.db";
     public static final String PER_COLUMN_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s_%s.db";
+    public static final String PER_COLUMN_FILE_SUFFIX_NAME_FORMAT = TYPE_PREFIX + "_%s_%s_%s.db";
 
     public static class IndexComponent extends Component
     {
@@ -192,6 +193,14 @@ public class IndexComponents
             return new IndexComponent(this, componentName);
         }
 
+        public IndexComponent newComponent(String indexName, String suffix)
+        {
+            assert !perSSTable;
+            String componentName = String.format(PER_COLUMN_FILE_SUFFIX_NAME_FORMAT, indexName, name, suffix);
+
+            return new IndexComponent(this, componentName);
+        }
+
         @Override
         public String toString()
         {
@@ -223,7 +232,7 @@ public class IndexComponents
      */
     public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, PRIMARY_KEYS, GROUP_META);
 
-    public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, kdTreeRowOrdinals, columnCompletionMarker;
+    public final IndexComponent kdTreeOrderMaps, termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, kdTreeRowOrdinals, columnCompletionMarker;
 
     private static final SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
                                                                                             .trickleFsync(DatabaseDescriptor.getTrickleFsync())
@@ -259,6 +268,7 @@ public class IndexComponents
         kdTree = NDIType.KD_TREE.newComponent(indexName);
         kdTreePostingLists = NDIType.KD_TREE_POSTING_LISTS.newComponent(indexName);
         kdTreeRowOrdinals = NDIType.KD_TREE_ROW_ORDINALS.newComponent(indexName);
+        kdTreeOrderMaps = NDIType.KD_TREE_ORDER_MAPS.newComponent(indexName);
         columnCompletionMarker = NDIType.COLUMN_COMPLETION_MARKER.newComponent(indexName);
     }
 
@@ -415,7 +425,7 @@ public class IndexComponents
 
     public FileHandle createFileHandle(IndexComponent component, boolean temporary)
     {
-        final File file = temporary ? descriptor.tmpFileFor(component) : descriptor.fileFor(component);
+        File file = temporary ? descriptor.tmpFileFor(component) : descriptor.fileFor(component);
 
         if (logger.isTraceEnabled())
         {
@@ -504,12 +514,14 @@ public class IndexComponents
 
     public IndexOutputWriter createOutput(IndexComponent component, boolean append, boolean temporary) throws IOException
     {
-        final File file = temporary ? descriptor.tmpFileFor(component) : descriptor.fileFor(component);
+        File file = temporary ? descriptor.tmpFileFor(component) : descriptor.fileFor(component);
+
+        System.out.println("createOutput file="+file.getAbsolutePath());
 
         if (logger.isTraceEnabled())
             logger.trace(logMessage("Creating {} sstable attached index output for component {} on file {}..."), temporary ? "temporary" : "", component, file);
 
-        IndexOutputWriter writer = createOutput(file, component.ndiType.encryptable());
+        final IndexOutputWriter writer = createOutput(file, component.ndiType.encryptable());
 
         if (append)
         {

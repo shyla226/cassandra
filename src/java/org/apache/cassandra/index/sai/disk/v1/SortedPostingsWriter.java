@@ -40,7 +40,7 @@ public class SortedPostingsWriter
 
     private final BKDReader reader;
 
-    SortedPostingsWriter(BKDReader reader)
+    public SortedPostingsWriter(BKDReader reader)
     {
         this.reader = reader;
     }

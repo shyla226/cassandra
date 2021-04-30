@@ -19,6 +19,8 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 
+import com.google.common.base.MoreObjects;
+
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 
@@ -33,6 +35,18 @@ public class NumericValuesMeta
         valueCount = input.readLong();
         blockSize = input.readInt();
         blockMetaOffset = input.readVLong();
+
+        System.out.println(toString());
+    }
+
+    @Override
+    public String toString()
+    {
+        return MoreObjects.toStringHelper(this)
+                          .add("valueCount", valueCount)
+                          .add("blockSize", blockSize)
+                          .add("blockMetaOffset", blockMetaOffset)
+                          .toString();
     }
 
     public NumericValuesMeta(long valueCount, int blockSize, long blockMetaOffset)

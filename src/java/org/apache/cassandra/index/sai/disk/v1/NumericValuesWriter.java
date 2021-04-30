@@ -45,15 +45,15 @@ public class NumericValuesWriter implements Closeable
     {
         this(component, indexOutput, metadataWriter, monotonic, monotonic ? MONOTONIC_BLOCK_SIZE : BLOCK_SIZE);
     }
-
-    NumericValuesWriter(IndexComponents.IndexComponent component,
-                        IndexComponents indexComponents,
-                        MetadataWriter metadataWriter,
-                        boolean monotonic,
-                        int blockSize) throws IOException
-    {
-        this(component, indexComponents.createOutput(component), metadataWriter, monotonic, blockSize);
-    }
+//  TODO: unused
+//    NumericValuesWriter(IndexComponents.IndexComponent component,
+//                        IndexComponents indexComponents,
+//                        MetadataWriter metadataWriter,
+//                        boolean monotonic,
+//                        int blockSize) throws IOException
+//    {
+//        this(component, indexComponents.createOutput(component), metadataWriter, monotonic, blockSize);
+//    }
 
     private NumericValuesWriter(Component component,
                                 IndexOutput indexOutput,
@@ -72,6 +72,7 @@ public class NumericValuesWriter implements Closeable
     @Override
     public void close() throws IOException
     {
+        System.out.println("component.name="+component.name);
         try (IndexOutput o = metadataWriter.builder(component.name))
         {
             final long fp = writer.finish();

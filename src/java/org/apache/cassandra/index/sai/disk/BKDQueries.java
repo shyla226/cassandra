@@ -74,8 +74,9 @@ class BKDQueries
     private static byte[] toComparableBytes(int numDim, int bytesPerDim, ByteBuffer value, AbstractType<?> type)
     {
         byte[] buffer = new byte[TypeUtil.fixedSizeOf(type)];
-        assert buffer.length == bytesPerDim * numDim;
+        //assert buffer.length == bytesPerDim * numDim;
         TypeUtil.toComparableBytes(value, type, buffer);
+        System.arraycopy(buffer, 0, buffer, 1, buffer.length - 1); // move the bytes up one
         return buffer;
     }
 
@@ -92,8 +93,8 @@ class BKDQueries
 
         int compareUnsigned(byte[] packedValue, int dim, Bound bound)
         {
-            final int offset = dim * bytesPerDim;
-            return FutureArrays.compareUnsigned(packedValue, offset, offset + bytesPerDim, bound.bound, offset, offset + bytesPerDim);
+            final int offset = dim * (bytesPerDim - 1);
+            return FutureArrays.compareUnsigned(packedValue, offset, offset + (bytesPerDim - 1), bound.bound, offset, offset + (bytesPerDim - 1));
         }
     }
 

@@ -118,7 +118,6 @@ public class SortedRow implements Comparable<SortedRow>
         public SortedRow createKey(byte[] sortedValue, byte[] bytes)
         {
             return createKeyFromPeekable(sortedValue, ByteSource.peekable(ByteSource.fixedLength(bytes)), -1);
-            //return createKeyFromPeekable(ByteSource.peekable(ByteSource.fixedLength(bytes)), -1);
         }
 
         @VisibleForTesting

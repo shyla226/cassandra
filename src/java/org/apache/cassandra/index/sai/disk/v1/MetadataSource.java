@@ -40,6 +40,8 @@ public class MetadataSource
     {
         this.version = version;
         this.components = components;
+
+        System.out.println("MetadataSource="+components);
     }
 
     public static MetadataSource loadGroupMetadata(IndexComponents components) throws IOException

@@ -36,8 +36,6 @@ import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 
 /**
  * Specialized writer for 1-dim point values, that builds them into a BKD tree with auxiliary posting lists on eligible
@@ -202,24 +200,41 @@ public class NumericIndexWriter implements Closeable
 
         if (config != null)
         {
-            try (TraversingBKDReader reader = new TraversingBKDReader(indexComponents, indexComponents.createFileHandle(indexComponents.kdTree, segmented), bkdPosition);
-                 IndexOutput postingsOutput = indexComponents.createOutput(indexComponents.kdTreePostingLists, true, segmented))
-            {
-                final long postingsOffset = postingsOutput.getFilePointer();
+            //try (TraversingBKDReader reader = new TraversingBKDReader(indexComponents, indexComponents.createFileHandle(indexComponents.kdTree, segmented), bkdPosition);
+//            try (BKDReader reader = new BKDReader(indexComponents,
+//                                                  indexComponents.createFileHandle(indexComponents.kdTree, segmented),
+//                                                  bkdPosition);
+            TraversingBKDReader reader = new TraversingBKDReader(indexComponents, indexComponents.createFileHandle(indexComponents.kdTree, segmented), bkdPosition);
+            IndexOutput postingsOutput = indexComponents.createOutput(indexComponents.kdTreePostingLists, true, segmented);
+            final long postingsOffset = postingsOutput.getFilePointer();
 
-                final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, indexComponents);
-                reader.traverse(postingsWriter);
+            final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, indexComponents);
+            reader.traverse(postingsWriter);
 
-                // The kd-tree postings writer already writes its own header & footer.
-                final long postingsPosition = postingsWriter.finish(postingsOutput);
+            // The kd-tree postings writer already writes its own header & footer.
+            final long postingsPosition = postingsWriter.finish(postingsOutput);
 
-                Map<String, String> attributes = new LinkedHashMap<>();
-                attributes.put("num_leaf_postings", Integer.toString(postingsWriter.numLeafPostings));
-                attributes.put("num_non_leaf_postings", Integer.toString(postingsWriter.numNonLeafPostings));
+            Map<String, String> attributes = new LinkedHashMap<>();
+            attributes.put("num_leaf_postings", Integer.toString(postingsWriter.numLeafPostings));
+            attributes.put("num_non_leaf_postings", Integer.toString(postingsWriter.numNonLeafPostings));
 
-                long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
-                components.put(IndexComponents.NDIType.KD_TREE_POSTING_LISTS, postingsPosition, postingsOffset, postingsLength, attributes);
-            }
+            long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
+            components.put(IndexComponents.NDIType.KD_TREE_POSTING_LISTS, postingsPosition, postingsOffset, postingsLength, attributes);
+
+            reader.close();
+            postingsOutput.close();
+
+            BKDReader reader2 = new BKDReader(indexComponents,
+                                              indexComponents.createFileHandle(indexComponents.kdTree, segmented),
+                                              bkdPosition,
+                                              indexComponents.createFileHandle(indexComponents.kdTreePostingLists, segmented),
+                                              postingsPosition,
+                                              null);
+
+            final BKDRowOrdinalsWriter rowOrdinalsWriter = new BKDRowOrdinalsWriter(reader2,
+                                                                                    indexComponents,
+                                                                                    components);
+            reader2.close();
         }
 
         return components;

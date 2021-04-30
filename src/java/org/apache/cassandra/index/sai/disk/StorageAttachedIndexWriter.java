@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -34,11 +36,23 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.v1.BKDReader;
+import org.apache.cassandra.index.sai.disk.v1.BKDRowOrdinalsWriter;
+import org.apache.cassandra.index.sai.disk.v1.BlockPackedReader;
+import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
+import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
+import org.apache.cassandra.index.sai.disk.v1.SortedPostingsWriter;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
 
 /**
  * Writes all on-disk index structures attached to a given SSTable.
@@ -180,15 +194,135 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
             rowMapping.complete();
 
+            final Map<String,IndexComponents> indexNames = new LinkedHashMap<>();
+            final Map<String,SortedRow.SortedRowFactory> sortedRowFactories = new LinkedHashMap<>();
+
             for (ColumnIndexWriter columnIndexWriter : columnIndexWriters)
             {
                 columnIndexWriter.flush();
+
+                if (!columnIndexWriter.isLiteral()) // only add the index name if it's a string
+                {
+                    String indexName = columnIndexWriter.indexName();
+                    SortedRow.SortedRowFactory sortedRowFactory = columnIndexWriter.sortedRowFactory();
+
+                    assert sortedRowFactory != null;
+
+                    sortedRowFactories.put(indexName, sortedRowFactory);
+                    indexNames.put(indexName, columnIndexWriter.indexComponents());
+                }
+            }
+
+            for (Map.Entry<String,IndexComponents> indexName : indexNames.entrySet())
+            {
+                //final IndexComponents indexComponents = IndexComponents.create(indexName.getKey(), indexName.getValue(), null);
+                final IndexComponents indexComponents = indexName.getValue();
+                final MetadataSource source = MetadataSource.loadColumnMetadata(indexComponents);
+
+//                for (String indexName2 : indexNames)
+//                {
+                for (Map.Entry<String,IndexComponents> indexName2 : indexNames.entrySet())
+                {
+                    //if (indexName.equals(indexName2)) continue;
+
+                    //final IndexComponents indexComponents2 = IndexComponents.create(indexName2.getKey(), indexName2.getValue(), null);
+
+                    final IndexComponents indexComponents2 = indexName2.getValue();
+
+                    SortedRow.SortedRowFactory sortedRowFactory = sortedRowFactories.get(indexName.getKey());
+
+                    assert sortedRowFactory != null;
+
+                    final BlockPackedReader rowIDToPointIDReader = BKDRowOrdinalsWriter.openReader(indexComponents, source, sortedRowFactory);
+                    final LongArray rowIDToPointIDMap = rowIDToPointIDReader.open();
+
+                    final FileHandle kdTreeFile2 = indexComponents.createFileHandle(indexComponents2.kdTree);
+                    final FileHandle kdTreePostingsFile2 = indexComponents.createFileHandle(indexComponents2.kdTreePostingLists);
+
+                    final MetadataSource source2 = MetadataSource.loadColumnMetadata(indexComponents2);
+
+                    SegmentMetadata metadata2 = SegmentMetadata.load(source2, SortedRow.factory(), null);
+
+                    long kdTreeIndexRoot2 = metadata2.getIndexRoot(indexComponents.kdTree);
+                    final long postingsPosition = metadata2.getIndexRoot(indexComponents.kdTreePostingLists);
+
+
+//                    final BKDReader bkdReader2 = new BKDReader(indexComponents2,
+//                                                               kdTreeFile2,
+//                                                               kdTreeIndexRoot2);
+
+                    final BKDReader bkdReader2 = new BKDReader(indexComponents2,
+                                                               kdTreeFile2,
+                                                               kdTreeIndexRoot2,
+                                                               kdTreePostingsFile2,
+                                                               postingsPosition,
+                    null);
+
+                    String suffix = "sorted_"+indexName2.getKey()+"_asc";
+
+                    IndexComponents.IndexComponent kdTreeOrderMapComp = indexComponents2.kdTreeOrderMaps.ndiType.newComponent(suffix);
+                    IndexComponents.IndexComponent kdTreePostingsComp = indexComponents2.kdTreePostingLists.ndiType.newComponent(suffix);
+
+                    IndexOutputWriter sortedOrderMapOut = indexComponents2.createOutput(kdTreeOrderMapComp);
+
+                    final SortedPostingsWriter sortedPostingsWriter = new SortedPostingsWriter(bkdReader2);
+
+                    final long postingsIndexFilePointer = sortedPostingsWriter.finish(() -> {
+                                                                                          try
+                                                                                          {
+                                                                                              return indexComponents2.createOutput(kdTreePostingsComp);
+                                                                                          }
+                                                                                          catch (Exception ex)
+                                                                                          {
+                                                                                              throw new RuntimeException(ex);
+                                                                                          }
+                                                                                      },
+                                                                                      sortedOrderMapOut,
+                                                                                      () -> {
+                                                                                          FileHandle handle = indexComponents2.createFileHandle(kdTreePostingsComp);
+                                                                                          return indexComponents2.openInput(handle);
+                                                                                      },
+                                                                                      (rowID -> rowIDToPointIDMap.get(rowID)));
+                    rowIDToPointIDMap.close();
+                    sortedOrderMapOut.close();
+
+                    bkdReader2.close();
+
+                    IndexComponents.IndexComponent metaComp2 = indexComponents2.meta.ndiType.newComponent(suffix);
+                    MetadataWriter metaWriter = new MetadataWriter(indexComponents2.createOutput(metaComp2));
+
+                    MetadataWriter.Builder builder = metaWriter.builder(kdTreePostingsComp.name);
+                    SortedPostingsMeta meta = new SortedPostingsMeta(postingsIndexFilePointer);
+                    meta.write(builder);
+                    builder.close();
+                    metaWriter.close();
+                }
             }
         }
         catch (Throwable t)
         {
             logger.error(logMessage("Failed to complete an index build"), t);
             abort(t, true);
+        }
+    }
+
+    public static class SortedPostingsMeta
+    {
+        public final long postingsIndexFilePointer;
+
+        public SortedPostingsMeta(IndexInput input) throws IOException
+        {
+            postingsIndexFilePointer = input.readLong();
+        }
+
+        public SortedPostingsMeta(long postingsIndexFilePointer)
+        {
+            this.postingsIndexFilePointer = postingsIndexFilePointer;
+        }
+
+        public void write(IndexOutput out) throws IOException
+        {
+            out.writeLong(postingsIndexFilePointer);
         }
     }
 

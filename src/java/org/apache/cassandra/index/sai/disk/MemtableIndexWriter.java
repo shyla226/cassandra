@@ -73,6 +73,42 @@ public class MemtableIndexWriter implements ColumnIndexWriter
     }
 
     @Override
+    public SortedRow.SortedRowFactory sortedRowFactory()
+    {
+        return context.sortedRowFactory();
+    }
+
+    @Override
+    public IndexComponents indexComponents()
+    {
+        return indexComponents;
+    }
+
+    @Override
+    public Descriptor descriptor()
+    {
+        return descriptor;
+    }
+
+    @Override
+    public boolean isLiteral()
+    {
+        return TypeUtil.isLiteral(context.getValidator());
+    }
+
+    @Override
+    public String indexName()
+    {
+        return context.getIndexName();
+    }
+
+    @Override
+    public String columnName()
+    {
+        return context.getColumnName();
+    }
+
+    @Override
     public void addRow(SortedRow rowKey, Row row)
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary

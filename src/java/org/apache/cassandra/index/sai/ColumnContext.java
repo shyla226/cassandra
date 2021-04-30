@@ -166,6 +166,11 @@ public class ColumnContext
         this.sortedRowFactory = SortedRow.immutableFactory(table);
     }
 
+    public SortedRow.SortedRowFactory sortedRowFactory()
+    {
+        return sortedRowFactory;
+    }
+
     public AbstractType<?> keyValidator()
     {
         return partitionKeyType;

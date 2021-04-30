@@ -92,6 +92,33 @@ public class KDTreeIndexSearcher extends IndexSearcher
         }
     }
 
+    @SuppressWarnings("resource")
+    public List<RangeIterator> search(Expression exp, SSTableQueryContext context, String sortColumn)
+    {
+        if (logger.isTraceEnabled())
+            logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
+
+        if (exp.getOp().isEqualityOrRange())
+        {
+            final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
+            QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
+
+//            List<PostingList.PeekablePostingList> postingList = bkdReader.intersect(query,
+//                                listener,
+//                                context,
+//                                sortColumn,
+//                                BKDReader.SortedPostingInputs sortedPostingInputs);
+
+            List<PostingList.PeekablePostingList> postingList = bkdReader.intersect(query, listener, context.queryContext);
+
+            return toIterators(postingList, context);
+        }
+        else
+        {
+            throw new IllegalArgumentException(indexComponents.logMessage(indexComponents.logMessage("Unsupported expression during index query: " + exp)));
+        }
+    }
+
     public static int openPerIndexFiles()
     {
         return BKDReader.openPerIndexFiles();

@@ -11,8 +11,10 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Charsets;
 import com.google.common.base.MoreObjects;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -21,8 +23,10 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
 
@@ -31,6 +35,34 @@ import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_B
 
 public class SortedPostingsTest extends NdiRandomizedTest
 {
+    @Test
+    public void testFileSuffix() throws Exception
+    {
+        TemporaryFolder temporaryFolder = new TemporaryFolder();
+        temporaryFolder.create();
+
+        String indexName = "test";
+        String suffix = "sorted_indexNameForColA_asc";
+
+        IndexComponents components = IndexComponents.create(indexName, new Descriptor(temporaryFolder.newFolder(), "test", "test", 20), null);
+
+        IndexComponents.IndexComponent comp = IndexComponents.NDIType.KD_TREE_POSTING_LISTS.newComponent(indexName, suffix);
+        IndexOutput out = components.createOutput(comp);
+        byte[] bytes = "hello world".getBytes(Charsets.UTF_8);
+        out.writeBytes(bytes, bytes.length);
+        out.close();
+
+        FileHandle handle = components.createFileHandle(comp, false);
+        System.out.println("path="+handle.path());
+
+//        IndexOutput out = components.createOutput(components.kdTreePostingLists, true, false, suffix);
+//        byte[] bytes = "hello world".getBytes(Charsets.UTF_8);
+//        out.writeBytes(bytes, bytes.length);
+//        out.close();
+//        FileHandle handle = components.createFileHandle(components.kdTreePostingLists, false, suffix);
+//        System.out.println("path="+handle.path());
+    }
+
     public static class Row
     {
         public final long rowID;
@@ -181,7 +213,7 @@ public class SortedPostingsTest extends NdiRandomizedTest
 //            bkdPostingsInput.close();
 //        }
 
-        final BlockPackedReader rowIDToPointIDReader = BKDRowOrdinalsWriter.openReader(reader.indexComponents, MetadataSource.loadColumnMetadata(reader.indexComponents));
+        final BlockPackedReader rowIDToPointIDReader = BKDRowOrdinalsWriter.openReader(reader.indexComponents, MetadataSource.loadColumnMetadata(reader.indexComponents), null);
         final LongArray rowIDToPointIDMap = rowIDToPointIDReader.open();
 
         BKDReader reader2 = create(1, rows);

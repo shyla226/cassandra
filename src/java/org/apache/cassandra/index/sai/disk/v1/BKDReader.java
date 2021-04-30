@@ -616,6 +616,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final IntersectVisitor visitor;
         private byte[] scratch = new byte[bytesPerDim - 1];
         private byte[] scratch2 = new byte[bytesPerDim - 1];
+//        private byte[] scratch = new byte[bytesPerDim];
+//        private byte[] scratch2 = new byte[bytesPerDim];
 
         public ExtendedBytesIntersectVisitor(IntersectVisitor visitor)
         {
@@ -625,15 +627,19 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         @Override
         public boolean visit(byte[] packedValue)
         {
-            System.arraycopy(packedValue, 1, scratch, 0, scratch.length);
+            if (packedValue.length > scratch.length)
+              System.arraycopy(packedValue, 1, scratch, 0, scratch.length);
             return visitor.visit(scratch);
         }
 
         @Override
         public Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
         {
-            System.arraycopy(minPackedValue, 1, scratch, 0, scratch.length);
-            System.arraycopy(maxPackedValue, 1, scratch2, 0, scratch.length);
+            if (minPackedValue.length > scratch.length)
+              System.arraycopy(minPackedValue, 1, scratch, 0, scratch.length);
+            if (maxPackedValue.length > scratch2.length)
+              System.arraycopy(maxPackedValue, 1, scratch2, 0, scratch.length);
+
             return visitor.compare(scratch, scratch2);
         }
     }

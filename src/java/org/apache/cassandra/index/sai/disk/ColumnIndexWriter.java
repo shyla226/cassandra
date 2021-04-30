@@ -20,13 +20,27 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.utils.SortedRow;
+import org.apache.cassandra.io.sstable.Descriptor;
 
 /**
  * Creates an on-disk index for a given column.
  */
 public interface ColumnIndexWriter
 {
+    boolean isLiteral();
+
+    SortedRow.SortedRowFactory sortedRowFactory();
+
+    IndexComponents indexComponents();
+
+    Descriptor descriptor();
+
+    String indexName();
+
+    String columnName();
+
     /**
      * Adds a row to this index.
      */
