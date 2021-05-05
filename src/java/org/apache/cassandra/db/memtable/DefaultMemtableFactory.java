@@ -18,12 +18,51 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.schema.TableMetadataRef;
+
 /**
  * This class exists solely to avoid initialization of the default memtable class.
  * Some tests want to setup table parameters before initializing DatabaseDescriptor -- this allows them to do so.
  */
-public class DefaultMemtableFactory
+public class DefaultMemtableFactory implements Memtable.Factory
 {
-    // We can't use SkipListMemtable.FACTORY as that requires DatabaseDescriptor to have been initialized.
-    public static final Memtable.Factory INSTANCE = SkipListMemtable::new;
+    @Override
+    public Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadaRef, Memtable.Owner owner)
+    {
+        return SkipListMemtable.FACTORY.create(commitLogLowerBound, metadaRef, owner);
+    }
+
+    @Override
+    public boolean writesShouldSkipCommitLog()
+    {
+        return SkipListMemtable.FACTORY.writesShouldSkipCommitLog();
+    }
+
+    @Override
+    public boolean writesAreDurable()
+    {
+        return SkipListMemtable.FACTORY.writesAreDurable();
+    }
+
+    @Override
+    public boolean streamToMemtable()
+    {
+        return SkipListMemtable.FACTORY.streamToMemtable();
+    }
+
+    @Override
+    public boolean streamFromMemtable()
+    {
+        return SkipListMemtable.FACTORY.streamFromMemtable();
+    }
+
+    @Override
+    public TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
+    {
+        return SkipListMemtable.FACTORY.createMemtableMetrics(metadataRef);
+    }
 }
