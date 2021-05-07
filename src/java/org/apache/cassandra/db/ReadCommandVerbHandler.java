@@ -24,12 +24,14 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
@@ -37,6 +39,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 {
     public static final ReadCommandVerbHandler instance = new ReadCommandVerbHandler();
 
+    private static InetAddressAndPort local = FBUtilities.getBroadcastAddressAndPort();
     private static final Logger logger = LoggerFactory.getLogger(ReadCommandVerbHandler.class);
 
     public void doVerb(Message<ReadCommand> message)
