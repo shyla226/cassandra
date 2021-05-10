@@ -18,6 +18,8 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -44,6 +46,11 @@ public class MetadataSource
         System.out.println("MetadataSource="+components);
     }
 
+    public Collection<String> names()
+    {
+        return new ArrayList(components.keySet());
+    }
+
     public static MetadataSource loadGroupMetadata(IndexComponents components) throws IOException
     {
         return MetadataSource.load(components.openBlockingInput(IndexComponents.GROUP_META));
@@ -54,7 +61,7 @@ public class MetadataSource
         return MetadataSource.load(components.openBlockingInput(components.meta));
     }
 
-    private static MetadataSource load(IndexInput indexInput) throws IOException
+    public static MetadataSource load(IndexInput indexInput) throws IOException
     {
         Map<String, BytesRef> components = new HashMap<>();
         Version version;

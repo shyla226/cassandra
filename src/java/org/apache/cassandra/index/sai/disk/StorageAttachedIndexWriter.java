@@ -215,18 +215,11 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
             for (Map.Entry<String,IndexComponents> indexName : indexNames.entrySet())
             {
-                //final IndexComponents indexComponents = IndexComponents.create(indexName.getKey(), indexName.getValue(), null);
                 final IndexComponents indexComponents = indexName.getValue();
                 final MetadataSource source = MetadataSource.loadColumnMetadata(indexComponents);
 
-//                for (String indexName2 : indexNames)
-//                {
                 for (Map.Entry<String,IndexComponents> indexName2 : indexNames.entrySet())
                 {
-                    //if (indexName.equals(indexName2)) continue;
-
-                    //final IndexComponents indexComponents2 = IndexComponents.create(indexName2.getKey(), indexName2.getValue(), null);
-
                     final IndexComponents indexComponents2 = indexName2.getValue();
 
                     SortedRow.SortedRowFactory sortedRowFactory = sortedRowFactories.get(indexName.getKey());
@@ -246,11 +239,6 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                     long kdTreeIndexRoot2 = metadata2.getIndexRoot(indexComponents.kdTree);
                     final long postingsPosition = metadata2.getIndexRoot(indexComponents.kdTreePostingLists);
 
-
-//                    final BKDReader bkdReader2 = new BKDReader(indexComponents2,
-//                                                               kdTreeFile2,
-//                                                               kdTreeIndexRoot2);
-
                     final BKDReader bkdReader2 = new BKDReader(indexComponents2,
                                                                kdTreeFile2,
                                                                kdTreeIndexRoot2,
@@ -260,17 +248,17 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
                     String suffix = "sorted_"+indexName2.getKey()+"_asc";
 
-                    IndexComponents.IndexComponent kdTreeOrderMapComp = indexComponents2.kdTreeOrderMaps.ndiType.newComponent(suffix);
-                    IndexComponents.IndexComponent kdTreePostingsComp = indexComponents2.kdTreePostingLists.ndiType.newComponent(suffix);
+                    IndexComponents.IndexComponent kdTreeOrderMapComp = indexComponents.kdTreeOrderMaps.ndiType.newComponent(indexName.getKey(), suffix);
+                    IndexComponents.IndexComponent kdTreePostingsComp = indexComponents.kdTreePostingLists.ndiType.newComponent(indexName.getKey(), suffix);
 
-                    IndexOutputWriter sortedOrderMapOut = indexComponents2.createOutput(kdTreeOrderMapComp);
+                    IndexOutputWriter sortedOrderMapOut = indexComponents.createOutput(kdTreeOrderMapComp);
 
                     final SortedPostingsWriter sortedPostingsWriter = new SortedPostingsWriter(bkdReader2);
 
                     final long postingsIndexFilePointer = sortedPostingsWriter.finish(() -> {
                                                                                           try
                                                                                           {
-                                                                                              return indexComponents2.createOutput(kdTreePostingsComp);
+                                                                                              return indexComponents.createOutput(kdTreePostingsComp);
                                                                                           }
                                                                                           catch (Exception ex)
                                                                                           {
@@ -288,10 +276,10 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
                     bkdReader2.close();
 
-                    IndexComponents.IndexComponent metaComp2 = indexComponents2.meta.ndiType.newComponent(suffix);
-                    MetadataWriter metaWriter = new MetadataWriter(indexComponents2.createOutput(metaComp2));
+                    IndexComponents.IndexComponent metaComp2 = indexComponents.meta.ndiType.newComponent(indexName.getKey(), suffix);
+                    MetadataWriter metaWriter = new MetadataWriter(indexComponents.createOutput(metaComp2));
 
-                    MetadataWriter.Builder builder = metaWriter.builder(kdTreePostingsComp.name);
+                    MetadataWriter.Builder builder = metaWriter.builder("sortedPostingsMeta");
                     SortedPostingsMeta meta = new SortedPostingsMeta(postingsIndexFilePointer);
                     meta.write(builder);
                     builder.close();

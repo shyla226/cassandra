@@ -18,10 +18,12 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -59,6 +62,7 @@ import org.apache.lucene.util.FutureArrays;
 import org.apache.lucene.util.packed.DirectWriter;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
+import org.assertj.core.util.Lists;
 
 /**
  * Handles intersection of a multi-dimensional shape in byte[] space with a block KD-tree previously written with
@@ -78,7 +82,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
     private final PackedLongValues filePointers;
 
     public static final String DEFAULT_POSTING_INDEX = "DEFAULT_POSTING_INDEX";
-    final Map<String,SortedPostingsIndex> postingIndexMap = new HashMap();
+    public final Map<String,SortedPostingsIndex> postingIndexMap = new HashMap();
 
     /**
      * Performs a blocking read.
@@ -119,6 +123,78 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             filePointerBuilder.add(filePosition);
         }
         filePointers = filePointerBuilder.build();
+
+        // nb-1-big-SAI_sai_index_a_KDTreePostingLists_sorted_sai_index_b_asc.db
+
+        List<File> list = Lists.newArrayList(indexComponents.fileFor(indexComponents.kdTreePostingLists),
+                                             indexComponents.fileFor(indexComponents.meta),
+                                             indexComponents.fileFor(indexComponents.kdTreeOrderMaps));
+
+        File parentDir = null;
+
+        List<String> endOfFiles = new ArrayList();
+
+        for (File file : list)
+        {
+            if (parentDir == null) parentDir = file.getParentFile();
+            //File parentDir = indexComponents.fileFor(indexComponents.kdTree).getParentFile();
+            //File kdTreePostingListsFile = indexComponents.fileFor(indexComponents.kdTreePostingLists);
+            System.out.println("kdTreePostingListsFile=" + file.getName());
+            String kdTreePostingListsFileName = file.getName();
+
+            String endOfFile = file.getName().substring(0, kdTreePostingListsFileName.length() - 3);
+            System.out.println("endOfFile=" + endOfFile);
+            endOfFiles.add(endOfFile);
+        }
+
+        StorageAttachedIndexWriter.SortedPostingsMeta sortedPostingsMeta = null;
+
+        for (File file : parentDir.listFiles())
+        {
+            File sortedPostingsFile = null;
+
+            String subname = null;
+
+            String name = file.getName();
+
+            for (String e : endOfFiles)
+            {
+                if (name.startsWith(e) && name.contains("_sorted_"))
+                {
+                    System.out.println("columnfile="+name);
+
+                    String sub = name.substring(name.indexOf("_sorted_")+("_sorted_".length()));
+                    sub = sub.substring(0, sub.length() - 3);
+                    subname = sub;
+                    System.out.println("columnfilesub="+sub);
+                    if (name.contains("Meta"))
+                    {
+                        IndexInput metaInput = indexComponents.openInput(file);
+                        MetadataSource metaSource = MetadataSource.load(metaInput);
+
+                        Collection<String> metaNames = metaSource.names();
+                        System.out.println("metaNames="+metaNames);
+
+                        sortedPostingsMeta = new StorageAttachedIndexWriter.SortedPostingsMeta(metaSource.get("sortedPostingsMeta"));
+                    }
+                    if (name.contains("KDTreePostingLists"))
+                    {
+                        sortedPostingsFile = file;
+                    }
+                }
+            }
+            if (sortedPostingsFile != null)
+            {
+                SortedPostingsIndex sortedPostingsIndex = new SortedPostingsIndex(indexComponents.openInput(sortedPostingsFile), sortedPostingsMeta.postingsIndexFilePointer);
+                postingIndexMap.put(subname, sortedPostingsIndex);
+                System.out.println("sortedPostingsIndex=" + sortedPostingsIndex.index.keySet());
+            }
+        }
+
+
+
+        // SortedPostingsIndex sortedPostingsIndex = new SortedPostingsIndex(reader2.indexComponents.openBlockingInput(reader2.indexComponents.postingLists), postingsIndexFilePointer);
+        // nb-1-big-SAI_sorted_sai_index_a_asc_Meta.db
     }
 
     public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor,

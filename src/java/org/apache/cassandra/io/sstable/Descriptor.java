@@ -143,6 +143,7 @@ public class Descriptor
 
     public String filenameFor(Component component)
     {
+        System.out.println("baseFilename="+baseFilename()+" component.name="+component.name());
         return baseFilename() + separator + component.name();
     }
 

@@ -166,6 +166,11 @@ public class ColumnContext
         this.sortedRowFactory = SortedRow.immutableFactory(table);
     }
 
+    public IndexViewManager viewManager()
+    {
+        return viewManager;
+    }
+
     public SortedRow.SortedRowFactory sortedRowFactory()
     {
         return sortedRowFactory;

@@ -486,7 +486,19 @@ public class IndexComponents
         return IndexInputReader.create(handle);
     }
 
+    public IndexInput openInput(File file)
+    {
+        try (final FileHandle.Builder builder = new FileHandle.Builder(file.getAbsolutePath()))
+        {
+            final FileHandle fileHandle = builder.complete();
+            final RandomAccessReader randomReader = fileHandle.createReader();
+
+            return IndexInputReader.create(randomReader, fileHandle::close);
+        }
+    }
+
     @SuppressWarnings("resource")
+    // TODO: "blocking" is redundant now?
     public IndexInput openBlockingInput(IndexComponent component)
     {
         final File file = descriptor.fileFor(component);
@@ -510,6 +522,11 @@ public class IndexComponents
     public IndexOutputWriter createOutput(IndexComponent component, boolean append) throws IOException
     {
         return createOutput(component, append, false);
+    }
+
+    public File fileFor(IndexComponent component)
+    {
+        return descriptor.fileFor(component);
     }
 
     public IndexOutputWriter createOutput(IndexComponent component, boolean append, boolean temporary) throws IOException

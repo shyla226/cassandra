@@ -103,6 +103,11 @@ public class SSTableIndex
         }
     }
 
+    public IndexComponents indexComponents()
+    {
+        return components;
+    }
+
     public ColumnContext getColumnContext()
     {
         return columnContext;

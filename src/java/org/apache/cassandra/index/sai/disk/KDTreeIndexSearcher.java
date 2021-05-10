@@ -64,6 +64,11 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
     }
 
+    public BKDReader bkdReader()
+    {
+        return bkdReader;
+    }
+
     @Override
     public long indexFileCacheSize()
     {
