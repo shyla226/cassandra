@@ -30,7 +30,7 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.IndexQueryTimeoutException;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
@@ -127,7 +127,7 @@ public class PostingListRangeIterator extends RangeIterator
         catch (Throwable t)
         {
             //TODO We aren't tidying up resources here
-            if (!(t instanceof AbortedOperationException))
+            if (!(t instanceof IndexQueryTimeoutException))
                 logger.error(components.logMessage("Unable to provide next token!"), t);
 
             throw Throwables.cleaned(t);

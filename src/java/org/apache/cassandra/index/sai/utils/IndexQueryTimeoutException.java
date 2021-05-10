@@ -19,6 +19,9 @@
 package org.apache.cassandra.index.sai.utils;
 
 
+import org.apache.cassandra.exceptions.ExceptionCode;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+
 /**
  * This exception indicates that a request was aborted, normally because it was taking too much time.
  *
@@ -26,11 +29,10 @@ package org.apache.cassandra.index.sai.utils;
  * passed to the onAborted callback without logging any message. Therefore if any logging is required,
  * it is up to the code raising this exception to log anything.
  */
-// TODO OSS doesn't support onAbort and timeout response
-public class AbortedOperationException extends RuntimeException
+public class IndexQueryTimeoutException extends RequestExecutionException
 {
-    public AbortedOperationException()
+    public IndexQueryTimeoutException()
     {
-        super();
+        super(ExceptionCode.INDEX_QUERY_TIMEOUT, null);
     }
 }

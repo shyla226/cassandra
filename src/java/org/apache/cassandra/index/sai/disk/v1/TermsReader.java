@@ -33,7 +33,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.IndexQueryTimeoutException;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
@@ -165,7 +165,7 @@ public class TermsReader implements Closeable
             catch (Throwable e)
             {
                 //TODO Is there an equivalent of AOE in OS?
-                if (!(e instanceof AbortedOperationException))
+                if (!(e instanceof IndexQueryTimeoutException))
                     logger.error(indexComponents.logMessage("Failed to execute term query"), e);
 
                 closeOnException();

@@ -79,7 +79,7 @@ public class TermIterator extends RangeIterator
             }
             catch (Throwable e1)
             {
-                if (logger.isDebugEnabled() && !(e1 instanceof AbortedOperationException))
+                if (logger.isDebugEnabled() && !(e1 instanceof IndexQueryTimeoutException))
                     logger.debug(String.format("Failed search an index %s, skipping.", index.getSSTable()), e1);
 
                 throw Throwables.cleaned(e1);

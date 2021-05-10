@@ -39,7 +39,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.IndexQueryTimeoutException;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -393,7 +393,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
             catch (Throwable t)
             {
-                if (!(t instanceof AbortedOperationException))
+                if (!(t instanceof IndexQueryTimeoutException))
                     logger.error(indexComponents.logMessage("kd-tree intersection failed on {}"), indexFile.path(), t);
 
                 closeOnException();

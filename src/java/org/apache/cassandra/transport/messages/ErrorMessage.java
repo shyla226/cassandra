@@ -34,6 +34,7 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.index.sai.utils.IndexQueryTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.MD5Digest;
@@ -187,6 +188,9 @@ public class ErrorMessage extends Message.Response
                     int received = body.readInt();
                     int blockFor = body.readInt();
                     te = new CasWriteUnknownResultException(cl, received, blockFor);
+                    break;
+                case INDEX_QUERY_TIMEOUT:
+                    te = new IndexQueryTimeoutException();
                     break;
             }
             return new ErrorMessage(te);

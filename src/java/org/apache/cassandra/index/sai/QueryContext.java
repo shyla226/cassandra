@@ -26,7 +26,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.IndexQueryTimeoutException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
@@ -96,7 +96,7 @@ public class QueryContext
         if (totalQueryTimeNs() >= executionQuotaNano)
         {
             queryTimeouts++;
-            throw new AbortedOperationException();
+            throw new IndexQueryTimeoutException();
         }
     }
 }
