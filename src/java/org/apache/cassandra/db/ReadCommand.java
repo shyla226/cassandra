@@ -413,7 +413,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     static Index.QueryPlan findIndexQueryPlan(TableMetadata table, RowFilter rowFilter)
     {
-        if (table.indexes.isEmpty() || rowFilter.isEmpty())
+        if (table.indexes.isEmpty() || (rowFilter.isEmpty() && rowFilter.getDisjunctionExpressions().isEmpty()))
             return null;
 
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(table);

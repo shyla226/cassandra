@@ -60,11 +60,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
                                         List<RowFilter.Expression> expressions,
+                                        List<RowFilter.Expression> disjunctionExpressions,
                                         long executionQuotaMs)
     {
         this.command = command;
         this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, expressions, queryContext, tableQueryMetrics);
+        this.controller = new QueryController(cfs, command, expressions, disjunctionExpressions, queryContext, tableQueryMetrics);
     }
 
     @Override

@@ -275,7 +275,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
         // json is a valid column name. By consequence, we need to resolve the ambiguity for "json - json"
       ( (K_JSON selectClause)=> K_JSON { isJson = true; } )? sclause=selectClause
       K_FROM cf=columnFamilyName
-      ( K_WHERE wclause=whereClause )?
+      ( K_WHERE wclause=selectWhereClause )?
       ( K_GROUP K_BY groupByClause[groups] ( ',' groupByClause[groups] )* )?
       ( K_ORDER K_BY orderByClause[orderings] ( ',' orderByClause[orderings] )* )?
       ( K_PER K_PARTITION K_LIMIT rows=intValue { perPartitionLimit = rows; } )?
@@ -444,6 +444,20 @@ sident returns [Selectable.RawIdentifier id]
 whereClause returns [WhereClause.Builder clause]
     @init{ $clause = new WhereClause.Builder(); }
     : relationOrExpression[$clause] (K_AND relationOrExpression[$clause])*
+    ;
+
+/**
+ * SELECT should probably get its own WhereClause.  WhereClause is currently shared between SELECT and UPDATE,
+ * but the former will assume a superset of the latter's grammar (OR, maybe with nesting).  WhereClause is a class,
+ * and this might call for a new interface.
+ */
+selectWhereClause returns [WhereClause.Builder clause]
+    @init{ $clause = new WhereClause.Builder(); }
+    : relationOrExpression[$clause] ( booleanOp[$clause] relationOrExpression[$clause])*
+    ;
+booleanOp [WhereClause.Builder clause]
+    : a=K_AND { clause.setCurrentOperator(a.getText()); }
+    | o=K_OR  { clause.setCurrentOperator(o.getText()); }
     ;
 
 relationOrExpression [WhereClause.Builder clause]

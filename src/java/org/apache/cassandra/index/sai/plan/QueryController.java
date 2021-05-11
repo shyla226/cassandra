@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -77,6 +78,7 @@ public class QueryController
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
     private final List<RowFilter.Expression> expressions;
+    private final List<RowFilter.Expression> disjunctionExpressions;
 
     private final List<DataRange> ranges;
     private final AbstractBounds<PartitionPosition> mergeRange;
@@ -87,11 +89,22 @@ public class QueryController
                            QueryContext queryContext,
                            TableQueryMetrics tableQueryMetrics)
     {
+        this(cfs, command, expressions, Collections.EMPTY_LIST, queryContext, tableQueryMetrics);
+    }
+
+    public QueryController(ColumnFamilyStore cfs,
+                           ReadCommand command,
+                           List<RowFilter.Expression> expressions,
+                           List<RowFilter.Expression> disjunctionExpressions,
+                           QueryContext queryContext,
+                           TableQueryMetrics tableQueryMetrics)
+    {
         this.cfs = cfs;
         this.command = command;
         this.queryContext = queryContext;
         this.tableQueryMetrics = tableQueryMetrics;
         this.expressions = expressions;
+        this.disjunctionExpressions = disjunctionExpressions;
 
         this.ranges = dataRanges(command);
         DataRange first = ranges.get(0);
@@ -110,6 +123,11 @@ public class QueryController
     List<RowFilter.Expression> getExpressions()
     {
         return expressions;
+    }
+
+    List<RowFilter.Expression> getDisjunctionExpressions()
+    {
+        return disjunctionExpressions;
     }
 
     /**

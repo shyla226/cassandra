@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,6 +28,7 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.restrictions.SingleRestriction;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -41,18 +43,21 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     private final TableQueryMetrics queryMetrics;
     private final RowFilter postIndexFilter;
     private final List<RowFilter.Expression> expressions;
+    private final List<RowFilter.Expression> disjunctionExpressions;
     private final Set<Index> indexes;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
                                           RowFilter postIndexFilter,
                                           List<RowFilter.Expression> expressions,
+                                          List<RowFilter.Expression> disjunctionExpressions,
                                           ImmutableSet<Index> indexes)
     {
         this.cfs = cfs;
         this.queryMetrics = queryMetrics;
         this.postIndexFilter = postIndexFilter;
         this.expressions = expressions;
+        this.disjunctionExpressions = disjunctionExpressions;
         this.indexes = indexes;
     }
 
@@ -64,6 +69,26 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     {
         ImmutableSet.Builder<Index> selectedIndexesBuilder = ImmutableSet.builder();
         List<RowFilter.Expression> acceptedExpressions = new ArrayList<>();
+
+        if (!rowFilter.getDisjunctionExpressions().isEmpty())
+        {
+            RowFilter postIndexFilter = rowFilter.restrict(e -> e.isUserDefined());
+            for (RowFilter.Expression expression : rowFilter.getDisjunctionExpressions())
+            {
+                for (StorageAttachedIndex index : indexes)
+                {
+                    if (index.supportsExpression(expression.column(), expression.operator()))
+                    {
+                        selectedIndexesBuilder.add(index);
+                    }
+                }
+            }
+            ImmutableSet<Index> selectedIndexes = selectedIndexesBuilder.build();
+            if (selectedIndexes.isEmpty())
+                return null;
+
+            return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, acceptedExpressions, rowFilter.getDisjunctionExpressions(), selectedIndexes);
+        }
 
         for (RowFilter.Expression expression : rowFilter.getExpressions())
         {
@@ -92,7 +117,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
          * at {@link RowFilter.UserExpression}s like those used by RLAC.
          */
         RowFilter postIndexFilter = rowFilter.restrict(e -> e.isUserDefined());
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, acceptedExpressions, selectedIndexes);
+        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, acceptedExpressions, Collections.EMPTY_LIST, selectedIndexes);
     }
 
     @Override
@@ -119,7 +144,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public Index.Searcher searcherFor(ReadCommand command)
     {
-        return new StorageAttachedIndexSearcher(cfs, queryMetrics, command, expressions, DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+        return new StorageAttachedIndexSearcher(cfs, queryMetrics, command, expressions, disjunctionExpressions, DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
 
     /**

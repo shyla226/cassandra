@@ -17,11 +17,17 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
+import com.bpodgursky.jbool_expressions.And;
+import com.bpodgursky.jbool_expressions.Expression;
+import com.bpodgursky.jbool_expressions.Or;
+import com.bpodgursky.jbool_expressions.rules.Rule;
 import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
 
@@ -34,13 +40,23 @@ public final class WhereClause
 {
     private static final WhereClause EMPTY = new WhereClause(new Builder());
 
-    public final List<Relation> relations;
-    public final List<CustomIndexExpression> expressions;
+    private final List<Relation> relations;
+    private final List<CustomIndexExpression> expressions;
+    // Set for a WhereClause with either one predicate or multiple predicates all joined by AND
+    private final boolean isPureConjunctionOrSingleton;
+    // Set for a WhereClause with multiple predicates all joined by OR
+    private final boolean isCompositeDisjunction;
+    // This is a dead field; it was intended to help smuggle a tree structure through C* to SAI, where it would be
+    // translated to an equivalent tree made out of SAI-internal AND/OR connectives
+    private final Expression treeRoot;
 
     private WhereClause(Builder builder)
     {
+        this.treeRoot = builder.currentTree;
         relations = builder.relations.build();
         expressions = builder.expressions.build();
+        this.isPureConjunctionOrSingleton = builder.seenOnlyAnd;
+        this.isCompositeDisjunction = !builder.seenOnlyAnd && builder.seenOnlyOr && 1 < this.relations.size() + this.expressions.size();
     }
 
     public static WhereClause empty()
@@ -48,9 +64,32 @@ public final class WhereClause
         return EMPTY;
     }
 
+    public boolean isCompositeDisjunction()
+    {
+        return isCompositeDisjunction;
+    }
+
     public boolean containsCustomExpressions()
     {
         return !expressions.isEmpty();
+    }
+
+    public List<Relation> getRelations()
+    {
+
+        Preconditions.checkState(isPureConjunctionOrSingleton);
+        return getRelationsUnsafe();
+    }
+
+    public List<Relation> getRelationsUnsafe()
+    {
+        return relations;
+    }
+
+    public List<CustomIndexExpression> getExpressions()
+    {
+        Preconditions.checkState(isPureConjunctionOrSingleton);
+        return expressions;
     }
 
     /**
@@ -114,20 +153,133 @@ public final class WhereClause
         return Objects.hash(relations, expressions);
     }
 
+    // This and CIEExpr both exist solely for the jbool_expressions tree, which is an unused stub from a
+    // barely-initiated idea that wasn't fully implemented.  If the tree goes, these inner classes can go, too.
+    public static class RelationExpression extends Expression<Relation>
+    {
+        private final Relation relation;
+
+        public RelationExpression(Relation r)
+        {
+            this.relation = r;
+        }
+
+        @Override
+        public Expression<Relation> apply(List<Rule<?, Relation>> list)
+        {
+            return this;
+        }
+
+        @Override
+        public String getExprType()
+        {
+            return "Relation";
+        }
+
+        @Override
+        public Expression<Relation> sort(Comparator<Expression> comparator)
+        {
+            return this;
+        }
+    }
+
+    public static class CIEExpr extends Expression<CustomIndexExpression>
+    {
+        private final CustomIndexExpression cie;
+
+        public CIEExpr(CustomIndexExpression cie)
+        {
+            this.cie = cie;
+        }
+
+        @Override
+        public Expression<CustomIndexExpression> apply(List<Rule<?, CustomIndexExpression>> rules)
+        {
+            return this;
+        }
+
+        @Override
+        public String getExprType()
+        {
+            return "CustomIndexExpression";
+        }
+
+        @Override
+        public Expression<CustomIndexExpression> sort(Comparator<Expression> comparator)
+        {
+            return this;
+        }
+    }
+
     public static final class Builder
     {
         ImmutableList.Builder<Relation> relations = new ImmutableList.Builder<>();
         ImmutableList.Builder<CustomIndexExpression> expressions = new ImmutableList.Builder<>();
+        // This is a hack; this field should be deleted, and the associated state should be pushed down into the
+        // ANTLR-generated parser, by specifying rules like
+        //      a=relationOrExpression K_OR  b=relationOrExpression { builder.or(a, b);  }
+        //    | a=relationOrExpression K_AND b=relationOrExpression { builder.and(a, b); }
+        // (I had to hand this issue off before getting to this change)
+        private String currentOp;
+        // Eligible for removal along the same lines as tree, CIEExpr, RelationExpr
+        private Expression currentTree;
+        private boolean seenOnlyAnd = true;
+        private boolean seenOnlyOr = true;
 
         public Builder add(Relation relation)
         {
             relations.add(relation);
+            addToTree(new RelationExpression(relation));
             return this;
         }
 
         public Builder add(CustomIndexExpression expression)
         {
             expressions.add(expression);
+            addToTree(new CIEExpr(expression));
+            return this;
+        }
+
+        private void addToTree(Expression e)
+        {
+            try
+            {
+                if (null == currentTree)
+                {
+                    currentTree = e;
+                }
+                else
+                {
+                    //Preconditions.checkState(null != currentOp);
+                    if (null == currentOp)
+                    {
+                        currentOp = "AND";
+                    }
+                    if ("AND".equalsIgnoreCase(currentOp))
+                    {
+                        currentTree = And.of(currentTree, e);
+                    }
+                    else if ("OR".equalsIgnoreCase(currentOp))
+                    {
+                        currentTree = Or.of(currentTree, e);
+                    }
+                    else
+                    {
+                        throw new IllegalArgumentException("Unsupported operation: \"" + currentOp + "\"");
+                    }
+                }
+            }
+            finally
+            {
+                currentOp = null;
+            }
+        }
+
+        public Builder setCurrentOperator(String op)
+        {
+            currentOp = op;
+            seenOnlyAnd &= "AND".equalsIgnoreCase(op);
+            seenOnlyOr &= "OR".equalsIgnoreCase(op);
             return this;
         }
 

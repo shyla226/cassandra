@@ -1128,7 +1128,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public Index.QueryPlan getBestIndexQueryPlanFor(RowFilter rowFilter)
     {
-        if (indexes.isEmpty() || rowFilter.isEmpty())
+        if (indexes.isEmpty() || (rowFilter.isEmpty() && rowFilter.getDisjunctionExpressions().isEmpty()))
             return null;
 
         for (RowFilter.Expression expression : rowFilter)

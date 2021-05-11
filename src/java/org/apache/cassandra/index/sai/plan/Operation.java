@@ -238,9 +238,19 @@ public class Operation extends RangeIterator
      */
     static TreeBuilder initTreeBuilder(QueryController controller)
     {
-        TreeBuilder tree = new TreeBuilder(controller);
-        tree.add(controller.getExpressions());
-        return tree;
+        if (controller.getDisjunctionExpressions().isEmpty())
+        {
+
+            Operation.TreeBuilder tree = new Operation.TreeBuilder(controller);
+            tree.add(controller.getExpressions());
+            return tree;
+        }
+        else
+        {
+            Operation.TreeBuilder tree = new Operation.TreeBuilder(controller, OperationType.OR);
+            tree.add(controller.getDisjunctionExpressions());
+            return tree;
+        }
     }
 
     /**
@@ -264,11 +274,16 @@ public class Operation extends RangeIterator
         final Builder root;
         Builder subtree;
 
-        TreeBuilder(QueryController controller)
+        TreeBuilder(QueryController controller, OperationType rootOperationType)
         {
             this.controller = controller;
-            this.root = new Builder(OperationType.AND, controller);
+            this.root = new Operation.Builder(rootOperationType, controller);
             this.subtree = root;
+        }
+
+        TreeBuilder(QueryController controller)
+        {
+            this(controller, OperationType.AND);
         }
 
         public TreeBuilder add(Collection<RowFilter.Expression> expressions)

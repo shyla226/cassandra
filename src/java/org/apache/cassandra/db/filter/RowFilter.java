@@ -68,6 +68,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     protected final List<Expression> expressions;
 
+    protected final List<Expression> disjunctionExpressions = new ArrayList<>();
+
     protected RowFilter(List<Expression> expressions)
     {
         this.expressions = expressions;
@@ -106,6 +108,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         expressions.add(expression);
     }
 
+    public void addDisjunctionRestrictions(List<Expression> rs)
+    {
+        disjunctionExpressions.addAll(rs);
+    }
+
     public void addUserExpression(UserExpression e)
     {
         expressions.add(e);
@@ -114,6 +121,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public List<Expression> getExpressions()
     {
         return expressions;
+    }
+
+    public List<Expression> getDisjunctionExpressions()
+    {
+        return disjunctionExpressions;
     }
 
     /**
