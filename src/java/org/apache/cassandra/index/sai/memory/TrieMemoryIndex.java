@@ -304,7 +304,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         Collector cd = new Collector(keyRange);
 
-        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(pk -> cd.processContent(pk));
+        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(cd::processContent);
 
         if (cd.mergedKeys.isEmpty())
         {
