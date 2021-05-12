@@ -162,19 +162,15 @@ public class SchemaCQLHelperTest extends CQLTester
         String expected = "CREATE TABLE IF NOT EXISTS cql_test_keyspace_dropped_columns.test_table_dropped_columns (\n" +
                           "    pk1 varint,\n" +
                           "    ck1 varint,\n" +
-                          "    reg1 varint,\n" +
-                          "    reg3 varint,\n" +
-                          "    reg2 varint,\n" +
-                          "    st1 varint static,\n" +
                           "    PRIMARY KEY (pk1, ck1)\n) WITH ID =";
         String actual = SchemaCQLHelper.getTableMetadataAsCQL(cfs.metadata(), true, true, true);
 
         assertThat(actual,
                    allOf(startsWith(expected),
-                         containsString("ALTER TABLE cql_test_keyspace_dropped_columns.test_table_dropped_columns DROP reg1 USING TIMESTAMP 10000;"),
-                         containsString("ALTER TABLE cql_test_keyspace_dropped_columns.test_table_dropped_columns DROP reg3 USING TIMESTAMP 30000;"),
-                         containsString("ALTER TABLE cql_test_keyspace_dropped_columns.test_table_dropped_columns DROP reg2 USING TIMESTAMP 20000;"),
-                         containsString("ALTER TABLE cql_test_keyspace_dropped_columns.test_table_dropped_columns DROP st1 USING TIMESTAMP 5000;")));
+                         containsString("DROPPED COLUMN RECORD reg1 varint USING TIMESTAMP 10000"),
+                         containsString("DROPPED COLUMN RECORD reg2 varint USING TIMESTAMP 20000"),
+                         containsString("DROPPED COLUMN RECORD reg3 varint USING TIMESTAMP 30000"),
+                         containsString("DROPPED COLUMN RECORD st1 varint static USING TIMESTAMP 5000")));
     }
 
     @Test
@@ -212,18 +208,16 @@ public class SchemaCQLHelperTest extends CQLTester
         String expected = "CREATE TABLE IF NOT EXISTS cql_test_keyspace_readded_columns.test_table_readded_columns (\n" +
                           "    pk1 varint,\n" +
                           "    ck1 varint,\n" +
-                          "    reg2 varint,\n" +
-                          "    reg1 varint,\n" +
                           "    st1 varint static,\n" +
+                          "    reg1 varint,\n" +
+                          "    reg2 varint,\n" +
                           "    PRIMARY KEY (pk1, ck1)\n" +
                           ") WITH ID";
 
         assertThat(actual,
                    allOf(startsWith(expected),
-                         containsString("ALTER TABLE cql_test_keyspace_readded_columns.test_table_readded_columns DROP reg1 USING TIMESTAMP 10000;"),
-                         containsString("ALTER TABLE cql_test_keyspace_readded_columns.test_table_readded_columns ADD reg1 varint;"),
-                         containsString("ALTER TABLE cql_test_keyspace_readded_columns.test_table_readded_columns DROP st1 USING TIMESTAMP 20000;"),
-                         containsString("ALTER TABLE cql_test_keyspace_readded_columns.test_table_readded_columns ADD st1 varint static;")));
+                         containsString("DROPPED COLUMN RECORD reg1 varint USING TIMESTAMP 10000"),
+                         containsString("DROPPED COLUMN RECORD st1 varint static USING TIMESTAMP 20000")));
     }
 
     @Test
@@ -295,7 +289,8 @@ public class SchemaCQLHelperTest extends CQLTester
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
 
         assertThat(SchemaCQLHelper.getTableMetadataAsCQL(cfs.metadata(), true, true, true),
-                   containsString("CLUSTERING ORDER BY (cl1 ASC)\n" +
+                   containsString("AND CLUSTERING ORDER BY (cl1 ASC)\n" +
+                            "    AND DROPPED COLUMN RECORD reg1 ascii USING TIMESTAMP " + droppedTimestamp +"\n" +
                             "    AND additional_write_policy = 'ALWAYS'\n" +
                             "    AND bloom_filter_fp_chance = 1.0\n" +
                             "    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}\n" +
@@ -433,16 +428,14 @@ public class SchemaCQLHelperTest extends CQLTester
                           "    ck1 varint,\n" +
                           "    ck2 varint,\n" +
                           "    reg2 int,\n" +
-                          "    reg1 " + typeC+ ",\n" +
                           "    reg3 int,\n" +
+                          "    reg1 " + typeC+ ",\n" +
                           "    PRIMARY KEY ((pk1, pk2), ck1, ck2)\n" +
                           ") WITH ID = " + cfs.metadata.id + "\n" +
-                          "    AND CLUSTERING ORDER BY (ck1 ASC, ck2 DESC)";
+                          "    AND CLUSTERING ORDER BY (ck1 ASC, ck2 DESC)" + "\n" +
+                          "    AND DROPPED COLUMN RECORD reg3 int USING TIMESTAMP 10000";
 
-        assertThat(schema,
-                   allOf(startsWith(expected),
-                         containsString("ALTER TABLE " + keyspace() + "." + tableName + " DROP reg3 USING TIMESTAMP 10000;"),
-                         containsString("ALTER TABLE " + keyspace() + "." + tableName + " ADD reg3 int;")));
+        assertThat(schema, startsWith(expected));
 
         assertThat(schema, containsString("CREATE INDEX IF NOT EXISTS " + tableName + "_reg2_idx ON " + keyspace() + '.' + tableName + " (reg2);"));
 
