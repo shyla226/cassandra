@@ -26,7 +26,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
@@ -93,10 +92,10 @@ public class QueryContext
 
     public void checkpoint()
     {
-        if (totalQueryTimeNs() >= executionQuotaNano)
-        {
-            queryTimeouts++;
-            throw new AbortedOperationException();
-        }
+//        if (totalQueryTimeNs() >= executionQuotaNano)
+//        {
+//            queryTimeouts++;
+//            throw new AbortedOperationException();
+//        }
     }
 }

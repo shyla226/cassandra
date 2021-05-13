@@ -131,6 +131,8 @@ public class BKDWriter implements Closeable
 
     private final ICompressor compressor;
 
+    final List<List<OneDimensionBKDWriter.LeafBlockMeta>> leafBlockMetaGroups = new ArrayList<>();
+
     public BKDWriter(long maxDoc, int numDims, int bytesPerDim,
             int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc,
             ICompressor compressor) throws IOException
@@ -292,9 +294,8 @@ public class BKDWriter implements Closeable
         }
     }
 
-    private class OneDimensionBKDWriter
+    public class OneDimensionBKDWriter
     {
-
         final IndexOutput out;
         final List<Long> leafBlockFPs = new ArrayList<>();
         final List<byte[]> leafBlockStartValues = new ArrayList<>();
@@ -334,6 +335,8 @@ public class BKDWriter implements Closeable
         final byte[] lastPackedValue;
         private long lastDocID;
 
+        private List<LeafBlockMeta> leafSameValues = new ArrayList<>();
+
         void add(byte[] packedValue, long docID) throws IOException
         {
             assert valueInOrder(valueCount + leafCount,
@@ -353,7 +356,33 @@ public class BKDWriter implements Closeable
             {
                 // We write a block once we hit exactly the max count ... this is different from
                 // when we write N > 1 dimensional points where we write between max/2 and max per leaf block
-                writeLeafBlock();
+                LeafBlockMeta allSameValue = writeLeafBlock();
+                if (allSameValue == null)
+                {
+                    leafSameValues.clear();
+                }
+                else
+                {
+                    if (leafSameValues.size() > 0)
+                    {
+                        List<LeafBlockMeta> previousLeafSameValues = null;
+
+                        LeafBlockMeta lastLeafSameValue = leafSameValues.get(leafSameValues.size() - 1);
+                        if (!Arrays.equals(allSameValue.firstValue, lastLeafSameValue.firstValue))
+                        {
+                            previousLeafSameValues = new ArrayList<>(leafSameValues);
+                            leafSameValues.clear();
+                        }
+
+                        if (previousLeafSameValues != null && previousLeafSameValues.size() >= 2)
+                        {
+                            // TODO: assert each previousLeafSameValues bytes are the same
+                            leafBlockMetaGroups.add(previousLeafSameValues);
+                        }
+                    }
+                    leafSameValues.add(allSameValue);
+                }
+
                 leafCount = 0;
             }
 
@@ -366,6 +395,11 @@ public class BKDWriter implements Closeable
             {
                 writeLeafBlock();
                 leafCount = 0;
+            }
+
+            if (leafSameValues.size() >= 2)
+            {
+                leafBlockMetaGroups.add(leafSameValues);
             }
 
             if (valueCount == 0)
@@ -392,9 +426,24 @@ public class BKDWriter implements Closeable
             return indexFP;
         }
 
-        private void writeLeafBlock() throws IOException
+        class LeafBlockMeta
+        {
+            public final long leafFilePointer;
+            public final byte[] firstValue;
+
+            public LeafBlockMeta(long leafFilePointer, byte[] firstValue)
+            {
+                this.leafFilePointer = leafFilePointer;
+                this.firstValue = firstValue;
+            }
+        }
+
+        private LeafBlockMeta writeLeafBlock() throws IOException
         {
             assert leafCount != 0;
+
+            long leafFilePointer = -1;
+
             if (valueCount == 0)
             {
                 System.arraycopy(leafValues, 0, minPackedValue, 0, packedBytesLength);
@@ -408,7 +457,10 @@ public class BKDWriter implements Closeable
                 // Save the first (minimum) value in each leaf block except the first, to build the split value index in the end:
                 leafBlockStartValues.add(ArrayUtil.copyOfSubArray(leafValues, 0, packedBytesLength));
             }
-            leafBlockFPs.add(out.getFilePointer());
+
+            leafFilePointer = out.getFilePointer();
+
+            leafBlockFPs.add(leafFilePointer);
             checkMaxLeafNodeCount(leafBlockFPs.size());
 
             // Find per-dim common prefix:
@@ -493,7 +545,10 @@ public class BKDWriter implements Closeable
                                           ArrayUtil.copyOfSubArray(leafValues, (leafCount - 1) * packedBytesLength, leafCount * packedBytesLength),
                                           packedValues, leafDocs, 0);
 
-            writeLeafBlockPackedValues(scratchOut, commonPrefixLengths, leafCount, 0, packedValues);
+            final boolean allLeafValuesSame = writeLeafBlockPackedValues(scratchOut, commonPrefixLengths, leafCount, 0, packedValues);
+
+            byte[] firstValue = new byte[bytesPerDim];
+            System.arraycopy(leafValues, 0, firstValue, 0, bytesPerDim);
 
             if (compressor == null)
             {
@@ -504,6 +559,11 @@ public class BKDWriter implements Closeable
                 CryptoUtils.compress(new BytesRef(scratchOut.getBytes(), 0, scratchOut.getPosition()), scratchBytesRef, out, compressor);
             }
             scratchOut.reset();
+            if (allLeafValuesSame)
+            {
+               return new LeafBlockMeta(leafFilePointer, firstValue);
+            }
+            return null;
         }
     }
 
@@ -873,13 +933,15 @@ public class BKDWriter implements Closeable
         }
     }
 
-    private void writeLeafBlockPackedValues(DataOutput out, int[] commonPrefixLengths, int count, int sortedDim, IntFunction<BytesRef> packedValues) throws IOException
+    private boolean writeLeafBlockPackedValues(DataOutput out, int[] commonPrefixLengths, int count, int sortedDim, IntFunction<BytesRef> packedValues) throws IOException
     {
         int prefixLenSum = Arrays.stream(commonPrefixLengths).sum();
+        boolean allValuesSame = false;
         if (prefixLenSum == packedBytesLength)
         {
             // all values in this block are equal
             out.writeByte((byte) -1);
+            allValuesSame = true;
         }
         else
         {
@@ -903,6 +965,7 @@ public class BKDWriter implements Closeable
                 assert i <= count;
             }
         }
+        return allValuesSame;
     }
 
     /**

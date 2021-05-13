@@ -101,7 +101,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
     }
 
     @SuppressWarnings("resource")
-    public long finish(IndexOutput out) throws IOException
+    public long finish(IndexOutput out, List<List<BKDWriter.OneDimensionBKDWriter.LeafBlockMeta>> leafBlockMetaGroups) throws IOException
     {
         checkState(postings.size() == leafOffsetToNodeID.size(),
                    "Expected equal number of postings lists (%s) and leaf offsets (%s).",
@@ -131,6 +131,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         final long startFP = out.getFilePointer();
         final Stopwatch flushTime = Stopwatch.createStarted();
         final TreeMap<Integer, Long> nodeIDToPostingsFilePointer = new TreeMap<>();
+        final TreeMap<Integer, Long> multiLeafNodeIDToPostingsFilePointer = new TreeMap<>();
         for (int nodeID : Iterables.concat(internalNodeIDs, leafNodeIDs))
         {
             Collection<Integer> leaves = nodeToChildLeaves.get(nodeID);
@@ -156,6 +157,33 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
             if (postingFilePosition >= 0)
                 nodeIDToPostingsFilePointer.put(nodeID, postingFilePosition);
         }
+
+
+        // for each list of leaf blocks with the same value write a merged posting list
+        // add to the multiLeafNodeIDToPostingsFilePointer map index
+        if (leafBlockMetaGroups != null)
+        {
+            for (List<BKDWriter.OneDimensionBKDWriter.LeafBlockMeta> leafBlockMetaGroup : leafBlockMetaGroups)
+            {
+                final PriorityQueue<PostingList.PeekablePostingList> postingLists = new PriorityQueue<>(100, Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+
+                for (BKDWriter.OneDimensionBKDWriter.LeafBlockMeta meta : leafBlockMetaGroup)
+                {
+                    final int nodeID = leafOffsetToNodeID.get(meta.leafFilePointer);
+                    postingLists.add(new PackedLongsPostingList(leafToPostings.get(nodeID)).peekable());
+                }
+
+                final PostingList mergedPostingList = MergePostingList.merge(postingLists);
+                final long postingFilePointer = postingsWriter.write(mergedPostingList);
+
+                for (BKDWriter.OneDimensionBKDWriter.LeafBlockMeta meta : leafBlockMetaGroup)
+                {
+                    final int nodeID = leafOffsetToNodeID.get(meta.leafFilePointer);
+                    multiLeafNodeIDToPostingsFilePointer.put(nodeID, postingFilePointer);
+                }
+            }
+        }
+
         flushTime.stop();
         logger.debug(components.logMessage("Flushed {} of posting lists for kd-tree nodes in {} ms."),
                      FBUtilities.prettyPrintMemory(out.getFilePointer() - startFP),
@@ -164,6 +192,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 
         final long indexFilePointer = out.getFilePointer();
         writeMap(nodeIDToPostingsFilePointer, out);
+        writeMap(multiLeafNodeIDToPostingsFilePointer, out);
         postingsWriter.complete();
         return indexFilePointer;
     }

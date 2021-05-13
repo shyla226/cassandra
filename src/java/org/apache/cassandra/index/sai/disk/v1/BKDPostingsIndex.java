@@ -37,6 +37,7 @@ class BKDPostingsIndex
 {
     private final int size;
     public final IntLongMap index = new IntLongHashMap();
+    public final IntLongMap multiLeafIndex = new IntLongHashMap();
 
     @SuppressWarnings("resource")
     BKDPostingsIndex(FileHandle postingsFileHandle, long filePosition) throws IOException
@@ -55,6 +56,16 @@ class BKDPostingsIndex
                 final long filePointer = input.readVLong();
 
                 index.put(node, filePointer);
+            }
+
+            int size2 = input.readVInt();
+
+            for (int x = 0; x < size2; x++)
+            {
+                final int node = input.readVInt();
+                final long filePointer = input.readVLong();
+
+                multiLeafIndex.put(node, filePointer);
             }
         }
     }
@@ -86,6 +97,11 @@ class BKDPostingsIndex
     {
         checkArgument(exists(nodeID));
         return index.get(nodeID);
+    }
+
+    long getMultiLeafPostingsFilePointer(int nodeID)
+    {
+        return multiLeafIndex.getOrDefault(nodeID, -1);
     }
 
     int size()

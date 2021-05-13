@@ -33,6 +33,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.agrona.collections.IntHashSet;
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -52,6 +53,7 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.FutureArrays;
+import org.apache.lucene.util.NumericUtils;
 import org.apache.lucene.util.packed.DirectWriter;
 
 /**
@@ -387,12 +389,15 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 PriorityQueue<PostingList.PeekablePostingList> postingLists = new PriorityQueue<>(100, COMPARATOR);
                 executeInternal(postingLists);
 
+                System.out.println("postingLists.size="+postingLists.size());
+
                 FileUtils.closeQuietly(bkdInput);
 
                 return mergePostings(postingLists);
             }
             catch (Throwable t)
             {
+                t.printStackTrace();
                 if (!(t instanceof AbortedOperationException))
                     logger.error(indexComponents.logMessage("kd-tree intersection failed on {}"), indexFile.path(), t);
 
@@ -432,17 +437,50 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
+        long lastValidFilePointer = -1;
+
+        final IntHashSet seenMultiLeafNodeIDs = new IntHashSet();
+
         public void collectPostingLists(PriorityQueue<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             context.checkpoint();
 
             final int nodeID = index.getNodeID();
 
-            // if there is pre-built posting for entire subtree
-            if (postingsIndex.exists(nodeID))
+            final long multiLeafFilePointer = postingsIndex.getMultiLeafPostingsFilePointer(nodeID);
+
+            if (multiLeafFilePointer != -1)
             {
-                postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)).peekable());
+                seenMultiLeafNodeIDs.add(nodeID);
+            }
+
+            System.out.println("seenMultiLeafNodeIDs="+seenMultiLeafNodeIDs+" multiLeafFilePointer="+multiLeafFilePointer+" lastValidFilePointer="+lastValidFilePointer);
+
+            if (multiLeafFilePointer != -1 && multiLeafFilePointer != lastValidFilePointer)
+            {
+                //assert !seenMultiLeafNodeIDs.contains(nodeID);
+
+                lastValidFilePointer = multiLeafFilePointer;
+
+                postingLists.add(initPostingReader(multiLeafFilePointer).peekable());
                 return;
+            }
+            else if (multiLeafFilePointer == lastValidFilePointer)
+            {
+                System.out.println("nodeid="+nodeID+" skipping index.isLeafNode="+index.isLeafNode());
+                 // do nothing as the posting list for this leaf node id has already been added to postingLists
+                if (index.isLeafNode())
+                    return;
+            }
+            else
+            {
+                //lastValidFilePointer = -1;
+                // if there is pre-built posting for entire subtree
+                if (postingsIndex.exists(nodeID))
+                {
+                    postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)).peekable());
+                    return;
+                }
             }
 
             Preconditions.checkState(!index.isLeafNode(), "Leaf node %s does not have kd-tree postings.", index.getNodeID());
@@ -665,18 +703,33 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 return;
             }
 
-            if (r == Relation.CELL_INSIDE_QUERY)
-            {
-                // This cell is fully inside of the query shape: recursively add all points in this cell without filtering
-                super.collectPostingLists(postingLists);
-                return;
-            }
+            int nodeID = index.getNodeID();
 
-            if (index.isLeafNode())
+            if (r == Relation.CELL_INSIDE_QUERY || (r == Relation.CELL_CROSSES_QUERY && postingsIndex.getMultiLeafPostingsFilePointer(nodeID) != -1))
             {
-                if (index.nodeExists())
-                    filterLeaf(postingLists);
-                return;
+                Relation r2 = visitor.compare(cellMinPacked, cellMinPacked);
+                if (r2 == Relation.CELL_INSIDE_QUERY)
+                {
+                    // This cell is fully inside of the query shape: recursively add all points in this cell without filtering
+                    super.collectPostingLists(postingLists);
+                    return;
+                }
+                else
+                {
+                    if (index.isLeafNode())
+                    {
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                if (index.isLeafNode())
+                {
+                    if (index.nodeExists())
+                        filterLeaf(postingLists);
+                    return;
+                }
             }
 
             visitNode(postingLists, cellMinPacked, cellMaxPacked);
@@ -745,6 +798,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             System.arraycopy(splitDimValue.bytes, splitDimValue.offset, splitPackedValue, splitDim * bytesPerDim, bytesPerDim);
 
             index.pushLeft();
+
+            System.out.println("visitNode2 cellMinPacked="+NumericUtils.sortableBytesToInt(cellMinPacked, 0)+" splitPackedValue="+NumericUtils.sortableBytesToInt(splitPackedValue, 0));
+
             collectPostingLists(postingLists, cellMinPacked, splitPackedValue);
             index.pop();
 
@@ -754,6 +810,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             System.arraycopy(cellMinPacked, 0, splitPackedValue, 0, packedBytesLength);
             System.arraycopy(splitDimValue.bytes, splitDimValue.offset, splitPackedValue, splitDim * bytesPerDim, bytesPerDim);
             index.pushRight();
+            System.out.println("visitNode2 splitPackedValue="+NumericUtils.sortableBytesToInt(splitPackedValue, 0)+" cellMaxPacked="+NumericUtils.sortableBytesToInt(cellMaxPacked, 0));
             collectPostingLists(postingLists, splitPackedValue, cellMaxPacked);
             index.pop();
         }

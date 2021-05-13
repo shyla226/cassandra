@@ -139,12 +139,16 @@ public class NumericIndexWriter implements Closeable
 
         final LeafCallback leafCallback = new LeafCallback();
 
+        List<List<BKDWriter.OneDimensionBKDWriter.LeafBlockMeta>> leafBlockMetaGroups = null;
+
         try (IndexOutput bkdOutput = indexComponents.createOutput(indexComponents.kdTree, true, segmented))
         {
             // The SSTable kd-tree component file is opened in append mode, so our offset is the current file pointer.
             final long bkdOffset = bkdOutput.getFilePointer();
 
             bkdPosition = writer.writeField(bkdOutput, values, leafCallback);
+
+            leafBlockMetaGroups = writer.leafBlockMetaGroups;
 
             // If the bkdPosition is less than 0 then we didn't write any values out
             // and the index is empty
@@ -172,7 +176,7 @@ public class NumericIndexWriter implements Closeable
             reader.traverse(postingsWriter);
 
             // The kd-tree postings writer already writes its own header & footer.
-            final long postingsPosition = postingsWriter.finish(postingsOutput);
+            final long postingsPosition = postingsWriter.finish(postingsOutput, leafBlockMetaGroups);
 
             Map<String, String> attributes = new LinkedHashMap<>();
             attributes.put("num_leaf_postings", Integer.toString(postingsWriter.numLeafPostings));

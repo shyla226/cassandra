@@ -57,7 +57,7 @@ public class OneDimBKDPostingsWriterTest extends NdiRandomizedTest
         long fp;
         try (IndexOutputWriter output = indexComponents.createOutput(indexComponents.kdTreePostingLists))
         {
-            fp = writer.finish(output);
+            fp = writer.finish(output, null);
         }
 
         BKDPostingsIndex postingsIndex = new BKDPostingsIndex(indexComponents.createFileHandle(indexComponents.kdTreePostingLists), fp);
@@ -103,7 +103,7 @@ public class OneDimBKDPostingsWriterTest extends NdiRandomizedTest
         long fp;
         try (IndexOutputWriter output = indexComponents.createOutput(indexComponents.kdTreePostingLists))
         {
-            fp = writer.finish(output);
+            fp = writer.finish(output, null);
         }
 
         // There is only a single posting list...the leaf posting list.
@@ -124,7 +124,7 @@ public class OneDimBKDPostingsWriterTest extends NdiRandomizedTest
         long fp;
         try (IndexOutputWriter output = indexComponents.createOutput(indexComponents.kdTreePostingLists))
         {
-            fp = writer.finish(output);
+            fp = writer.finish(output, null);
         }
 
         // There is only a single posting list...the leaf posting list.
