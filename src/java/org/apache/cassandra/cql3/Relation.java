@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.cql3.restrictions.QueryExpression;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -27,7 +28,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
-public abstract class Relation
+public abstract class Relation implements QueryExpression
 {
     protected Operator relationType;
 
@@ -269,5 +270,11 @@ public abstract class Relation
     public String toString()
     {
         return toCQLString();
+    }
+
+    @Override
+    public Kind kind()
+    {
+        return Kind.RELATION;
     }
 }

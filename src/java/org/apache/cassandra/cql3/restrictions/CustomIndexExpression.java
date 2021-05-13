@@ -25,7 +25,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class CustomIndexExpression
+public class CustomIndexExpression implements QueryExpression
 {
     private final ColumnIdentifier valueColId = new ColumnIdentifier("custom index expression", false);
 
@@ -95,5 +95,11 @@ public class CustomIndexExpression
 
         CustomIndexExpression cie = (CustomIndexExpression) o;
         return targetIndex.equals(cie.targetIndex) && valueRaw.equals(cie.valueRaw);
+    }
+
+    @Override
+    public Kind kind()
+    {
+        return Kind.CUSTOM_INDEX_EXPRESSION;
     }
 }

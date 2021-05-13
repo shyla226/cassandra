@@ -446,23 +446,30 @@ whereClause returns [WhereClause.Builder clause]
     : relationOrExpression[$clause] (K_AND relationOrExpression[$clause])*
     ;
 
-/**
- * SELECT should probably get its own WhereClause.  WhereClause is currently shared between SELECT and UPDATE,
- * but the former will assume a superset of the latter's grammar (OR, maybe with nesting).  WhereClause is a class,
- * and this might call for a new interface.
- */
-selectWhereClause returns [WhereClause.Builder clause]
-    @init{ $clause = new WhereClause.Builder(); }
-    : relationOrExpression[$clause] ( booleanOp[$clause] relationOrExpression[$clause])*
-    ;
-booleanOp [WhereClause.Builder clause]
-    : a=K_AND { clause.setCurrentOperator(a.getText()); }
-    | o=K_OR  { clause.setCurrentOperator(o.getText()); }
-    ;
-
 relationOrExpression [WhereClause.Builder clause]
     : relation[$clause]
+    | '(' relation[$clause] ')'
     | customIndexExpression[$clause]
+    ;
+
+selectWhereClause returns [WhereClause.Builder clause]
+    @init{ $clause = new WhereClause.Builder(); }
+    : expression[$clause]
+    ;
+
+expression [WhereClause.Builder clause]
+    : primaryExpression[$clause] (booleanOp[$clause] primaryExpression[$clause])*
+    ;
+
+primaryExpression [WhereClause.Builder clause]
+    : '(' {clause.startEnclosure(); } expression[$clause] ')' { clause.endEnclosure(); }
+    | relation[$clause]
+    | customIndexExpression[$clause]
+    ;
+
+booleanOp [WhereClause.Builder clause]
+    : op=K_AND { clause.setCurrentOperator(op.getText()); }
+    | op=K_OR { clause.setCurrentOperator(op.getText()); }
     ;
 
 customIndexExpression [WhereClause.Builder clause]
@@ -1720,7 +1727,6 @@ relation[WhereClause.Builder clauses]
       | type=relationType tupleMarker=markerForTuple /* (a, b, c) >= ? */
           { $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, tupleMarker)); }
       )
-    | '(' relation[$clauses] ')'
     ;
 
 containsOperator returns [Operator o]
