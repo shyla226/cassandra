@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
+import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 
@@ -864,7 +865,7 @@ public abstract class CommitLogTest
                 {
                     try (Closeable c = Util.markDirectoriesUnwriteable(cfs))
                     {
-                        cfs.forceBlockingFlush();
+                        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
                     }
                     catch (Throwable t)
                     {
@@ -874,7 +875,7 @@ public abstract class CommitLogTest
                     }
                 }
                 else
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
             }
         }
         finally
@@ -929,7 +930,7 @@ public abstract class CommitLogTest
     {
         try
         {
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
         catch (Throwable t)
         {
@@ -937,7 +938,7 @@ public abstract class CommitLogTest
             while (!(t instanceof FSWriteError))
                 t = t.getCause();
             // Wait for started flushes to complete.
-            cfs.switchMemtableIfCurrent(current);
+            waitForStartedFlushes(cfs, current);
         }
     };
 
@@ -949,8 +950,20 @@ public abstract class CommitLogTest
         CommitLog.instance.forceRecycleAllSegments();
 
         // Wait for started flushes to complete.
-        cfs.switchMemtableIfCurrent(current);
+        waitForStartedFlushes(cfs, current);
     };
+
+    private void waitForStartedFlushes(ColumnFamilyStore cfs, Memtable current)
+    {
+        try
+        {
+            cfs.switchMemtableIfCurrent(current, ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
+        }
+        catch (InterruptedException|ExecutionException e)
+        {
+            throw Throwables.propagate(e);
+        }
+    }
 
     @Test
     public void testOutOfOrderFlushRecovery() throws ExecutionException, InterruptedException, IOException
