@@ -275,7 +275,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
         // json is a valid column name. By consequence, we need to resolve the ambiguity for "json - json"
       ( (K_JSON selectClause)=> K_JSON { isJson = true; } )? sclause=selectClause
       K_FROM cf=columnFamilyName
-      ( K_WHERE wclause=selectWhereClause )?
+      ( K_WHERE wclause=whereClause )?
       ( K_GROUP K_BY groupByClause[groups] ( ',' groupByClause[groups] )* )?
       ( K_ORDER K_BY orderByClause[orderings] ( ',' orderByClause[orderings] )* )?
       ( K_PER K_PARTITION K_LIMIT rows=intValue { perPartitionLimit = rows; } )?
@@ -442,17 +442,6 @@ sident returns [Selectable.RawIdentifier id]
     ;
 
 whereClause returns [WhereClause.Builder clause]
-    @init{ $clause = new WhereClause.Builder(); }
-    : relationOrExpression[$clause] (K_AND relationOrExpression[$clause])*
-    ;
-
-relationOrExpression [WhereClause.Builder clause]
-    : relation[$clause]
-    | '(' relation[$clause] ')'
-    | customIndexExpression[$clause]
-    ;
-
-selectWhereClause returns [WhereClause.Builder clause]
     @init{ $clause = new WhereClause.Builder(); }
     : expression[$clause]
     ;

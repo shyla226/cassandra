@@ -28,7 +28,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.stream.Collectors;
+
+import com.google.common.collect.ImmutableList;
 
 import com.bpodgursky.jbool_expressions.And;
 import com.bpodgursky.jbool_expressions.Expression;
@@ -45,13 +46,19 @@ public class ComplexBooleanExpression
     private final List<Relation> relations;
     private final List<CustomIndexExpression> expressions;
     private final boolean containsDisjunction;
+    private String cachedStringRepresentation;
 
     private ComplexBooleanExpression(Builder builder)
     {
         this.root = builder.root;
-        this.relations = builder.relations;
-        this.expressions = builder.expressions;
+        this.relations = builder.relations.build();
+        this.expressions = builder.expressions.build();
         this.containsDisjunction = builder.containsDisjunction;
+    }
+
+    public Expression<QueryExpression> root()
+    {
+        return root;
     }
 
     public List<Relation> relations()
@@ -91,19 +98,35 @@ public class ComplexBooleanExpression
     @Override
     public String toString()
     {
-        return super.toString();
+        if (cachedStringRepresentation == null)
+        {
+            if (root == null)
+                cachedStringRepresentation = "";
+            else
+            {
+                cachedStringRepresentation = root.sort(Expression.LEXICOGRAPHIC_COMPARATOR)
+                                                 .toString()
+                                                 .replaceAll("&", "AND")
+                                                 .replaceAll("\\|", "OR");
+                cachedStringRepresentation = cachedStringRepresentation.startsWith("(")
+                                             ? cachedStringRepresentation.substring(1, cachedStringRepresentation.length() - 1)
+                                             : cachedStringRepresentation;
+            }
+        }
+        return cachedStringRepresentation;
     }
 
     public static class Builder
     {
-        private String operator = "AND";
+        private final Deque<List<Expression<QueryExpression>>> expressionStack = new ArrayDeque<>();
+        private final Deque<String> operatorStack = new ArrayDeque<>();
+
+        private String operator = "";
         private Expression<QueryExpression> root;
-        private Deque<List<Expression<QueryExpression>>> expressionStack = new ArrayDeque<>();
-        private Deque<String> operatorStack = new ArrayDeque<>();
         private List<Expression<QueryExpression>> current = new ArrayList<>();
         private boolean containsDisjunction;
-        private List<Relation> relations;
-        private List<CustomIndexExpression> expressions;
+        ImmutableList.Builder<Relation> relations = new ImmutableList.Builder<>();
+        ImmutableList.Builder<CustomIndexExpression> expressions = new ImmutableList.Builder<>();
 
         public void add(QueryExpression queryExpression)
         {
@@ -126,6 +149,11 @@ public class ComplexBooleanExpression
 
         public void setCurrentOperator(String operator)
         {
+            if (!this.operator.isEmpty() && !this.operator.equalsIgnoreCase(operator))
+            {
+                root = generate();
+                current.clear();
+            }
             this.operator = operator;
             if (operator.equalsIgnoreCase("OR"))
                 containsDisjunction = true;
@@ -134,14 +162,12 @@ public class ComplexBooleanExpression
         public ComplexBooleanExpression build()
         {
             root = RuleSet.simplify(generate());
-            relations = root.getAllK().stream()
-                            .filter(exp -> (exp instanceof Relation))
-                            .map(exp -> ((Relation)exp))
-                            .collect(Collectors.toList());
-            expressions = root.getAllK().stream()
-                              .filter(exp -> (exp instanceof CustomIndexExpression))
-                              .map(exp -> ((CustomIndexExpression)exp))
-                              .collect(Collectors.toList());
+            root.getAllK().forEach(exp -> {
+                if (exp instanceof Relation)
+                    relations.add((Relation)exp);
+                else
+                    expressions.add((CustomIndexExpression)exp);
+            });
             return new ComplexBooleanExpression(this);
         }
 
@@ -151,7 +177,8 @@ public class ComplexBooleanExpression
                 return root;
             if (root != null)
                 current.add(root);
-            return operator.equalsIgnoreCase("AND") ? And.of(current) : Or.of(current);
+            return operator.equalsIgnoreCase("AND") ? And.of(current)
+                                                    : Or.of(current);
         }
 
         private static class InternalExpression extends Expression<QueryExpression>
@@ -172,7 +199,7 @@ public class ComplexBooleanExpression
             @Override
             public List<Expression<QueryExpression>> getChildren()
             {
-                return Collections.EMPTY_LIST;
+                return Collections.emptyList();
             }
 
             @Override
@@ -207,6 +234,18 @@ public class ComplexBooleanExpression
                                                            ExprFactory<QueryExpression> exprFactory)
             {
                 return this;
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return queryExpression.hashCode();
+            }
+
+            @Override
+            public boolean equals(Object obj)
+            {
+                return (obj instanceof InternalExpression) && queryExpression.equals(((InternalExpression) obj).queryExpression);
             }
 
             @Override
