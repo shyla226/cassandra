@@ -55,6 +55,7 @@ import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -79,7 +80,8 @@ public class HashOrderedMapMemtable extends AbstractAllocatorMemtable
     HashOrderedMapMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-        assert metadataRef.get().partitioner.sortsByHashCode() : "HashOrderedMapMemtable cannot be used with non-hashing partitioners.";
+        if (!metadataRef.get().partitioner.sortsByHashCode())
+            throw new ConfigurationException("HashOrderedMapMemtable cannot be used with non-hashing partitioners for " + owner.toString());
         Set<Range<Token>> localRanges = owner.localRanges();
         partitions = new NonBlockingHashOrderedMap<>(localRanges);
     }
@@ -325,14 +327,5 @@ public class HashOrderedMapMemtable extends AbstractAllocatorMemtable
     public long getLiveDataSize()
     {
         return liveDataSize.get();
-    }
-
-    /**
-     * For testing only. Give this memtable too big a size to make it always fail flushing.
-     */
-    @VisibleForTesting
-    public void makeUnflushable()
-    {
-        liveDataSize.addAndGet(1024L * 1024 * 1024 * 1024 * 1024);
     }
 }
