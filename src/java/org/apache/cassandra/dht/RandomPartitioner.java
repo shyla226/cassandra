@@ -237,6 +237,11 @@ public class RandomPartitioner implements IPartitioner
         return false;
     }
 
+    public boolean sortsByHashCode()
+    {
+        return true;
+    }
+
     public static class BigIntegerToken extends ComparableObjectToken<BigInteger>
     {
         static final long serialVersionUID = -5833589141319293006L;
@@ -283,6 +288,20 @@ public class RandomPartitioner implements IPartitioner
             double d = Math.scalb(v.doubleValue(), -127); // Scale so that the full range is 1.
             return d > 0.0 ? d : (d + 1.0); // Adjust for signed long, also making sure t.size(t) == 1.
         }
+
+        @Override
+        public int hashCode()
+        {
+            return token.hashCode();
+        }
+
+        @Override
+        public long comparableHashCode()
+        {
+            assert token.bitCount() <= 128;
+            return (int) token.shiftRight(64).longValue();
+        }
+
     }
 
     public BigIntegerToken getToken(ByteBuffer key)

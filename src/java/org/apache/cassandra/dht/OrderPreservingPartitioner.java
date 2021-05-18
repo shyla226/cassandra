@@ -182,6 +182,11 @@ public class OrderPreservingPartitioner implements IPartitioner
         return true;
     }
 
+    public boolean sortsByHashCode()
+    {
+        return false;
+    }
+
     public static class StringToken extends ComparableObjectToken<String>
     {
         static final long serialVersionUID = 5464084395277974963L;

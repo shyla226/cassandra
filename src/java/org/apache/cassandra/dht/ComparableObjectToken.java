@@ -67,6 +67,11 @@ abstract class ComparableObjectToken<C extends Comparable<C>> extends Token
         return token.compareTo(((ComparableObjectToken<C>) o).token);
     }
 
+    public long comparableHashCode()
+    {
+        throw new UnsupportedOperationException();
+    }
+
     @Override
     public double size(Token next)
     {

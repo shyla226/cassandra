@@ -27,10 +27,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.InsertOnlyOrderedMap;
+import org.apache.cassandra.concurrent.NonBlockingHashOrderedMap;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
@@ -60,59 +63,25 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
-public class SkipListMemtable extends AbstractAllocatorMemtable
+public class HashOrderedMapMemtable extends AbstractAllocatorMemtable
 {
-    private static final Logger logger = LoggerFactory.getLogger(SkipListMemtable.class);
+    private static final Logger logger = LoggerFactory.getLogger(HashOrderedMapMemtable.class);
 
-    public static final Factory FACTORY = SkipListMemtable::new;
-
-    private static final int ROW_OVERHEAD_HEAP_SIZE = estimateRowOverhead(Integer.parseInt(System.getProperty("cassandra.memtable_row_overhead_computation_step", "100000")));
+    public static final Factory FACTORY = HashOrderedMapMemtable::new;
 
     // We index the memtable by PartitionPosition only for the purpose of being able
     // to select key range using Token.KeyBound. However put() ensures that we
     // actually only store DecoratedKey.
-    private final ConcurrentNavigableMap<PartitionPosition, AtomicBTreePartition> partitions = new ConcurrentSkipListMap<>();
+    private final NonBlockingHashOrderedMap<PartitionPosition, AtomicBTreePartition> partitions;
 
     private final AtomicLong liveDataSize = new AtomicLong(0);
 
-    SkipListMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
+    HashOrderedMapMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-    }
-
-    // Only for testing
-    @VisibleForTesting
-    public SkipListMemtable(TableMetadataRef metadataRef)
-    {
-        this(null, metadataRef, new Owner()
-        {
-            @Override
-            public ListenableFuture<CommitLogPosition> signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason)
-            {
-                return null;
-            }
-
-            @Override
-            public Memtable getCurrentMemtable()
-            {
-                return null;
-            }
-
-            @Override
-            public Iterable<Memtable> getIndexMemtables()
-            {
-                return Collections.emptyList();
-            }
-
-            public Set<Range<Token>> localRanges()
-            {
-                return null; // not implemented
-            }
-            public ShardBoundaries localRangeSplits(int shardCount)
-            {
-                return null; // not implemented
-            }
-        });
+        assert metadataRef.get().partitioner.sortsByHashCode() : "HashOrderedMapMemtable cannot be used with non-hashing partitioners.";
+        Set<Range<Token>> localRanges = owner.localRanges();
+        partitions = new NonBlockingHashOrderedMap<>(localRanges);
     }
 
     protected Factory factory()
@@ -128,7 +97,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
     public boolean isClean()
     {
-        return partitions.isEmpty();
+        return partitions.size() == 0;
     }
 
     /**
@@ -153,7 +122,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
                 previous = empty;
                 // allocate the row overhead after the fact; this saves over allocating and having to free after, but
                 // means we can overshoot our declared limit.
-                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                int overhead = (int) (cloneKey.getToken().getHeapSize() + cloneKey.unsharedHeapSize() + NonBlockingHashOrderedMap.ITEM_HEAP_OVERHEAD);
                 allocator.onHeap().allocate(overhead, opGroup);
                 initialSize = 8;
             }
@@ -184,18 +153,18 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         boolean isBound = keyRange instanceof Bounds;
         boolean includeLeft = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeRight = isBound || keyRange instanceof Range;
-        Map<PartitionPosition, AtomicBTreePartition> subMap = getPartitionsSubMap(left,
-                                                                                  includeLeft,
-                                                                                  right,
-                                                                                  includeRight);
+        Iterable<Map.Entry<PartitionPosition, AtomicBTreePartition>> subMap = getPartitionsSubMap(left,
+                                                                                                  includeLeft,
+                                                                                                  right,
+                                                                                                  includeRight);
 
         return new MemtableUnfilteredPartitionIterator(metadata.get(), subMap, columnFilter, dataRange);
     }
 
-    private Map<PartitionPosition, AtomicBTreePartition> getPartitionsSubMap(PartitionPosition left,
-                                                                             boolean includeLeft,
-                                                                             PartitionPosition right,
-                                                                             boolean includeRight)
+    private Iterable<Map.Entry<PartitionPosition, AtomicBTreePartition>> getPartitionsSubMap(PartitionPosition left,
+                                                                                             boolean includeLeft,
+                                                                                             PartitionPosition right,
+                                                                                             boolean includeRight)
     {
         if (left != null && left.isMinimum())
             left = null;
@@ -204,12 +173,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
         try
         {
-            if (left == null)
-                return right == null ? partitions : partitions.headMap(right, includeRight);
-            else
-                return right == null
-                       ? partitions.tailMap(left, includeLeft)
-                       : partitions.subMap(left, includeLeft, right, includeRight);
+            return partitions.range(left, includeLeft, right, includeRight);
         }
         catch (IllegalArgumentException e)
         {
@@ -247,40 +211,36 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
     public FlushCollection<?> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
-        Map<PartitionPosition, AtomicBTreePartition> toFlush = getPartitionsSubMap(from, true, to, false);
+        Iterable<Map.Entry<PartitionPosition, AtomicBTreePartition>> toFlush = getPartitionsSubMap(from, true, to, false);
         long keySize = 0;
+        long keyCount = 0;
 
         boolean trackContention = logger.isTraceEnabled();
-        if (trackContention)
+        int heavilyContendedRowCount = 0;
+        for (Map.Entry<PartitionPosition, AtomicBTreePartition> en : toFlush)
         {
-            int heavilyContendedRowCount = 0;
+            ++keyCount;
+            PartitionPosition key = en.getKey();
+            //  make sure we don't write non-sensical keys
+            assert key instanceof DecoratedKey;
+            keySize += ((DecoratedKey) key).getKey().remaining();
 
-            for (AtomicBTreePartition partition : toFlush.values())
-            {
-                keySize += partition.partitionKey().getKey().remaining();
-                if (trackContention && partition.useLock())
-                    heavilyContendedRowCount++;
-            }
-
-            if (heavilyContendedRowCount > 0)
-                logger.trace("High update contention in {}/{} partitions of {} ", heavilyContendedRowCount, toFlush.size(), SkipListMemtable.this);
+            if (trackContention && en.getValue().useLock())
+                heavilyContendedRowCount++;
         }
-        else
-        {
-            for (PartitionPosition key : toFlush.keySet())
-            {
-                //  make sure we don't write non-sensical keys
-                assert key instanceof DecoratedKey;
-                keySize += ((DecoratedKey) key).getKey().remaining();
-            }
-        }
+        if (heavilyContendedRowCount > 0)
+            logger.trace("High update contention in {}/{} partitions of {} ",
+                         heavilyContendedRowCount,
+                         keyCount,
+                         HashOrderedMapMemtable.this);
         final long partitionKeySize = keySize;
+        final long partitionCount = keyCount;
 
         return new AbstractFlushCollection<AtomicBTreePartition>()
         {
             public Memtable memtable()
             {
-                return SkipListMemtable.this;
+                return HashOrderedMapMemtable.this;
             }
 
             public PartitionPosition from()
@@ -295,12 +255,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
             public long partitionCount()
             {
-                return toFlush.size();
+                return partitionCount;
             }
 
             public Iterator<AtomicBTreePartition> iterator()
             {
-                return toFlush.values().iterator();
+                return Iterators.transform(toFlush.iterator(), Map.Entry::getValue);
             }
 
             public long partitionKeySize()
@@ -315,15 +275,18 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     {
         private final TableMetadata metadata;
         private final Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter;
-        private final Map<PartitionPosition, AtomicBTreePartition> source;
+        private final Iterable<Map.Entry<PartitionPosition, AtomicBTreePartition>> source;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
 
-        public MemtableUnfilteredPartitionIterator(TableMetadata metadata, Map<PartitionPosition, AtomicBTreePartition> map, ColumnFilter columnFilter, DataRange dataRange)
+        public MemtableUnfilteredPartitionIterator(TableMetadata metadata,
+                                                   Iterable<Map.Entry<PartitionPosition, AtomicBTreePartition>> map,
+                                                   ColumnFilter columnFilter,
+                                                   DataRange dataRange)
         {
             this.metadata = metadata;
             this.source = map;
-            this.iter = map.entrySet().iterator();
+            this.iter = map.iterator();
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
         }
@@ -331,8 +294,8 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         public int getMinLocalDeletionTime()
         {
             int minLocalDeletionTime = Integer.MAX_VALUE;
-            for (AtomicBTreePartition partition : source.values())
-                minLocalDeletionTime = Math.min(minLocalDeletionTime, partition.stats().minLocalDeletionTime);
+            for (Map.Entry<PartitionPosition, AtomicBTreePartition> en : source)
+                minLocalDeletionTime = Math.min(minLocalDeletionTime, en.getValue().stats().minLocalDeletionTime);
 
             return minLocalDeletionTime;
         }

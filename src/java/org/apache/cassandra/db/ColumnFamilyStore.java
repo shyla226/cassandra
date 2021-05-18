@@ -184,7 +184,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             OpenType<?>[] counterTypes = new OpenType[] { SimpleType.STRING, SimpleType.LONG, SimpleType.LONG, SimpleType.STRING };
             COUNTER_COMPOSITE_TYPE = new CompositeType(SAMPLING_RESULTS_NAME, SAMPLING_RESULTS_NAME, COUNTER_NAMES, COUNTER_DESCS, counterTypes);
-        } catch (OpenDataException e)
+        }
+        catch (OpenDataException e)
         {
             throw new RuntimeException(e);
         }
@@ -1354,6 +1355,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             logger.info("Memtable shard boundaries for {}.{}: {}", keyspace.getName(), getTableName(), boundaries);
         }
         return shardBoundaries;
+    }
+
+    public Set<Range<Token>> localRanges()
+    {
+        return keyspace.getReplicationStrategy().getAddressReplicas(FBUtilities.getBroadcastAddressAndPort()).ranges();
     }
 
     /**

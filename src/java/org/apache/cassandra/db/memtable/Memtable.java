@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -33,6 +34,8 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -162,6 +165,7 @@ public interface Memtable extends Comparable<Memtable>
         Iterable<Memtable> getIndexMemtables();
 
         ShardBoundaries localRangeSplits(int shardCount);
+        Set<Range<Token>> localRanges();
     }
 
     // Main write and read operations

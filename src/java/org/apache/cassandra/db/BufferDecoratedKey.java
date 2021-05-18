@@ -20,11 +20,17 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public class BufferDecoratedKey extends DecoratedKey
 {
+    private static final long HEAP_SIZE = ObjectSizes.measure(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(0L),
+                                                                                     ByteBufferUtil.EMPTY_BYTE_BUFFER));
+
     private final ByteBuffer key;
 
     public BufferDecoratedKey(Token token, ByteBuffer key)
@@ -67,5 +73,10 @@ public class BufferDecoratedKey extends DecoratedKey
                                                version,
                                                partitioner,
                                                (token, keyBytes) -> new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes)));
+    }
+
+    public long unsharedHeapSize()
+    {
+        return HEAP_SIZE + ObjectSizes.sizeOnHeapOf(key);
     }
 }

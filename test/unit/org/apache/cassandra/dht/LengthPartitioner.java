@@ -126,6 +126,12 @@ public class LengthPartitioner implements IPartitioner
         return false;
     }
 
+    @Override
+    public boolean sortsByHashCode()
+    {
+        return false;
+    }
+
     public BigIntegerToken getToken(ByteBuffer key)
     {
         if (key.remaining() == 0)

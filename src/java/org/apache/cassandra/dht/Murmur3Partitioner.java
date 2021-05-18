@@ -171,7 +171,7 @@ public class Murmur3Partitioner implements IPartitioner
 
         public int hashCode()
         {
-            return Longs.hashCode(token);
+            return Long.hashCode(token);
         }
 
         public int compareTo(Token o)
@@ -199,6 +199,11 @@ public class Murmur3Partitioner implements IPartitioner
 
         @Override
         public Object getTokenValue()
+        {
+            return token;
+        }
+
+        public long comparableHashCode()
         {
             return token;
         }
@@ -281,6 +286,11 @@ public class Murmur3Partitioner implements IPartitioner
     public boolean preservesOrder()
     {
         return false;
+    }
+
+    public boolean sortsByHashCode()
+    {
+        return true;
     }
 
     public Map<Token, Float> describeOwnership(List<Token> sortedTokens)

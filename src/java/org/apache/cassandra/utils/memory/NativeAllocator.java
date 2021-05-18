@@ -93,6 +93,7 @@ public class NativeAllocator extends MemtableAllocator
         return new CloningBTreeRowBuilder(opGroup, this);
     }
 
+    // we don't account for the on-heap overhead of the object here
     public DecoratedKey clone(DecoratedKey key, OpOrder.Group writeOp)
     {
         return new NativeDecoratedKey(key.getToken(), this, writeOp, key.getKey());

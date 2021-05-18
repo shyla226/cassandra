@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.function.BiFunction;
 
+import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.KeyBound;
@@ -40,7 +41,7 @@ import org.apache.cassandra.utils.MurmurHash;
  * if this matters, you can subclass RP to use a stronger hash, or use a non-lossy tokenization scheme (as in the
  * OrderPreservingPartitioner classes).
  */
-public abstract class DecoratedKey implements PartitionPosition, FilterKey
+public abstract class DecoratedKey implements PartitionPosition, FilterKey, IMeasurableMemory
 {
     public static final Comparator<DecoratedKey> comparator = new Comparator<DecoratedKey>()
     {
@@ -61,7 +62,7 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
     @Override
     public int hashCode()
     {
-        return getKey().hashCode(); // hash of key is enough
+        return token.hashCode();
     }
 
     @Override
@@ -186,5 +187,10 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), version);
         // Decode the key bytes from the second component.
         return ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+    }
+
+    public long comparableHashCode()
+    {
+        return token.comparableHashCode();
     }
 }

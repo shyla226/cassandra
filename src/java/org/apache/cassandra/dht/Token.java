@@ -28,8 +28,9 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.HashComparable;
 
-public abstract class Token implements RingPosition<Token>, Serializable
+public abstract class Token implements RingPosition<Token>, HashComparable<Token>, Serializable
 {
     private static final long serialVersionUID = 1L;
 
@@ -285,6 +286,11 @@ public abstract class Token implements RingPosition<Token>, Serializable
         public String toString()
         {
             return String.format("%s(%s)", isMinimumBound ? "min" : "max", getToken().toString());
+        }
+
+        public long comparableHashCode()
+        {
+            return token.comparableHashCode();
         }
     }
 }

@@ -123,6 +123,11 @@ public class LocalPartitioner implements IPartitioner
         return true;
     }
 
+    public boolean sortsByHashCode()
+    {
+        return false;
+    }
+
     public Map<Token, Float> describeOwnership(List<Token> sortedTokens)
     {
         return Collections.singletonMap((Token)getMinimumToken(), new Float(1.0));
