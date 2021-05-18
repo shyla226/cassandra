@@ -94,7 +94,7 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService implements SE
             for (SEPWorker spinner : pool.spinning.values())
             {
                 long spinTime = System.nanoTime() - spinner.spinStartNanos;
-                if (spinTime > (100*MAX_SPIN_SLEEP_NANOS))
+                if (spinTime > (1000*MAX_SPIN_SLEEP_NANOS))
                     logger.error("SEPWorker {} stuck for {}ns", spinner, spinTime);
             }
             return false;
