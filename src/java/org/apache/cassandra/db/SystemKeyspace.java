@@ -137,6 +137,7 @@ public final class SystemKeyspace
               + "version int,"
               + "PRIMARY KEY ((id)))")
               .partitioner(new LocalPartitioner(TimeUUIDType.instance))
+              .memtable(MemtableParams.DEFAULT)
               .compaction(CompactionParams.stcs(singletonMap("min_threshold", "2")))
               .build();
 

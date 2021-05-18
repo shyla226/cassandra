@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
@@ -113,6 +114,8 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(Option.MEMTABLE))
             builder.memtable(MemtableParams.fromMap(getMap(Option.MEMTABLE)));
+        else
+            builder.memtable(MemtableParams.fromMap(ImmutableMap.of()));
 
         if (hasOption(Option.DEFAULT_TIME_TO_LIVE))
             builder.defaultTimeToLive(getInt(Option.DEFAULT_TIME_TO_LIVE));
