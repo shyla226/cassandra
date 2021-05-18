@@ -33,6 +33,7 @@ import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
+import static org.apache.cassandra.concurrent.SEPWorker.MAX_SPIN_SLEEP_NANOS;
 import static org.apache.cassandra.concurrent.SEPWorker.Work;
 
 public class SEPExecutor extends AbstractLocalAwareExecutorService implements SEPExecutorMBean
@@ -88,7 +89,16 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService implements SE
     boolean maybeSchedule()
     {
         if (pool.spinningCount.get() > 0 || !takeWorkPermit(true))
+        {
+            // Complain if any of the threads have been spinning for too long because they're probably stuck.
+            for (SEPWorker spinner : pool.spinning.values())
+            {
+                long spinTime = System.nanoTime() - spinner.spinStartNanos;
+                if (spinTime > (100*MAX_SPIN_SLEEP_NANOS))
+                    logger.error("SEPWorker {} stuck for {}ns", spinner, spinTime);
+            }
             return false;
+        }
 
         pool.schedule(new Work(this));
         return true;

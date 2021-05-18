@@ -35,6 +35,7 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
 {
     private static final Logger logger = LoggerFactory.getLogger(SEPWorker.class);
     private static final boolean SET_THREAD_NAME = Boolean.parseBoolean(System.getProperty("cassandra.set_sep_thread_name", "true"));
+    public static final long MAX_SPIN_SLEEP_NANOS = 1000000;    // 1ms
 
     final Long workerId;
     final Thread thread;
@@ -46,6 +47,9 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
     // strategy can only work when there are multiple threads spinning (as more sleep time must elapse than real time)
     long prevStopCheck = 0;
     long soleSpinnerSpinTime = 0;
+
+    // Record the time we park in doWaitSpin(). This is used to detect hung workers.
+    public volatile long spinStartNanos;
 
     SEPWorker(Long workerId, Work initialState, SharedExecutorPool pool)
     {
@@ -253,14 +257,14 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
         // pick a random sleep interval based on the number of threads spinning, so that
         // we should always have a thread about to wake up, but most threads are sleeping
         long sleep = 10000L * pool.spinningCount.get();
-        sleep = Math.min(1000000, sleep);
+        sleep = Math.min(MAX_SPIN_SLEEP_NANOS, sleep);
         sleep *= ThreadLocalRandom.current().nextDouble();
         sleep = Math.max(10000, sleep);
 
-        long start = System.nanoTime();
+        spinStartNanos = System.nanoTime();
 
         // place ourselves in the spinning collection; if we clash with another thread just exit
-        Long target = start + sleep;
+        Long target = spinStartNanos + sleep;
         if (pool.spinning.putIfAbsent(target, this) != null)
             return;
         LockSupport.parkNanos(sleep);
@@ -270,7 +274,7 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
 
         // finish timing and grab spinningTime (before we finish timing so it is under rather than overestimated)
         long end = System.nanoTime();
-        long spin = end - start;
+        long spin = end - spinStartNanos;
         long stopCheck = pool.stopCheck.addAndGet(spin);
         maybeStop(stopCheck, end);
         if (prevStopCheck + spin == stopCheck)
